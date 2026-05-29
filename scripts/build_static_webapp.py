@@ -136,6 +136,7 @@ def build_html() -> str:
     html = _harden_charts(html)
     html = _taxonomy_and_skus(html)
     html = _weekly_views(html)
+    html = _threshold_priority(html)
     html = _harden_csvcell(html)
 
     closing_body = "</body>"
@@ -164,6 +165,10 @@ def build_html() -> str:
     _assert_contains(html, "${escapeHtml(c.getAttribute('data-customer'))}", "escaped quadrant tooltip customer")
     _assert_absent(html, ".label.replace(/\"/g, '&quot;')", "stale quote-only label escape (should use escapeHtml)")
     _assert_contains(html, "CSV_FORMULA_LEADERS", "CSV formula-injection guard")
+    _assert_contains(html, "function reclassifyOpportunities(", "reclassify function")
+    _assert_contains(html, "reclassifyOpportunities(dfcShareThreshold);\n  renderKpis();", "renderAll reclassify wiring")
+    _assert_contains(html, "const DEFAULT_DFC_SHARE_THRESHOLD = 6;", "default 6% attach baseline")
+    _assert_contains(html, "attach baseline", "attach baseline footer copy")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
     _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
@@ -242,7 +247,7 @@ def _inject_persistence(html: str) -> str:
     # Add the cache key constant + restore-on-load block, replacing the bare
     # ``renderAll();`` bootstrapper near the bottom of the inline script.
     boot_block = (
-        "const ACR_CACHE_KEY = 'defenderattach:acr:v1';\n"
+        "const ACR_CACHE_KEY = 'defenderattach:acr:v2';\n"
         "renderAll();\n"
         "document.addEventListener('DOMContentLoaded', function() {\n"
         "  // Restore from a previous tab-internal navigation if available.\n"
@@ -939,6 +944,27 @@ def _harden_csvcell(html: str) -> str:
     return _replace_once(html, original, hardened, "csvCell helper")
 
 
+def _threshold_priority(html: str) -> str:
+    """Reclassify opportunities at the default attach baseline before first render.
+
+    The model bakes a classification at its 6% default, but renderAll is the
+    single source of truth for the live page: it reclassifies against the
+    current slider value so KPI counts, tables, and the heatmap all agree on
+    load. Slider changes call reclassifyOpportunities again client-side.
+    """
+    return _replace_once(
+        html,
+        "function renderAll() {\n"
+        "  if (!DATA.customers || DATA.customers.length === 0) return;\n"
+        "  renderKpis();",
+        "function renderAll() {\n"
+        "  if (!DATA.customers || DATA.customers.length === 0) return;\n"
+        "  reclassifyOpportunities(dfcShareThreshold);\n"
+        "  renderKpis();",
+        "renderAll baseline reclassify",
+    )
+
+
 def _export_handler_script() -> str:
     return (
         "<script>\n"
@@ -958,7 +984,8 @@ def _export_handler_script() -> str:
         "    const originalLabel = btn.textContent;\n"
         "    btn.textContent = 'Building deck…';\n"
         "    try {\n"
-        "      const threshold = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 8;\n"
+        "      const threshold = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;\n"
+        "      if (typeof reclassifyOpportunities === 'function') reclassifyOpportunities(threshold);\n"
         "      const sourceName = DATA.source_name || 'Imported workbook';\n"
         "      await window.PptxAcr.exportDeck(DATA, sourceName, threshold);\n"
         "      setStatus('PowerPoint deck downloaded.', 'success');\n"

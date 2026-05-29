@@ -35,6 +35,36 @@
     return (end - start) / start;
   }
 
+  // Corporate "Defender attach" baseline: every customer should run at least
+  // this share of total ACR on Defender workloads. Drives the default priority
+  // classification; the dashboard slider can override it client-side.
+  const DEFAULT_DFC_SHARE = 0.06;
+
+  // Core Azure workload categories (ServiceLevel1 names) used by the
+  // break-of-trend rule. Names match the consumption workbook exactly.
+  const GROWTH_CATEGORIES = ['Compute', 'Databases', 'Developer Tools', 'Integration', 'AI + Machine Learning', 'Containers'];
+
+  // Aggregate (ACR-weighted) 3-month growth across the core workload categories
+  // the customer actually uses. Summing dollars avoids a tiny category with a
+  // huge percentage swing dominating an arithmetic mean. Returns the growth
+  // fraction (null when there was no base spend) plus the names of categories
+  // individually growing more than 5%.
+  function categoryGrowth(breakdown, base3mIdx, latestIdx) {
+    let base = 0;
+    let latest = 0;
+    const growing = [];
+    for (const entry of (breakdown || [])) {
+      if (GROWTH_CATEGORIES.indexOf(entry.product) === -1) continue;
+      const s = Array.isArray(entry.series) ? entry.series : [];
+      const b = Number(s[base3mIdx]) || 0;
+      const l = Number(s[latestIdx]) || 0;
+      base += b;
+      latest += l;
+      if (b > 0 && l > 0 && (l - b) / b > 0.05) growing.push(entry.product);
+    }
+    return { growth: base > 0 ? (latest - base) / base : null, growing };
+  }
+
   const DEFENDER_NEW_S2 = 'Microsoft Defender for Cloud';
   const SENTINEL_S2 = 'Sentinel';
   // Deterministic, hex-validated palette for trend lines (DfC/Sentinel pinned).
@@ -317,7 +347,10 @@
       }
       breakdown.sort((a, b) => b.current - a.current);
 
-      const [priority, notes] = classifyOpportunity({ dfc_current, total_current, dfc_ratio, dfc_3m, other_3m });
+      const catGrowth = categoryGrowth(breakdown, base3mIdx, latestIdx);
+      const growth_cat_3m = catGrowth.growth;
+      const growth_cat_names = catGrowth.growing;
+      const [priority, notes] = classifyOpportunity({ dfc_current, total_current, dfc_ratio, dfc_3m, other_3m, growth_cat_3m, growth_cat_names });
 
       opportunity.push({
         customer,
@@ -339,6 +372,8 @@
         other_3m_delta: roundMoney(other_3m_delta),
         total_3m_delta: roundMoney(total_3m_delta),
         growth_gap: roundMoney(other_3m_delta - dfc_3m_delta),
+        growth_cat_3m,
+        growth_cat_names,
       });
 
       const cd = {
@@ -555,8 +590,11 @@
       }
       breakdown.sort((a, b) => b.current - a.current);
 
+      const catGrowth = categoryGrowth(breakdown, base3mIdx, latestIdx);
+      const growth_cat_3m = catGrowth.growth;
+      const growth_cat_names = catGrowth.growing;
       const [priority, notes] = classifyOpportunity({
-        dfc_current, total_current, dfc_ratio, dfc_3m, other_3m,
+        dfc_current, total_current, dfc_ratio, dfc_3m, other_3m, growth_cat_3m, growth_cat_names,
       });
 
       opportunity.push({
@@ -579,6 +617,8 @@
         other_3m_delta: roundMoney(other_3m_delta),
         total_3m_delta: roundMoney(total_3m_delta),
         growth_gap: roundMoney(other_3m_delta - dfc_3m_delta),
+        growth_cat_3m,
+        growth_cat_names,
       });
 
       customerData[customer] = {
@@ -628,39 +668,76 @@
     };
   }
 
-  // Same thresholds & wording as dashboard_model._classify_opportunity.
-  function classifyOpportunity({ dfc_current, total_current, dfc_ratio, dfc_3m, other_3m }) {
-    let priority = 'Low';
+  const PRIORITY_RANK = { 'Too small': 0, Low: 1, Medium: 2, High: 3 };
+
+  // Same thresholds & wording as dashboard_model._classify_opportunity, plus
+  // two corporate rules: the Defender attach baseline (DfC share must be >=
+  // threshold of total ACR) and a break-of-trend rule (core Azure workloads
+  // growing while DfC fails to keep pace). `threshold` is a fraction (0.06).
+  function classifyOpportunity({ dfc_current, total_current, dfc_ratio, dfc_3m, other_3m, growth_cat_3m = null, growth_cat_names = null, threshold = DEFAULT_DFC_SHARE }) {
     const notes = [];
+    let priority = 'Low';
+    const bump = p => { if (PRIORITY_RANK[p] > PRIORITY_RANK[priority]) priority = p; };
+    const baselinePct = threshold * 100;
+    const baselineLabel = baselinePct % 1 === 0 ? baselinePct.toFixed(0) : baselinePct.toFixed(1);
+
     if (total_current < 1500) {
       return ['Too small', 'Customer ACR under $1,500/month - sales priority low'];
     }
     if (dfc_current < 15 && total_current > 3000) {
-      return ['High', 'No Defender for Cloud spend at all'];
+      return ['High', `No Defender for Cloud spend at all - 0% vs the ${baselineLabel}% attach baseline`];
     }
+
+    const belowBaseline = dfc_ratio < threshold;
+
     if (other_3m != null && other_3m > 0.05) {
       if (dfc_3m == null || dfc_3m < -0.05) {
-        priority = 'High';
+        bump('High');
         notes.push(`Other Azure +${(other_3m * 100).toFixed(0)}% over 3 months while DfC declining`);
       } else if (dfc_3m < 0.02 && dfc_ratio < 0.02) {
-        priority = 'High';
+        bump('High');
         notes.push('Other Azure growing, DfC flat AND under 2% of total ACR');
       } else if (dfc_ratio < 0.015) {
-        priority = 'Medium';
+        bump('Medium');
         notes.push(`DfC penetration only ${(dfc_ratio * 100).toFixed(1)}% - undersold`);
       } else if (dfc_3m < other_3m - 0.05) {
-        priority = 'Medium';
+        bump('Medium');
         notes.push('DfC growing slower than rest of Azure');
       }
     } else if (dfc_ratio < 0.005 && total_current > 6000) {
-      priority = 'Medium';
+      bump('Medium');
       notes.push('Very low DfC penetration');
     }
+
+    // Break of trend: core Azure workloads growing but DfC not keeping pace.
+    // A null DfC 3-month change (no base spend) only counts as lagging when the
+    // customer is still below the attach baseline; a customer that grew DfC from
+    // zero to >= baseline is attaching well and should not be flagged.
+    if (growth_cat_3m != null && growth_cat_3m > 0.05) {
+      const dfcLagging = (dfc_3m == null) ? belowBaseline : (dfc_3m < growth_cat_3m - 0.05);
+      if (dfcLagging) {
+        bump(belowBaseline ? 'High' : 'Medium');
+        const cats = Array.isArray(growth_cat_names) && growth_cat_names.length
+          ? growth_cat_names.join(', ')
+          : 'core Azure workloads';
+        const dfcText = dfc_3m == null ? 'absent' : `${(dfc_3m * 100).toFixed(0)}%`;
+        notes.push(`Break of trend: ${cats} +${(growth_cat_3m * 100).toFixed(0)}% over 3 months while DfC ${dfcText}`);
+      }
+    }
+
+    // Corporate attach baseline.
+    if (belowBaseline) {
+      bump('Medium');
+      notes.push(`DfC share ${(dfc_ratio * 100).toFixed(1)}% is below the ${baselineLabel}% attach baseline`);
+    }
+
+    // Healthy DfC growth note (only when nothing else elevated priority).
     if (dfc_3m != null && dfc_3m > 0.10 && (other_3m == null || dfc_3m > other_3m)) {
       if (priority === 'Low' || priority === 'Too small') {
         notes.push(`DfC growing healthily +${(dfc_3m * 100).toFixed(0)}% over 3 months`);
       }
     }
+
     return [priority, notes.length ? notes.join('; ') : '-'];
   }
 

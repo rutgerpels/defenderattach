@@ -136,7 +136,7 @@ console.log('\nweb-app/index.html (generated)');
       'dropped file extension must be validated');
   });
   test('ACR data is persisted to sessionStorage across navigation', () => {
-    assert(/ACR_CACHE_KEY = 'defenderattach:acr:v1'/.test(src),
+    assert(/ACR_CACHE_KEY = 'defenderattach:acr:v2'/.test(src),
       'versioned sessionStorage key must be defined');
     assert(/sessionStorage\.setItem\(ACR_CACHE_KEY, json\)/.test(src),
       'must cache DATA after successful import');
@@ -476,6 +476,148 @@ console.log('\nweb-app/index.html (weekly granularity views)');
   test('granularity selects are wired to re-render their panels', () => {
     assert(/g\.addEventListener\('change', \(\) => \{ renderProductTrend\(\); renderDfcTrend\(\); \}\);/.test(src), 'overview grain listener present');
     assert(/cg\.addEventListener\('change', \(\) => \{ const cs = document\.getElementById\('customer-select'\); if \(cs && cs\.value\) renderCustomerDetail\(cs\.value\); \}\);/.test(src), 'customer grain listener present');
+  });
+}
+
+// ---- acr-model: opportunity classification rules (baseline + break-of-trend) ----
+console.log('\nacr-model.js (opportunity rules)');
+{
+  const sb = makeSandbox();
+  loadInto(sb, 'js/acr-model.js');
+  const classify = sb.AcrModel.classifyOpportunity;
+
+  test('"Too small" customers short-circuit regardless of other signals', () => {
+    const [p] = classify({ dfc_current: 0, total_current: 1000, dfc_ratio: 0, dfc_3m: 0.5, other_3m: 0.5, growth_cat_3m: 0.5 });
+    assertEqual(p, 'Too small', 'priority');
+  });
+
+  test('baseline rule: DfC share below the threshold bumps to at least Medium', () => {
+    const [p, notes] = classify({ dfc_current: 400, total_current: 20000, dfc_ratio: 0.02, dfc_3m: 0, other_3m: 0 });
+    assertEqual(p, 'Medium', 'below-baseline priority');
+    assert(/attach baseline/.test(notes), 'note must mention the attach baseline: ' + notes);
+    assert(/6%/.test(notes), 'note must cite the default 6% baseline: ' + notes);
+  });
+
+  test('baseline rule: DfC share at/above the threshold stays Low when flat', () => {
+    const [p] = classify({ dfc_current: 2000, total_current: 20000, dfc_ratio: 0.10, dfc_3m: 0, other_3m: 0 });
+    assertEqual(p, 'Low', 'above-baseline flat priority');
+  });
+
+  test('baseline rule is threshold-reactive (slider drives priority)', () => {
+    const args = { dfc_current: 1400, total_current: 20000, dfc_ratio: 0.07, dfc_3m: 0, other_3m: 0 };
+    assertEqual(classify({ ...args, threshold: 0.06 })[0], 'Low', 'Low at 6% threshold');
+    assertEqual(classify({ ...args, threshold: 0.10 })[0], 'Medium', 'Medium at 10% threshold');
+  });
+
+  test('break-of-trend: core workloads growing while DfC lags + below baseline => High', () => {
+    const [p, notes] = classify({
+      dfc_current: 600, total_current: 20000, dfc_ratio: 0.03, dfc_3m: -0.20, other_3m: 0,
+      growth_cat_3m: 0.30, growth_cat_names: ['Compute', 'Databases'],
+    });
+    assertEqual(p, 'High', 'break-of-trend below baseline priority');
+    assert(/Break of trend/.test(notes), 'note must flag break of trend: ' + notes);
+    assert(/Compute, Databases/.test(notes), 'note must list the growing categories: ' + notes);
+  });
+
+  test('break-of-trend does not fire when DfC keeps pace with category growth', () => {
+    const [p, notes] = classify({
+      dfc_current: 2000, total_current: 20000, dfc_ratio: 0.10, dfc_3m: 0.30, other_3m: 0,
+      growth_cat_3m: 0.30, growth_cat_names: ['Compute'],
+    });
+    assertEqual(p, 'Low', 'priority stays Low when DfC keeps pace');
+    assert(!/Break of trend/.test(notes), 'must not flag break of trend: ' + notes);
+  });
+
+  test('null DfC 3m growth only lags when still below baseline', () => {
+    // Below baseline + categories growing + no DfC base => lagging => bumped.
+    const below = classify({
+      dfc_current: 100, total_current: 20000, dfc_ratio: 0.01, dfc_3m: null, other_3m: 0,
+      growth_cat_3m: 0.30, growth_cat_names: ['Compute'],
+    });
+    assert(/Break of trend/.test(below[1]), 'below-baseline null-DfC must flag: ' + below[1]);
+    // At/above baseline with DfC that grew from zero => not flagged as lagging.
+    const ok = classify({
+      dfc_current: 3000, total_current: 20000, dfc_ratio: 0.15, dfc_3m: null, other_3m: 0,
+      growth_cat_3m: 0.30, growth_cat_names: ['Compute'],
+    });
+    assert(!/Break of trend/.test(ok[1]), 'above-baseline null-DfC must not flag: ' + ok[1]);
+  });
+
+  test('build emits growth_cat_3m + growth_cat_names on opportunity rows', () => {
+    const h0 = ['FiscalMonth', null, null, null, 'FY26-Feb', 'FY26-Mar', 'FY26-Apr', 'Total'];
+    const h1 = ['FiscalWeekStartDate', null, null, null, 'Total', 'Total', 'Total', null];
+    const h2 = ['Timezone', 'TPAccountName', 'ServiceLevel1', 'ServiceLevel2', '$ ACR', '$ ACR', '$ ACR', '$ ACR'];
+    const rows = [
+      h0, h1, h2,
+      ['UTC', 'Grow', 'Compute', 'Virtual Machines',                 1000, 1500, 2000, 4500],
+      ['UTC', 'Grow', 'Security', 'Microsoft Defender for Cloud',       10,   11,   12,   33],
+      ['UTC', 'Grow', 'Total', null,                                  1010, 1511, 2012, 4533],
+    ];
+    const gm = sb.AcrModel.build(rows, 'grow.xlsx');
+    const row = gm.opportunity.find(r => r.customer === 'Grow');
+    assert(row, 'Grow opportunity row present');
+    assert('growth_cat_3m' in row, 'row must carry growth_cat_3m');
+    assert(typeof row.growth_cat_3m === 'number' && row.growth_cat_3m > 0.05, 'Compute growth should be positive: ' + row.growth_cat_3m);
+    assert(Array.isArray(row.growth_cat_names) && row.growth_cat_names.includes('Compute'), 'growth_cat_names should list Compute: ' + JSON.stringify(row.growth_cat_names));
+  });
+
+  test('reclassifying at the model default (6%) reproduces baked counts', () => {
+    // Mirror the client reclassify path: re-run classify on emitted rows and
+    // recompute counts; they must equal the counts baked by build at 0.06.
+    const h0 = ['FiscalMonth', null, null, null, 'FY26-Feb', 'FY26-Mar', 'FY26-Apr', 'Total'];
+    const h1 = ['FiscalWeekStartDate', null, null, null, 'Total', 'Total', 'Total', null];
+    const h2 = ['Timezone', 'TPAccountName', 'ServiceLevel1', 'ServiceLevel2', '$ ACR', '$ ACR', '$ ACR', '$ ACR'];
+    const rows = [
+      h0, h1, h2,
+      ['UTC', 'Big', 'Compute', 'Virtual Machines',               5000, 6000, 7000, 18000],
+      ['UTC', 'Big', 'Security', 'Microsoft Defender for Cloud',    20,   20,   20,    60],
+      ['UTC', 'Big', 'Total', null,                               5020, 6020, 7020, 18060],
+      ['UTC', 'Tiny', 'Compute', 'Virtual Machines',               300,  300,  300,   900],
+      ['UTC', 'Tiny', 'Total', null,                               300,  300,  300,   900],
+    ];
+    const m = sb.AcrModel.build(rows, 'parity.xlsx');
+    const recount = { high: 0, medium: 0, low: 0, too_small: 0, total: m.customers.length };
+    for (const r of m.opportunity) {
+      const [p] = sb.AcrModel.classifyOpportunity({
+        dfc_current: r.dfc_current, total_current: r.total_current,
+        dfc_ratio: (Number(r.dfc_ratio) || 0) / 100,
+        dfc_3m: r.dfc_3m, other_3m: r.other_3m,
+        growth_cat_3m: r.growth_cat_3m, growth_cat_names: r.growth_cat_names,
+        threshold: 0.06,
+      });
+      const key = p === 'Too small' ? 'too_small' : p.toLowerCase();
+      recount[key]++;
+    }
+    assertEqual(JSON.stringify(recount), JSON.stringify(m.counts), 'reclassified counts must equal baked counts');
+  });
+}
+
+// ---- generated index.html: slider-driven reclassification ----
+console.log('\nweb-app/index.html (attach baseline + reclassification)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  test('default Defender share threshold is the 6% attach baseline', () => {
+    assert(/const DEFAULT_DFC_SHARE_THRESHOLD = 6;/.test(src), 'default threshold must be 6');
+    assert(/attach baseline/.test(src), 'footer copy must reference the attach baseline');
+    assert(!/Default 8% is aligned/.test(src), 'stale 8% footer copy must be gone');
+  });
+  test('reclassifyOpportunities recomputes priorities and counts', () => {
+    assert(/function reclassifyOpportunities\(thresholdPct\)/.test(src), 'reclassify function defined');
+    assert(/AcrModel\.classifyOpportunity\(\{/.test(src), 'reclassify calls the model classifier');
+    assert(/dfc_ratio: \(Number\(row\.dfc_ratio\) \|\| 0\) \/ 100/.test(src), 'dfc_ratio converted percent->fraction');
+    assert(/threshold: threshold,/.test(src), 'threshold passed as a fraction');
+    assert(/DATA\.counts = \{/.test(src), 'reclassify recomputes DATA.counts');
+  });
+  test('renderAll reclassifies at the default baseline before rendering KPIs', () => {
+    assert(/reclassifyOpportunities\(dfcShareThreshold\);\r?\n  renderKpis\(\);/.test(src), 'renderAll must reclassify before renderKpis');
+  });
+  test('threshold slider drives reclassification + re-render', () => {
+    assert(/reclassifyOpportunities\(dfcShareThreshold\);\r?\n    applyThresholdRender\(\);/.test(src), 'slider handler must reclassify then re-render');
+    assert(/function applyThresholdRender\(\)/.test(src), 'debounced render helper present');
+  });
+  test('PPTX export reclassifies against the current threshold', () => {
+    assert(/if \(typeof reclassifyOpportunities === 'function'\) reclassifyOpportunities\(threshold\);/.test(src), 'export must reclassify before building the deck');
+    assert(!/: 8;\n.*const sourceName = DATA\.source_name/.test(src), 'stale 8% export fallback must be gone');
   });
 }
 
