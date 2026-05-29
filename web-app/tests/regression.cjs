@@ -135,6 +135,32 @@ console.log('\nweb-app/index.html (generated)');
     assert(/\\\.\(xlsx\|xls\)\$\/i\.test\(file\.name\)/.test(src),
       'dropped file extension must be validated');
   });
+  test('ACR data is persisted to sessionStorage across navigation', () => {
+    assert(/ACR_CACHE_KEY = 'defenderattach:acr:v1'/.test(src),
+      'versioned sessionStorage key must be defined');
+    assert(/sessionStorage\.setItem\(ACR_CACHE_KEY, json\)/.test(src),
+      'must cache DATA after successful import');
+    assert(/sessionStorage\.getItem\(ACR_CACHE_KEY\)/.test(src),
+      'must restore DATA on page load');
+    assert(/AppNav\.onReload\(function\(\)\{[\s\S]{0,200}sessionStorage\.removeItem\(ACR_CACHE_KEY\)/.test(src),
+      'AppNav reload handler must clear the cache');
+  });
+}
+
+// ---- milestone-app persistence ----
+console.log('\nmilestone-app.js');
+{
+  const ms = fs.readFileSync(path.join(WEBAPP, 'js', 'milestone-app.js'), 'utf8');
+  test('milestone data is persisted to sessionStorage across navigation', () => {
+    assert(/CACHE_KEY = 'defenderattach:milestones:v1'/.test(ms),
+      'versioned sessionStorage key must be defined');
+    assert(/sessionStorage\.setItem\(CACHE_KEY, payload\)/.test(ms),
+      'must cache rows + filenames + nearTerm after each successful file load');
+    assert(/sessionStorage\.getItem\(CACHE_KEY\)/.test(ms),
+      'must attempt restore on init');
+    assert(/sessionStorage\.removeItem\(CACHE_KEY\)/.test(ms),
+      'reload handler must clear the cache');
+  });
 }
 
 // ---- csv-export (still used by milestones page) ----

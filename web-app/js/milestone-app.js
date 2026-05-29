@@ -1,6 +1,7 @@
 // milestone-app.js — bootstraps the milestone gaps page.
 (() => {
   const state = { migrationRows: null, defenderRows: null, migrationName: '', defenderName: '', model: null };
+  const CACHE_KEY = 'defenderattach:milestones:v1';
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -11,7 +12,7 @@
     document.getElementById('defender-btn').addEventListener('click', () => document.getElementById('defender-input').click());
     document.getElementById('csv-btn').addEventListener('click', exportCsv);
     document.getElementById('pptx-btn').addEventListener('click', exportPptx);
-    document.getElementById('near-term').addEventListener('change', rebuildIfReady);
+    document.getElementById('near-term').addEventListener('change', () => { rebuildIfReady(); persist(); });
     AppNav.onReload(() => {
       state.migrationRows = state.defenderRows = state.model = null;
       state.migrationName = state.defenderName = '';
@@ -20,7 +21,51 @@
       document.getElementById('milestone-shell').hidden = true;
       document.getElementById('milestone-empty').hidden = false;
       AppNav.setSource('');
+      try { sessionStorage.removeItem(CACHE_KEY); } catch (_) {}
     });
+
+    restoreFromSession();
+  }
+
+  function persist() {
+    if (!state.migrationRows || !state.defenderRows) return;
+    try {
+      const payload = JSON.stringify({
+        migrationRows: state.migrationRows,
+        defenderRows: state.defenderRows,
+        migrationName: state.migrationName,
+        defenderName: state.defenderName,
+        nearTerm: document.getElementById('near-term').value,
+      });
+      // 4.5 MB ceiling — leaves headroom under the 5 MB sessionStorage quota.
+      if (payload.length < 4500000) sessionStorage.setItem(CACHE_KEY, payload);
+    } catch (err) {
+      console.warn('Could not cache milestone data:', err);
+    }
+  }
+
+  function restoreFromSession() {
+    let cached;
+    try { cached = sessionStorage.getItem(CACHE_KEY); }
+    catch (_) { return; }
+    if (!cached) return;
+    try {
+      const parsed = JSON.parse(cached);
+      if (!parsed || !Array.isArray(parsed.migrationRows) || !Array.isArray(parsed.defenderRows)) return;
+      state.migrationRows = parsed.migrationRows;
+      state.defenderRows = parsed.defenderRows;
+      state.migrationName = parsed.migrationName || '';
+      state.defenderName = parsed.defenderName || '';
+      document.getElementById('migration-status').textContent = '✓ ' + state.migrationName + ' — restored from session';
+      document.getElementById('migration-status').className = 'file-status success';
+      document.getElementById('defender-status').textContent = '✓ ' + state.defenderName + ' — restored from session';
+      document.getElementById('defender-status').className = 'file-status success';
+      if (parsed.nearTerm) document.getElementById('near-term').value = parsed.nearTerm;
+      rebuildIfReady();
+    } catch (err) {
+      console.warn('Could not restore cached milestone data:', err);
+      try { sessionStorage.removeItem(CACHE_KEY); } catch (_) {}
+    }
   }
 
   async function handleFile(event, kind) {
@@ -35,6 +80,7 @@
       statusEl.textContent = '✓ ' + file.name + ' — ' + (rows.length - 1) + ' rows';
       statusEl.className = 'file-status success';
       rebuildIfReady();
+      persist();
     } catch (err) {
       console.error(err);
       statusEl.textContent = 'Failed: ' + err.message;

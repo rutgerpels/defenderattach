@@ -467,6 +467,12 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     const splash = document.getElementById('splash');
     if (splash) splash.hidden = true;
     renderAll();
+    try {
+      const json = JSON.stringify(DATA);
+      // 4.5 MB ceiling — leaves headroom under the 5 MB sessionStorage quota.
+      if (json.length < 4500000) sessionStorage.setItem(ACR_CACHE_KEY, json);
+    } catch (cacheErr) { console.warn('Could not cache data:', cacheErr); }
+    if (window.AppNav) AppNav.setSource(file.name);
     setStatus('✓ Loaded "' + file.name + '" — ' + DATA.customers.length + ' customers, ' + DATA.months.length + ' months', 'success');
   } catch (err) {
     console.error(err);
@@ -1655,7 +1661,37 @@ function renderAll() {
   }
 }
 
+const ACR_CACHE_KEY = 'defenderattach:acr:v1';
 renderAll();
+document.addEventListener('DOMContentLoaded', function() {
+  // Restore from a previous tab-internal navigation if available.
+  try {
+    const cached = sessionStorage.getItem(ACR_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && parsed.customers && parsed.customers.length) {
+        DATA = parsed;
+        const splash = document.getElementById('splash');
+        if (splash) splash.hidden = true;
+        renderAll();
+        if (window.AppNav) AppNav.setSource(DATA.source_name || 'Restored from session');
+        setStatus('Restored "' + (DATA.source_name || 'previous file') + '" from this session.', 'success');
+      }
+    }
+  } catch (restoreErr) {
+    console.warn('Could not restore cached data:', restoreErr);
+    try { sessionStorage.removeItem(ACR_CACHE_KEY); } catch (_) {}
+  }
+  // Wire the shared nav's "Load other file" button to the existing
+  // import flow + clear the cache so the splash returns next reload.
+  if (window.AppNav && AppNav.onReload) {
+    AppNav.onReload(function(){
+      try { sessionStorage.removeItem(ACR_CACHE_KEY); } catch (_) {}
+      const btn = document.getElementById('import-btn');
+      if (btn) btn.click();
+    });
+  }
+});
 </script>
 <script>
 (function(){

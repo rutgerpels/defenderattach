@@ -123,6 +123,7 @@ def build_html() -> str:
     html = _strip_bundled_data(html)
     html = _inject_app_nav_css(html)
     html = _inject_splash(html)
+    html = _inject_persistence(html)
 
     html = _replace_once(
         html,
@@ -171,8 +172,88 @@ def build_html() -> str:
     _assert_contains(html, 'id="splash-dropzone"', "splash dropzone")
     _assert_contains(html, "splash.hidden = true", "splash hide-on-load")
     _assert_contains(html, "if (!DATA.customers || DATA.customers.length === 0) return;", "renderAll empty-state guard")
+    _assert_contains(html, "ACR_CACHE_KEY", "session-storage persistence")
+    _assert_contains(html, "sessionStorage.setItem(ACR_CACHE_KEY", "persistence write on import")
 
     return html
+
+
+def _inject_persistence(html: str) -> str:
+    """Cache parsed DATA in sessionStorage so tab-internal navigation keeps it.
+
+    Each browser tab gets its own sessionStorage; closing the tab clears it
+    (privacy default). We:
+
+    * persist DATA after a successful import,
+    * try to restore on page load (before the initial empty render),
+    * clear the cache when the user clicks "Load other file" in the top nav,
+    * wire the nav reload button to the existing import button so both entry
+      points behave identically.
+
+    The persistence is wrapped in DOMContentLoaded so ``window.AppNav`` (loaded
+    after the inline script) is available when we touch the source pill.
+    """
+
+    persist_after_import = (
+        "    DATA = newData;\n"
+        "    const splash = document.getElementById('splash');\n"
+        "    if (splash) splash.hidden = true;\n"
+        "    renderAll();\n"
+        "    try {\n"
+        "      const json = JSON.stringify(DATA);\n"
+        "      // 4.5 MB ceiling — leaves headroom under the 5 MB sessionStorage quota.\n"
+        "      if (json.length < 4500000) sessionStorage.setItem(ACR_CACHE_KEY, json);\n"
+        "    } catch (cacheErr) { console.warn('Could not cache data:', cacheErr); }\n"
+        "    if (window.AppNav) AppNav.setSource(file.name);\n"
+    )
+    html = _replace_once(
+        html,
+        (
+            "    DATA = newData;\n"
+            "    const splash = document.getElementById('splash');\n"
+            "    if (splash) splash.hidden = true;\n"
+            "    renderAll();\n"
+        ),
+        persist_after_import,
+        "persist-on-import block",
+    )
+
+    # Add the cache key constant + restore-on-load block, replacing the bare
+    # ``renderAll();`` bootstrapper near the bottom of the inline script.
+    boot_block = (
+        "const ACR_CACHE_KEY = 'defenderattach:acr:v1';\n"
+        "renderAll();\n"
+        "document.addEventListener('DOMContentLoaded', function() {\n"
+        "  // Restore from a previous tab-internal navigation if available.\n"
+        "  try {\n"
+        "    const cached = sessionStorage.getItem(ACR_CACHE_KEY);\n"
+        "    if (cached) {\n"
+        "      const parsed = JSON.parse(cached);\n"
+        "      if (parsed && parsed.customers && parsed.customers.length) {\n"
+        "        DATA = parsed;\n"
+        "        const splash = document.getElementById('splash');\n"
+        "        if (splash) splash.hidden = true;\n"
+        "        renderAll();\n"
+        "        if (window.AppNav) AppNav.setSource(DATA.source_name || 'Restored from session');\n"
+        "        setStatus('Restored \"' + (DATA.source_name || 'previous file') + '\" from this session.', 'success');\n"
+        "      }\n"
+        "    }\n"
+        "  } catch (restoreErr) {\n"
+        "    console.warn('Could not restore cached data:', restoreErr);\n"
+        "    try { sessionStorage.removeItem(ACR_CACHE_KEY); } catch (_) {}\n"
+        "  }\n"
+        "  // Wire the shared nav's \"Load other file\" button to the existing\n"
+        "  // import flow + clear the cache so the splash returns next reload.\n"
+        "  if (window.AppNav && AppNav.onReload) {\n"
+        "    AppNav.onReload(function(){\n"
+        "      try { sessionStorage.removeItem(ACR_CACHE_KEY); } catch (_) {}\n"
+        "      const btn = document.getElementById('import-btn');\n"
+        "      if (btn) btn.click();\n"
+        "    });\n"
+        "  }\n"
+        "});\n"
+    )
+    return _replace_once(html, "\nrenderAll();\n", "\n" + boot_block, "initial renderAll bootstrap")
 
 
 def _inject_splash(html: str) -> str:
