@@ -186,6 +186,9 @@ def build_html() -> str:
     _assert_contains(html, 'id="m-chart-cust-dfc"', "customer modal dfc chart container")
     _assert_contains(html, 'id="m-chart-cust-pct"', "customer modal pct chart container")
     _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]", "opportunity matrix click interceptor")
+    _assert_contains(html, "function _enhanceCustomerTargetsA11y()", "customer target a11y enhancer")
+    _assert_contains(html, "n.setAttribute('tabindex', '0')", "customer targets made focusable")
+    _assert_contains(html, "if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;", "customer target keydown activation")
     _assert_contains(html, "renderCustomerDetail(name, 'm-')", "modal renders breakdown via idp")
     _assert_contains(html, "${escapeHtml(opp.notes)}", "escaped drill-down signal note")
     _assert_absent(html, "<strong>Signal:</strong> ${opp.notes}", "unescaped drill-down signal note")
@@ -1589,6 +1592,48 @@ function closeCustomerModal() {
 // navigating to the drill-down tab. Priority badges are skipped so the priority
 // explainer still wins.
 document.addEventListener('click', function (e) {
+  if (!e.target.closest) return;
+  if (e.target.closest('.prio-badge')) return;
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]');
+  if (!el) return;
+  const name = el.getAttribute('data-customer');
+  if (!name) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _custLastFocus = (typeof el.focus === 'function') ? el : null;
+  openCustomerModal(name);
+}, true);
+
+// Keyboard access for the same customer targets. SVG <rect>/<circle> bubbles and
+// table <tr> rows are not natively focusable, so a tabindex + button role +
+// aria-label is added after every render. MutationObservers scoped to the three
+// host containers re-apply this whenever their contents are re-rendered (tab
+// switch, data reload), and an initial pass covers anything already drawn.
+function _enhanceCustomerTargetsA11y() {
+  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]');
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (n.getAttribute('tabindex') === null) n.setAttribute('tabindex', '0');
+    // Bubbles/bars (SVG shapes) become buttons; table rows keep their row/cell
+    // semantics (a "button" role would hide the per-column data from AT) and are
+    // simply made focusable + labelled.
+    if (n.tagName !== 'TR' && !n.getAttribute('role')) n.setAttribute('role', 'button');
+    const nm = n.getAttribute('data-customer');
+    if (nm && !n.getAttribute('aria-label')) n.setAttribute('aria-label', 'Open breakdown for ' + nm);
+  }
+}
+['chart-quadrant', 'opp-tbody', 'chart-top-dfc'].forEach(function (id) {
+  const host = document.getElementById(id);
+  if (!host || typeof MutationObserver !== 'function') return;
+  new MutationObserver(_enhanceCustomerTargetsA11y).observe(host, { childList: true, subtree: true });
+});
+_enhanceCustomerTargetsA11y();
+
+// Enter/Space on a focused customer target opens the modal (mirrors the click
+// interceptor). Priority badges keep their own keyboard handling, so they are
+// skipped here too.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
   const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]');

@@ -742,6 +742,17 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
     assert(/#chart-top-dfc \[data-customer\]/.test(src),
       'top-customers bars are in the modal interceptor selector');
   });
+  test('customer targets are keyboard accessible (focusable + Enter/Space)', () => {
+    assert(/function _enhanceCustomerTargetsA11y\(\)/.test(src), 'a11y enhancer defined');
+    assert(/n\.setAttribute\('tabindex', '0'\)/.test(src), 'targets get tabindex');
+    assert(/n\.setAttribute\('role', 'button'\)/.test(src), 'targets get button role');
+    assert(/n\.tagName !== 'TR' && !n\.getAttribute\('role'\)/.test(src), 'table rows keep row semantics (no button role)');
+    assert(/n\.setAttribute\('aria-label', 'Open breakdown for ' \+ nm\)/.test(src), 'targets get an aria-label');
+    assert(/new MutationObserver\(_enhanceCustomerTargetsA11y\)\.observe\(host, \{ childList: true, subtree: true \}\);/.test(src),
+      'observers re-apply a11y attributes after each render');
+    assert(/document\.addEventListener\('keydown', function \(e\) \{[\s\S]*?if \(e\.key !== 'Enter' && e\.key !== ' ' && e\.key !== 'Spacebar'\) return;[\s\S]*?if \(e\.target\.closest\('\.prio-badge'\)\) return;[\s\S]*?#chart-quadrant \[data-customer\][\s\S]*?openCustomerModal\(name\);[\s\S]*?\}, true\);/.test(src),
+      'keydown handler opens the modal, skips prio badges, mirrors the selector');
+  });
   test('stacked Escape disambiguation via window-capture sentinel', () => {
     assert(/_custPrioWasOpenOnEscape = \(typeof _prioOverlay !== 'undefined'\) && !!\(_prioOverlay && !_prioOverlay\.hasAttribute\('hidden'\)\);/.test(src),
       'window-capture sentinel records prio-open state (guarded against undefined)');
