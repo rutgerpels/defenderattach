@@ -137,6 +137,7 @@ def build_html() -> str:
     html = _taxonomy_and_skus(html)
     html = _weekly_views(html)
     html = _threshold_priority(html)
+    html = _inject_priority_explainer(html)
     html = _harden_csvcell(html)
 
     closing_body = "</body>"
@@ -169,6 +170,10 @@ def build_html() -> str:
     _assert_contains(html, "reclassifyOpportunities(dfcShareThreshold);\n  renderKpis();", "renderAll reclassify wiring")
     _assert_contains(html, "const DEFAULT_DFC_SHARE_THRESHOLD = 6;", "default 6% attach baseline")
     _assert_contains(html, "attach baseline", "attach baseline footer copy")
+    _assert_contains(html, "function openPriorityExplainer(", "priority explainer modal")
+    _assert_contains(html, "function priorityGradingRules()", "priority grading rubric")
+    _assert_contains(html, 'class="tag \' + cls + \' prio-badge"', "clickable priority badge")
+    _assert_contains(html, "e.target.closest('.prio-badge')", "capture-phase badge click handler")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
     _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
@@ -962,6 +967,221 @@ def _threshold_priority(html: str) -> str:
         "  reclassifyOpportunities(dfcShareThreshold);\n"
         "  renderKpis();",
         "renderAll baseline reclassify",
+    )
+
+
+def _inject_priority_explainer(html: str) -> str:
+    """Make every High/Medium/Low/Too small badge a clickable explainer.
+
+    Clicking a priority badge opens a modal that (a) lists the exact signals
+    that produced this customer's rating (parsed from row.notes), (b) shows the
+    key numbers behind it, and (c) documents the full grading rubric so a user
+    can always audit why a customer is rated the way it is. The grading text is
+    threshold-aware (reads the live slider value).
+
+    Implementation notes:
+    * ``tagFor`` is reassigned (late-bound by every render fn) to emit an
+      accessible, focusable badge. The original is defined earlier in the same
+      top-level <script>, so this reassignment wins at runtime.
+    * A capture-phase click listener intercepts badge clicks BEFORE the row's
+      bubbling ``selectCustomer`` handler, so opening the explainer does not also
+      navigate to the drill-down.
+    """
+    script = r'''
+// ---- Priority grading explainer -------------------------------------------
+const PRIORITY_META = {
+  High:        { color: '#d13438', bg: '#fdf3f4', label: 'High priority' },
+  Medium:      { color: '#ff8c00', bg: '#fffaf0', label: 'Medium priority' },
+  Low:         { color: '#107c10', bg: '#f3f9ef', label: 'Low priority' },
+  'Too small': { color: '#605e5c', bg: '#f3f2f1', label: 'Too small to prioritize' },
+};
+
+// Threshold-aware rubric mirroring AcrModel.classifyOpportunity. The highest
+// tier whose conditions are met wins.
+function priorityGradingRules() {
+  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
+  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
+  return [
+    { tier: 'Too small', text: 'Total Azure ACR under $1,500 / month — sales priority is low regardless of Defender share.' },
+    { tier: 'High',   text: 'No Defender for Cloud spend at all (under $15 / month) while the customer spends over $3,000 / month on Azure — 0% against the ' + tl + ' attach baseline.' },
+    { tier: 'High',   text: 'Other Azure workloads grew over the last 3 months while Defender for Cloud is shrinking (declining more than 5%).' },
+    { tier: 'High',   text: 'Other Azure is growing, Defender is flat (under 2% growth) AND Defender is under 2% of total ACR.' },
+    { tier: 'High',   text: 'Break of trend: core workloads (Compute, Databases, Developer Tools, Integration, AI + Machine Learning, Containers) grew over 5% over 3 months, Defender did not keep pace (more than 5 points behind), and the customer is below the ' + tl + ' baseline.' },
+    { tier: 'Medium', text: 'Defender penetration under 1.5% of total ACR while other Azure is growing — undersold.' },
+    { tier: 'Medium', text: 'Defender for Cloud is growing more than 5 points slower than the rest of Azure.' },
+    { tier: 'Medium', text: 'Very low Defender penetration (under 0.5%) on a sizeable account (total ACR over $6,000 / month).' },
+    { tier: 'Medium', text: 'Break of trend on core workloads while already at or above the ' + tl + ' baseline.' },
+    { tier: 'Medium', text: 'Defender attach baseline: Defender share is below the ' + tl + ' corporate baseline — every customer should run at least ' + tl + ' of total ACR on Defender workloads.' },
+    { tier: 'Low',    text: 'None of the above triggers fire — Defender attach looks healthy for this customer at the current ' + tl + ' baseline.' },
+  ];
+}
+
+// Clickable, accessible replacement for the template's tagFor. Late-bound, so
+// every render path (tables, heatmap, action queue, drill-down) picks it up.
+tagFor = function (opp) {
+  const cls = opp === 'High' ? 'high' : opp === 'Medium' ? 'medium' : opp === 'Low' ? 'low' : 'small-tag';
+  const safe = escapeHtml(opp);
+  return '<span class="tag ' + cls + ' prio-badge" role="button" tabindex="0" ' +
+    'title="Why is the priority ' + safe + '? Click for the grading.">' +
+    safe + ' <span class="prio-badge-i" aria-hidden="true">&#9432;</span></span>';
+};
+
+let _prioOverlay = null;
+let _prioLastFocus = null;
+function _ensurePrioOverlay() {
+  if (_prioOverlay) return _prioOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.prio-badge{cursor:pointer;user-select:none}' +
+    '.prio-badge:hover{filter:brightness(.96);box-shadow:0 0 0 1px rgba(0,0,0,.15)}' +
+    '.prio-badge:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.prio-badge-i{font-size:11px;opacity:.7}' +
+    '.prio-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:4000;padding:40px 16px;overflow:auto}' +
+    '.prio-overlay[hidden]{display:none}' +
+    '.prio-dialog{position:relative;background:#fff;border-radius:10px;max-width:720px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.prio-close{position:absolute;top:8px;right:12px;border:none;background:transparent;font-size:26px;' +
+    'line-height:1;cursor:pointer;color:#605e5c}' +
+    '.prio-close:hover{color:#201f1e}' +
+    '#prio-body{padding:22px 26px 28px}' +
+    '.prio-head{padding:14px 16px;border-radius:6px;margin:6px 0 18px}' +
+    '.prio-head-tier{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}' +
+    '.prio-head h2{margin:4px 0 0;font-size:19px;color:#201f1e}' +
+    '.prio-section{margin-bottom:18px}' +
+    '.prio-section h3{font-size:14px;margin:0 0 8px;color:#201f1e}' +
+    '.prio-signals{margin:0;padding-left:18px}' +
+    '.prio-signals li{margin-bottom:6px;color:#323130}' +
+    '.prio-none{color:#107c10;margin:0}' +
+    '.prio-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}' +
+    '.prio-metric{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eef1f5;padding:5px 0;font-size:13px}' +
+    '.prio-metric .k{color:#605e5c}.prio-metric .v{font-weight:600;color:#201f1e;text-align:right}' +
+    '.prio-rubric-intro{font-size:12px;color:#605e5c;margin:0 0 8px}' +
+    '.prio-rubric{list-style:none;margin:0;padding:0}' +
+    '.prio-rule{display:flex;gap:10px;align-items:flex-start;padding:7px 8px;border-radius:6px;font-size:13px}' +
+    '.prio-rule.current{background:#f5f7fb}' +
+    '.prio-pill{flex:0 0 auto;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid}' +
+    '.prio-rule-text{color:#323130}' +
+    '@media(max-width:560px){.prio-metrics{grid-template-columns:1fr}}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'prio-explainer';
+  overlay.className = 'prio-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="prio-dialog" role="dialog" aria-modal="true" aria-labelledby="prio-title">' +
+    '<button class="prio-close" type="button" aria-label="Close">&times;</button>' +
+    '<div id="prio-body"></div></div>';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePriorityExplainer(); });
+  overlay.querySelector('.prio-close').addEventListener('click', closePriorityExplainer);
+  document.body.appendChild(overlay);
+  _prioOverlay = overlay;
+  return overlay;
+}
+
+function openPriorityExplainer(customer) {
+  if (!DATA || !Array.isArray(DATA.opportunity)) return;
+  const row = DATA.opportunity.find(r => r.customer === customer);
+  if (!row) return;
+  const overlay = _ensurePrioOverlay();
+  const meta = PRIORITY_META[row.opportunity] || PRIORITY_META.Low;
+  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
+  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
+
+  const signals = (row.notes && row.notes !== '-')
+    ? row.notes.split('; ').map(s => s.trim()).filter(Boolean) : [];
+  const signalsHtml = signals.length
+    ? '<ul class="prio-signals">' + signals.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ul>'
+    : '<p class="prio-none">No attach gaps detected at the current ' + escapeHtml(tl) +
+      ' baseline — Defender coverage looks healthy for this customer.</p>';
+
+  const catNames = (Array.isArray(row.growth_cat_names) && row.growth_cat_names.length)
+    ? row.growth_cat_names.join(', ') : '—';
+  const metrics = [
+    ['Total monthly ACR', fmt.money2(row.total_current)],
+    ['Defender for Cloud monthly ACR', fmt.money2(row.dfc_current)],
+    ['Defender share of total', fmt.pctRaw(row.dfc_ratio)],
+    ['Attach baseline', escapeHtml(tl)],
+    ['Defender 3-month trend', fmt.pct(row.dfc_3m)],
+    ['Other Azure 3-month trend', fmt.pct(row.other_3m)],
+    ['Core workloads 3-month trend', row.growth_cat_3m == null ? '—' : fmt.pct(row.growth_cat_3m)],
+    ['Growing core workloads', escapeHtml(catNames)],
+  ];
+  const metricsHtml = metrics.map(m =>
+    '<div class="prio-metric"><span class="k">' + m[0] + '</span><span class="v">' + m[1] + '</span></div>'
+  ).join('');
+
+  const rubricHtml = priorityGradingRules().map(rule => {
+    const rm = PRIORITY_META[rule.tier] || PRIORITY_META.Low;
+    const current = rule.tier === row.opportunity ? ' current' : '';
+    return '<li class="prio-rule' + current + '">' +
+      '<span class="prio-pill" style="background:' + rm.bg + ';color:' + rm.color + ';border-color:' + rm.color + ';">' +
+      escapeHtml(rule.tier) + '</span>' +
+      '<span class="prio-rule-text">' + escapeHtml(rule.text) + '</span></li>';
+  }).join('');
+
+  document.getElementById('prio-body').innerHTML =
+    '<div class="prio-head" style="border-left:6px solid ' + meta.color + ';background:' + meta.bg + ';">' +
+      '<div class="prio-head-tier" style="color:' + meta.color + ';">' + escapeHtml(meta.label) + '</div>' +
+      '<h2 id="prio-title">Why is ' + escapeHtml(customer) + ' rated &ldquo;' + escapeHtml(row.opportunity) + '&rdquo;?</h2>' +
+    '</div>' +
+    '<section class="prio-section"><h3>Signals for this customer</h3>' + signalsHtml + '</section>' +
+    '<section class="prio-section"><h3>Key numbers</h3><div class="prio-metrics">' + metricsHtml + '</div></section>' +
+    '<section class="prio-section"><h3>How priorities are graded</h3>' +
+      '<p class="prio-rubric-intro">The highest tier whose conditions are met wins. The tier this customer landed in is highlighted.</p>' +
+      '<ul class="prio-rubric">' + rubricHtml + '</ul></section>';
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.prio-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closePriorityExplainer() {
+  if (_prioOverlay) _prioOverlay.setAttribute('hidden', '');
+  // Restore focus to the badge that opened the modal so keyboard users are not stranded.
+  if (_prioLastFocus && typeof _prioLastFocus.focus === 'function') {
+    try { _prioLastFocus.focus(); } catch (_) {}
+  }
+  _prioLastFocus = null;
+}
+
+function _prioBadgeCustomer(el) {
+  const rowEl = el.closest('[data-customer]');
+  if (rowEl) return rowEl.getAttribute('data-customer');
+  const sel = document.getElementById('customer-select');
+  return (sel && sel.value) ? sel.value : null;
+}
+
+// Capture phase: intercept before the row's bubbling selectCustomer handler so
+// a badge click opens the explainer instead of navigating to the drill-down.
+document.addEventListener('click', function (e) {
+  const badge = e.target.closest ? e.target.closest('.prio-badge') : null;
+  if (!badge) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _prioLastFocus = badge;
+  const customer = _prioBadgeCustomer(badge);
+  if (customer) openPriorityExplainer(customer);
+}, true);
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { closePriorityExplainer(); return; }
+  const isBadge = e.target.classList && e.target.classList.contains('prio-badge');
+  if (isBadge && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    e.stopPropagation();
+    _prioLastFocus = e.target;
+    const customer = _prioBadgeCustomer(e.target);
+    if (customer) openPriorityExplainer(customer);
+  }
+}, true);
+
+'''
+    return _replace_once(
+        html,
+        "function renderAll() {",
+        script + "\nfunction renderAll() {",
+        "priority explainer injection point",
     )
 
 

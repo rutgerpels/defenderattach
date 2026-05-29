@@ -619,6 +619,22 @@ console.log('\nweb-app/index.html (attach baseline + reclassification)');
     assert(/if \(typeof reclassifyOpportunities === 'function'\) reclassifyOpportunities\(threshold\);/.test(src), 'export must reclassify before building the deck');
     assert(!/: 8;\n.*const sourceName = DATA\.source_name/.test(src), 'stale 8% export fallback must be gone');
   });
+  test('priority badges are clickable and open a grading explainer', () => {
+    assert(/tagFor = function \(opp\) \{/.test(src), 'tagFor reassigned to clickable badge');
+    assert(/class="tag ' \+ cls \+ ' prio-badge"/.test(src), 'badge carries the prio-badge hook + role');
+    assert(/function openPriorityExplainer\(customer\)/.test(src), 'explainer open function present');
+    assert(/function priorityGradingRules\(\)/.test(src), 'grading rubric helper present');
+  });
+  test('explainer parses per-customer signals and is threshold-aware', () => {
+    assert(/row\.notes\.split\('; '\)/.test(src), 'signals derived from row.notes');
+    assert(/attach baseline: Defender share is below the ' \+ tl/.test(src), 'baseline rule text uses the live threshold label');
+    assert(/escapeHtml\(customer\)/.test(src), 'customer name escaped in explainer title');
+  });
+  test('badge clicks are intercepted in capture phase (no drill-down navigation)', () => {
+    assert(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?e\.target\.closest\('\.prio-badge'\)[\s\S]*?e\.stopPropagation\(\);[\s\S]*?\}, true\);/.test(src),
+      'capture-phase click handler must stopPropagation on badge clicks');
+    assert(/if \(e\.key === 'Escape'\) \{ closePriorityExplainer\(\); return; \}/.test(src), 'Escape closes the explainer');
+  });
 }
 
 console.log(`\nResults: ${pass} passed, ${fail} failed`);
