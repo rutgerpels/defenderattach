@@ -136,6 +136,7 @@ def build_html() -> str:
     html = _harden_charts(html)
     html = _taxonomy_and_skus(html)
     html = _weekly_views(html)
+    html = _product_mix_donut(html)
     html = _threshold_priority(html)
     html = _inject_priority_explainer(html)
     html = _harden_csvcell(html)
@@ -188,7 +189,7 @@ def build_html() -> str:
     _assert_contains(html, "sessionStorage.setItem(ACR_CACHE_KEY", "persistence write on import")
     _assert_contains(html, "DATA.track_products && DATA.track_products.length", "taxonomy-aware trend chart")
     _assert_contains(html, "const colorFor = p =>", "validated trend colour helper")
-    _assert_contains(html, "${escapeHtml(p)}</span>", "escaped product trend legend label")
+    _assert_contains(html, "${escapeHtml(d.label)}</span>", "escaped product mix donut legend label")
     _assert_contains(html, "const nameEsc = escapeHtml(p.product);", "escaped customer product name")
     _assert_contains(html, "${escapeHtml(s.sku)}", "escaped SKU name in drill-down")
     _assert_contains(html, "data-sku-toggle", "SKU drill-down toggle markup")
@@ -206,6 +207,20 @@ def build_html() -> str:
     _assert_absent(html, 'id="product-trend-grain"', "removed monthly/weekly granularity toggle")
     _assert_absent(html, 'id="cust-trend-grain"', "removed customer granularity toggle")
     _assert_absent(html, "function initGrainControls()", "removed granularity control init")
+
+    # Product-mix donut (replaces the product-trend line chart on the overview).
+    _assert_contains(html, "function donutChart(", "product-mix donut helper")
+    _assert_contains(html, "function renderProductMix()", "product-mix donut renderer")
+    _assert_contains(html, 'id="chart-product-mix"', "product-mix donut container")
+    _assert_contains(html, 'id="legend-product-mix"', "product-mix donut legend")
+    _assert_contains(html, "  renderProductMix();", "renderAll product-mix wiring")
+    _assert_contains(html, "donutChart('chart-product-mix', items)", "donut render call")
+    _assert_absent(html, "function renderProductTrend()", "removed product-trend line renderer")
+    _assert_absent(html, "  renderProductTrend();", "removed product-trend renderAll call")
+    _assert_absent(html, 'id="product-trend-mode"', "removed product-trend mode select")
+    _assert_absent(html, 'id="chart-product-trend"', "removed product-trend line container")
+    _assert_absent(html, 'id="legend-product-trend"', "removed product-trend legend")
+    _assert_absent(html, "Product mix — ACR trend by service", "removed product-trend line title")
 
     return html
 
@@ -788,6 +803,182 @@ def _weekly_views(html: str) -> str:
         '      <div class="sub">DfC as % of total monthly ACR for this customer</div>',
         '      <div class="sub">DfC as % of total ACR for this customer</div>',
         "customer pct trend sub relabel",
+    )
+
+    return html
+
+
+def _product_mix_donut(html: str) -> str:
+    """Overview GUI change: replace the product-mix line chart with a donut.
+
+    Runs AFTER ``_weekly_views`` so every needle byte-matches the
+    post-weekly-views text. Three structural moves on the overview page:
+
+    1. The ``grid-2`` row keeps the weekly total-ACR line chart on the left
+       and gains a product-mix **donut** on the right (replacing Top 15).
+    2. The standalone product-trend *line* box below becomes the full-width
+       **Top 15** box.
+    3. ``renderProductTrend`` (a line chart over time) is replaced by
+       ``renderProductMix`` (share-of-ACR donut), a ``donutChart`` SVG helper
+       is injected, ``renderAll`` calls the new renderer, and the now-dead
+       ``product-trend-mode`` change listener is removed.
+    """
+    # 1) grid-2 right cell: Top 15 box -> product-mix donut box.
+    html = _replace_once(
+        html,
+        (
+            '    <div class="chart-box">\n'
+            '      <div class="title">Top 15 customers by Defender for Cloud monthly ACR</div>\n'
+            '      <div class="sub">Click a bar to drill down</div>\n'
+            '      <div class="svg-container" id="chart-top-dfc"></div>\n'
+            "    </div>"
+        ),
+        (
+            '    <div class="chart-box">\n'
+            '      <div class="title">Product mix — share of ACR by service</div>\n'
+            '      <div class="sub">ACR split across tracked workloads (weekly where available)</div>\n'
+            '      <div class="svg-container" id="chart-product-mix"></div>\n'
+            '      <div class="legend" id="legend-product-mix"></div>\n'
+            "    </div>"
+        ),
+        "overview grid-2 donut swap",
+    )
+
+    # 2) standalone product-trend line box -> full-width Top 15 box.
+    html = _replace_once(
+        html,
+        (
+            '  <div class="chart-box">\n'
+            '    <div class="title">Product mix — ACR trend by service</div>\n'
+            '    <div class="sub">Compare DfC against Azure Virtual Desktop, General Purpose Compute, and other workloads</div>\n'
+            '    <div class="controls">\n'
+            "      <label>Show: </label>\n"
+            '      <select id="product-trend-mode">\n'
+            '        <option value="indexed">Indexed to first point (=100)</option>\n'
+            '        <option value="absolute" selected>Absolute ACR</option>\n'
+            "      </select>\n"
+            "    </div>\n"
+            '    <div class="svg-container" id="chart-product-trend"></div>\n'
+            '    <div class="legend" id="legend-product-trend"></div>\n'
+            "  </div>"
+        ),
+        (
+            '  <div class="chart-box">\n'
+            '    <div class="title">Top 15 customers by Defender for Cloud monthly ACR</div>\n'
+            '    <div class="sub">Click a bar to drill down</div>\n'
+            '    <div class="svg-container" id="chart-top-dfc"></div>\n'
+            "  </div>"
+        ),
+        "overview product-trend box -> top15",
+    )
+
+    # 3a) Replace renderProductTrend (line-over-time) with renderProductMix (donut).
+    html = _replace_once(
+        html,
+        (
+            "function renderProductTrend() {\n"
+            "  const mode = document.getElementById('product-trend-mode').value;\n"
+            "  const weekly = !!(DATA.weekly_enabled && DATA.product_weekly);\n"
+            "  const src = weekly ? DATA.product_weekly : DATA.product_monthly;\n"
+            "  const labels = weekly ? DATA.week_labels : DATA.month_labels;\n"
+            "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
+            "    .filter(p => src[p]);\n"
+            "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+            "  const series = tracks.map(p => ({label: p, values: src[p], color: colorFor(p)}));\n"
+            "  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300, labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});\n"
+            "  document.getElementById('legend-product-trend').innerHTML = tracks.map(p =>\n"
+            "    `<span class=\"legend-item\"><span class=\"legend-swatch\" style=\"background:${colorFor(p)}\"></span>${escapeHtml(p)}</span>`).join('');\n"
+            "}"
+        ),
+        (
+            "function renderProductMix() {\n"
+            "  const weekly = !!(DATA.weekly_enabled && DATA.product_weekly);\n"
+            "  const src = weekly ? DATA.product_weekly : DATA.product_monthly;\n"
+            "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
+            "    .filter(p => src[p]);\n"
+            "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+            "  const sumOf = a => (Array.isArray(a) ? a : []).reduce((s, v) => s + (Number(v) || 0), 0);\n"
+            "  const items = tracks.map(p => ({label: p, value: sumOf(src[p]), color: colorFor(p)}))\n"
+            "    .filter(d => d.value > 0)\n"
+            "    .sort((a, b) => b.value - a.value);\n"
+            "  donutChart('chart-product-mix', items);\n"
+            "  document.getElementById('legend-product-mix').innerHTML = items.map(d =>\n"
+            "    `<span class=\"legend-item\"><span class=\"legend-swatch\" style=\"background:${d.color}\"></span>${escapeHtml(d.label)}</span>`).join('');\n"
+            "}"
+        ),
+        "renderProductTrend -> renderProductMix",
+    )
+
+    # 3b) Inject the donutChart SVG helper just before lineChart.
+    html = _replace_once(
+        html,
+        "function lineChart(containerId, series, opts = {}) {",
+        (
+            "function donutChart(containerId, items, opts = {}) {\n"
+            "  const el = document.getElementById(containerId);\n"
+            "  if (!el) return;\n"
+            "  const W = opts.width || 420, H = opts.height || 300;\n"
+            "  const cx = W / 2, cy = H / 2;\n"
+            "  const rOuter = Math.min(W, H) / 2 - 14, rInner = rOuter * 0.6;\n"
+            "  const total = items.reduce((a, d) => a + (Number(d.value) || 0), 0);\n"
+            "  if (!(total > 0)) {\n"
+            "    el.innerHTML = '<div style=\"padding:40px;text-align:center;color:#a19f9d;font-size:12px;\">No service ACR to display</div>';\n"
+            "    return;\n"
+            "  }\n"
+            "  const totalLbl = total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);\n"
+            "  let svg = `<svg viewBox=\"0 0 ${W} ${H}\" xmlns=\"http://www.w3.org/2000/svg\">`;\n"
+            "  if (items.length === 1) {\n"
+            "    const d = items[0];\n"
+            "    svg += `<circle cx=\"${cx}\" cy=\"${cy}\" r=\"${rOuter}\" fill=\"${d.color}\" data-label=\"${escapeHtml(d.label)}\" data-val=\"${(Number(d.value) || 0).toFixed(2)}\" data-pct=\"100.0\" style=\"cursor:pointer\"/>`;\n"
+            "    svg += `<circle cx=\"${cx}\" cy=\"${cy}\" r=\"${rInner}\" fill=\"#ffffff\"/>`;\n"
+            "  } else {\n"
+            "    let a0 = -Math.PI / 2;\n"
+            "    items.forEach(d => {\n"
+            "      const frac = (Number(d.value) || 0) / total;\n"
+            "      const a1 = a0 + frac * Math.PI * 2;\n"
+            "      const large = (a1 - a0) > Math.PI ? 1 : 0;\n"
+            "      const xo0 = cx + rOuter * Math.cos(a0), yo0 = cy + rOuter * Math.sin(a0);\n"
+            "      const xo1 = cx + rOuter * Math.cos(a1), yo1 = cy + rOuter * Math.sin(a1);\n"
+            "      const xi1 = cx + rInner * Math.cos(a1), yi1 = cy + rInner * Math.sin(a1);\n"
+            "      const xi0 = cx + rInner * Math.cos(a0), yi0 = cy + rInner * Math.sin(a0);\n"
+            "      const dPath = `M${xo0.toFixed(2)},${yo0.toFixed(2)} A${rOuter},${rOuter} 0 ${large} 1 ${xo1.toFixed(2)},${yo1.toFixed(2)} L${xi1.toFixed(2)},${yi1.toFixed(2)} A${rInner},${rInner} 0 ${large} 0 ${xi0.toFixed(2)},${yi0.toFixed(2)} Z`;\n"
+            "      svg += `<path d=\"${dPath}\" fill=\"${d.color}\" stroke=\"#ffffff\" stroke-width=\"1.5\" data-label=\"${escapeHtml(d.label)}\" data-val=\"${(Number(d.value) || 0).toFixed(2)}\" data-pct=\"${(frac * 100).toFixed(1)}\" style=\"cursor:pointer\"/>`;\n"
+            "      a0 = a1;\n"
+            "    });\n"
+            "  }\n"
+            "  svg += `<text x=\"${cx}\" y=\"${cy - 2}\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"700\" fill=\"#323130\">${totalLbl}</text>`;\n"
+            "  svg += `<text x=\"${cx}\" y=\"${cy + 15}\" text-anchor=\"middle\" font-size=\"10\" fill=\"#605e5c\">total ACR</text>`;\n"
+            "  svg += `</svg>`;\n"
+            "  el.innerHTML = svg;\n"
+            "  el.querySelectorAll('[data-label]').forEach(seg => {\n"
+            "    seg.addEventListener('mousemove', e => {\n"
+            "      const label = seg.getAttribute('data-label');\n"
+            "      const val = parseFloat(seg.getAttribute('data-val'));\n"
+            "      const pct = seg.getAttribute('data-pct');\n"
+            "      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} · ${pct}%`, e.pageX, e.pageY);\n"
+            "    });\n"
+            "    seg.addEventListener('mouseleave', hideTooltip);\n"
+            "  });\n"
+            "}\n\n"
+            "function lineChart(containerId, series, opts = {}) {"
+        ),
+        "inject donutChart helper",
+    )
+
+    # 3c) renderAll: call renderProductMix instead of renderProductTrend.
+    html = _replace_once(
+        html,
+        "  renderProductTrend();",
+        "  renderProductMix();",
+        "renderAll product-mix call",
+    )
+
+    # 3d) Remove the now-dead product-trend-mode change listener.
+    html = _replace_once(
+        html,
+        "document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);\n",
+        "",
+        "remove product-trend-mode listener",
     )
 
     return html

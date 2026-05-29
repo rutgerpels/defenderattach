@@ -429,7 +429,7 @@ console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
   test('escapes Excel-derived product and SKU names', () => {
     assert(/const nameEsc = escapeHtml\(p\.product\);/.test(src), 'product name escaped');
     assert(/\$\{escapeHtml\(s\.sku\)\}/.test(src), 'SKU name escaped');
-    assert(/\$\{escapeHtml\(p\)\}<\/span>/.test(src), 'legend label escaped');
+    assert(/\$\{escapeHtml\(d\.label\)\}<\/span>/.test(src), 'legend label escaped');
     assert(!/style="background:\$\{PRODUCT_COLORS\[p\]\}"><\/span>\$\{p\}/.test(src), 'no unescaped legend label');
   });
   test('escapes Excel-derived series labels in the line chart', () => {
@@ -456,11 +456,12 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
     assert(!/id="grain-ctl"/.test(src), 'no overview grain control wrapper');
     assert(!/id="cust-grain-ctl"/.test(src), 'no customer grain control wrapper');
   });
-  test('trend mode labels no longer mention "month"', () => {
-    assert(/Indexed to first point \(=100\)/.test(src), 'indexed option relabelled');
-    assert(/Absolute ACR</.test(src), 'absolute option relabelled');
-    assert(!/Indexed to first month/.test(src), 'no stale indexed label');
-    assert(!/Absolute monthly ACR/.test(src), 'no stale absolute label');
+  test('product-mix line-chart mode select is removed', () => {
+    assert(!/id="product-trend-mode"/.test(src), 'no product trend mode select');
+    assert(!/Indexed to first point \(=100\)/.test(src), 'no indexed mode option');
+    assert(!/id="chart-product-trend"/.test(src), 'no product trend line container');
+    assert(!/id="legend-product-trend"/.test(src), 'no product trend legend');
+    assert(!/function renderProductTrend\(\)/.test(src), 'no product trend line renderer');
   });
   test('overview trends auto-select weekly when available', () => {
     assert(/function renderDfcTrend\(\)/.test(src), 'weekly-preferring DfC trend defined');
@@ -485,18 +486,58 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
     assert(/const isPartial = i === partialIdx;/.test(src), 'marker uses resolved partialIdx');
     assert(!/const isPartial = i === DATA\.partial_month_idx;/.test(src), 'no hard-coded monthly partial index');
     const passed = (src.match(/partialIdx: weekly \? -1 : DATA\.partial_month_idx/g) || []).length;
-    assert(passed === 2, 'overview charts pass weekly partialIdx (got ' + passed + ')');
+    assert(passed === 1, 'overview DfC chart passes weekly partialIdx (got ' + passed + ')');
     const cPassed = (src.match(/partialIdx: cWeekly \? -1 : DATA\.partial_month_idx/g) || []).length;
     assert(cPassed === 2, 'customer charts pass weekly partialIdx (got ' + cPassed + ')');
   });
   test('trend chart titles/subtitles no longer hard-code "monthly"', () => {
     assert(/Defender for Cloud — ACR across all customers/.test(src), 'DfC trend title neutral');
     assert(/ACR trend \(weekly where available\)/.test(src), 'DfC trend sub clarifies weekly');
-    assert(/Product mix — ACR trend by service/.test(src), 'product trend title neutral');
+    assert(/Product mix — share of ACR by service/.test(src), 'product mix donut title');
     assert(/ACR trend — does DfC track with the rest of the footprint\?/.test(src), 'customer DfC sub neutral');
     assert(/DfC as % of total ACR for this customer/.test(src), 'customer pct sub neutral');
     assert(!/Monthly ACR across all customers/.test(src), 'no stale DfC trend title');
     assert(!/monthly ACR trend by service/.test(src), 'no stale product trend title');
+  });
+}
+
+console.log('\nweb-app/index.html (product-mix donut)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  test('donut replaces the product-trend line chart on the overview', () => {
+    assert(/function donutChart\(/.test(src), 'donutChart helper defined');
+    assert(/function renderProductMix\(\)/.test(src), 'renderProductMix defined');
+    assert(/id="chart-product-mix"/.test(src), 'donut container present');
+    assert(/id="legend-product-mix"/.test(src), 'donut legend present');
+    assert(/donutChart\('chart-product-mix', items\)/.test(src), 'donut render call wired');
+    assert(/\n {2}renderProductMix\(\);/.test(src), 'renderAll calls renderProductMix');
+    assert(!/\n {2}renderProductTrend\(\);/.test(src), 'renderAll no longer calls renderProductTrend');
+  });
+  test('donut lives next to the weekly total-ACR chart in grid-2', () => {
+    const gridOpen = src.indexOf('<div class="grid-2">');
+    const gridClose = src.indexOf('\n  </div>', gridOpen);
+    assert(gridOpen >= 0 && gridClose > gridOpen, 'grid-2 block found');
+    const dfcIdx = src.indexOf('id="chart-dfc-trend"');
+    const mixIdx = src.indexOf('id="chart-product-mix"');
+    const topIdx = src.indexOf('id="chart-top-dfc"');
+    assert(dfcIdx > gridOpen && dfcIdx < gridClose, 'weekly total ACR chart inside grid-2');
+    assert(mixIdx > gridOpen && mixIdx < gridClose, 'product-mix donut inside grid-2');
+    assert(topIdx > gridClose, 'Top 15 chart outside (below) grid-2');
+  });
+  test('Top 15 chart moved to a full-width box below grid-2', () => {
+    const gridClose = src.indexOf('\n  </div>', src.indexOf('<div class="grid-2">'));
+    const topIdx = src.indexOf('id="chart-top-dfc"');
+    assert(topIdx > gridClose, 'Top 15 box appears after the grid-2 row');
+    assert(/Top 15 customers by Defender for Cloud monthly ACR/.test(src), 'Top 15 title retained');
+  });
+  test('donut output is XSS-safe', () => {
+    assert(/data-label="\$\{escapeHtml\(d\.label\)\}"/.test(src), 'donut segment label escaped');
+    assert(/showTooltip\(`<b>\$\{escapeHtml\(label\)\}<\/b>/.test(src), 'donut tooltip label escaped');
+  });
+  test('donut aggregates ACR across all periods', () => {
+    assert(/const sumOf = a => \(Array\.isArray\(a\) \? a : \[\]\)\.reduce/.test(src), 'sumOf guards non-arrays');
+    assert(/\.filter\(d => d\.value > 0\)/.test(src), 'zero-value services filtered out');
+    assert(/No service ACR to display/.test(src), 'empty-state guard present');
   });
 }
 

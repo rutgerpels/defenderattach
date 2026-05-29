@@ -260,24 +260,17 @@ tr.clickable:hover { background: #f3f2f1; }
       <div class="svg-container" id="chart-dfc-trend"></div>
     </div>
     <div class="chart-box">
-      <div class="title">Top 15 customers by Defender for Cloud monthly ACR</div>
-      <div class="sub">Click a bar to drill down</div>
-      <div class="svg-container" id="chart-top-dfc"></div>
+      <div class="title">Product mix — share of ACR by service</div>
+      <div class="sub">ACR split across tracked workloads (weekly where available)</div>
+      <div class="svg-container" id="chart-product-mix"></div>
+      <div class="legend" id="legend-product-mix"></div>
     </div>
   </div>
 
   <div class="chart-box">
-    <div class="title">Product mix — ACR trend by service</div>
-    <div class="sub">Compare DfC against Azure Virtual Desktop, General Purpose Compute, and other workloads</div>
-    <div class="controls">
-      <label>Show: </label>
-      <select id="product-trend-mode">
-        <option value="indexed">Indexed to first point (=100)</option>
-        <option value="absolute" selected>Absolute ACR</option>
-      </select>
-    </div>
-    <div class="svg-container" id="chart-product-trend"></div>
-    <div class="legend" id="legend-product-trend"></div>
+    <div class="title">Top 15 customers by Defender for Cloud monthly ACR</div>
+    <div class="sub">Click a bar to drill down</div>
+    <div class="svg-container" id="chart-top-dfc"></div>
   </div>
 </div>
 
@@ -672,6 +665,53 @@ function parseAndScore(rows) {
 }
 
 // ============ Chart utilities ============
+function donutChart(containerId, items, opts = {}) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const W = opts.width || 420, H = opts.height || 300;
+  const cx = W / 2, cy = H / 2;
+  const rOuter = Math.min(W, H) / 2 - 14, rInner = rOuter * 0.6;
+  const total = items.reduce((a, d) => a + (Number(d.value) || 0), 0);
+  if (!(total > 0)) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#a19f9d;font-size:12px;">No service ACR to display</div>';
+    return;
+  }
+  const totalLbl = total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  if (items.length === 1) {
+    const d = items[0];
+    svg += `<circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="${d.color}" data-label="${escapeHtml(d.label)}" data-val="${(Number(d.value) || 0).toFixed(2)}" data-pct="100.0" style="cursor:pointer"/>`;
+    svg += `<circle cx="${cx}" cy="${cy}" r="${rInner}" fill="#ffffff"/>`;
+  } else {
+    let a0 = -Math.PI / 2;
+    items.forEach(d => {
+      const frac = (Number(d.value) || 0) / total;
+      const a1 = a0 + frac * Math.PI * 2;
+      const large = (a1 - a0) > Math.PI ? 1 : 0;
+      const xo0 = cx + rOuter * Math.cos(a0), yo0 = cy + rOuter * Math.sin(a0);
+      const xo1 = cx + rOuter * Math.cos(a1), yo1 = cy + rOuter * Math.sin(a1);
+      const xi1 = cx + rInner * Math.cos(a1), yi1 = cy + rInner * Math.sin(a1);
+      const xi0 = cx + rInner * Math.cos(a0), yi0 = cy + rInner * Math.sin(a0);
+      const dPath = `M${xo0.toFixed(2)},${yo0.toFixed(2)} A${rOuter},${rOuter} 0 ${large} 1 ${xo1.toFixed(2)},${yo1.toFixed(2)} L${xi1.toFixed(2)},${yi1.toFixed(2)} A${rInner},${rInner} 0 ${large} 0 ${xi0.toFixed(2)},${yi0.toFixed(2)} Z`;
+      svg += `<path d="${dPath}" fill="${d.color}" stroke="#ffffff" stroke-width="1.5" data-label="${escapeHtml(d.label)}" data-val="${(Number(d.value) || 0).toFixed(2)}" data-pct="${(frac * 100).toFixed(1)}" style="cursor:pointer"/>`;
+      a0 = a1;
+    });
+  }
+  svg += `<text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="15" font-weight="700" fill="#323130">${totalLbl}</text>`;
+  svg += `<text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10" fill="#605e5c">total ACR</text>`;
+  svg += `</svg>`;
+  el.innerHTML = svg;
+  el.querySelectorAll('[data-label]').forEach(seg => {
+    seg.addEventListener('mousemove', e => {
+      const label = seg.getAttribute('data-label');
+      const val = parseFloat(seg.getAttribute('data-val'));
+      const pct = seg.getAttribute('data-pct');
+      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} · ${pct}%`, e.pageX, e.pageY);
+    });
+    seg.addEventListener('mouseleave', hideTooltip);
+  });
+}
+
 function lineChart(containerId, series, opts = {}) {
   const W = opts.width || 600, H = opts.height || 260;
   const M = {top: 20, right: 16, bottom: 36, left: 56};
@@ -986,18 +1026,19 @@ function renderDfcTrend() {
   lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#0078d4'}], {labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});
 }
 
-function renderProductTrend() {
-  const mode = document.getElementById('product-trend-mode').value;
+function renderProductMix() {
   const weekly = !!(DATA.weekly_enabled && DATA.product_weekly);
   const src = weekly ? DATA.product_weekly : DATA.product_monthly;
-  const labels = weekly ? DATA.week_labels : DATA.month_labels;
   const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)
     .filter(p => src[p]);
   const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };
-  const series = tracks.map(p => ({label: p, values: src[p], color: colorFor(p)}));
-  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300, labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});
-  document.getElementById('legend-product-trend').innerHTML = tracks.map(p =>
-    `<span class="legend-item"><span class="legend-swatch" style="background:${colorFor(p)}"></span>${escapeHtml(p)}</span>`).join('');
+  const sumOf = a => (Array.isArray(a) ? a : []).reduce((s, v) => s + (Number(v) || 0), 0);
+  const items = tracks.map(p => ({label: p, value: sumOf(src[p]), color: colorFor(p)}))
+    .filter(d => d.value > 0)
+    .sort((a, b) => b.value - a.value);
+  donutChart('chart-product-mix', items);
+  document.getElementById('legend-product-mix').innerHTML = items.map(d =>
+    `<span class="legend-item"><span class="legend-swatch" style="background:${d.color}"></span>${escapeHtml(d.label)}</span>`).join('');
 }
 
 function renderQuadrant() {
@@ -1155,7 +1196,6 @@ function renderCustomerDetail(name) {
 }
 
 // Wire static event listeners
-document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);
 document.getElementById('cust-products').addEventListener('click', (e) => {
   const head = e.target.closest('[data-sku-toggle]');
   if (!head) return;
@@ -1936,7 +1976,7 @@ function renderAll() {
     .sort((a, b) => b.dfc_current - a.dfc_current).slice(0, 15)
     .map(r => ({label: r.customer, value: r.dfc_current, color: '#0078d4'}));
   barChartHorizontal('chart-top-dfc', top15);
-  renderProductTrend();
+  renderProductMix();
   renderQuadrant();
   renderOppTable();
   renderAllTable();
