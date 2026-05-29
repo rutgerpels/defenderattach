@@ -185,7 +185,7 @@ def build_html() -> str:
     _assert_contains(html, 'id="m-cust-products"', "customer modal product table")
     _assert_contains(html, 'id="m-chart-cust-dfc"', "customer modal dfc chart container")
     _assert_contains(html, 'id="m-chart-cust-pct"', "customer modal pct chart container")
-    _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer]", "opportunity matrix click interceptor")
+    _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]", "opportunity matrix click interceptor")
     _assert_contains(html, "renderCustomerDetail(name, 'm-')", "modal renders breakdown via idp")
     _assert_contains(html, "${escapeHtml(opp.notes)}", "escaped drill-down signal note")
     _assert_absent(html, "<strong>Signal:</strong> ${opp.notes}", "unescaped drill-down signal note")
@@ -1583,14 +1583,15 @@ function closeCustomerModal() {
   _custLastFocus = null;
 }
 
-// Capture phase: intercept a customer click in the Opportunity Matrix before
-// the row's bubbling selectCustomer handler so the breakdown opens in a modal
-// instead of navigating to the drill-down tab. Priority badges are skipped so
-// the priority explainer still wins.
+// Capture phase: intercept a customer click in the Opportunity Matrix (heatmap/
+// scatter + action queue) or the Overview top-customers chart before the
+// element's own selectCustomer handler so the breakdown opens in a modal instead of
+// navigating to the drill-down tab. Priority badges are skipped so the priority
+// explainer still wins.
 document.addEventListener('click', function (e) {
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;

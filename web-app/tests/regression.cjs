@@ -731,12 +731,16 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
     assert(/if \(title\) title\.textContent = name;/.test(src), 'modal title set via textContent (safe)');
   });
   test('matrix customer clicks open the modal instead of navigating', () => {
-    assert(/e\.target\.closest\('#chart-quadrant \[data-customer\], #opp-tbody tr\[data-customer\]'\)/.test(src),
-      'interceptor targets heatmap + action-queue rows');
+    assert(/e\.target\.closest\('#chart-quadrant \[data-customer\], #opp-tbody tr\[data-customer\], #chart-top-dfc \[data-customer\]'\)/.test(src),
+      'interceptor targets heatmap + action-queue rows + overview top-customers chart');
     assert(/if \(e\.target\.closest\('\.prio-badge'\)\) return;/.test(src), 'priority badges are skipped (explainer wins)');
     assert(/openCustomerModal\(name\);/.test(src), 'interceptor opens the modal');
     assert(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?#chart-quadrant \[data-customer\][\s\S]*?e\.stopPropagation\(\);[\s\S]*?e\.preventDefault\(\);[\s\S]*?\}, true\);/.test(src),
       'capture-phase handler stops propagation + default (no selectCustomer navigation)');
+  });
+  test('overview top-customers chart opens the modal (not the drill-down tab)', () => {
+    assert(/#chart-top-dfc \[data-customer\]/.test(src),
+      'top-customers bars are in the modal interceptor selector');
   });
   test('stacked Escape disambiguation via window-capture sentinel', () => {
     assert(/_custPrioWasOpenOnEscape = \(typeof _prioOverlay !== 'undefined'\) && !!\(_prioOverlay && !_prioOverlay\.hasAttribute\('hidden'\)\);/.test(src),
