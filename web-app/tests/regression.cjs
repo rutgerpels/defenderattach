@@ -473,8 +473,8 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
   test('customer drill-down charts auto-select weekly when available', () => {
     assert(/const cWeekly = !!\(DATA\.weekly_enabled && Array\.isArray\(cd\.dfc_weekly\) && Array\.isArray\(cd\.other_weekly\) && Array\.isArray\(cd\.total_weekly\)\);/.test(src), 'customer weekly guard present');
     assert(/const dfcSeries = cWeekly \? cd\.dfc_weekly : cd\.dfc_series;/.test(src), 'customer DfC series switched');
-    assert(/lineChart\('chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer DfC chart relabelled');
-    assert(/lineChart\('chart-cust-pct', .*\{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer % chart relabelled');
+    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer DfC chart relabelled');
+    assert(/lineChart\(idp \+ 'chart-cust-pct', .*\{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer % chart relabelled');
   });
   test('legacy monthly data still falls back without blank charts', () => {
     assert(/weekly \? DATA\.product_weekly : DATA\.product_monthly/.test(src), 'product monthly fallback retained');
@@ -696,6 +696,58 @@ console.log('\nweb-app/index.html (attach baseline + reclassification)');
     assert(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?e\.target\.closest\('\.prio-badge'\)[\s\S]*?e\.stopPropagation\(\);[\s\S]*?\}, true\);/.test(src),
       'capture-phase click handler must stopPropagation on badge clicks');
     assert(/if \(e\.key === 'Escape'\) \{ closePriorityExplainer\(\); return; \}/.test(src), 'Escape closes the explainer');
+  });
+}
+
+// ---- generated index.html: Opportunity Matrix customer breakdown modal ----
+console.log('\nweb-app/index.html (customer breakdown modal)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  test('renderCustomerDetail is id-prefix aware (shared by panel + modal)', () => {
+    assert(/function renderCustomerDetail\(name, idp\) \{/.test(src), 'renderCustomerDetail accepts an id prefix');
+    assert(/idp = idp \|\| '';/.test(src), 'idp defaults to empty (drill-down panel)');
+    assert(/document\.getElementById\(idp \+ 'cust-cards'\)\.innerHTML = /.test(src), 'cards target is prefixed');
+    assert(/document\.getElementById\(idp \+ 'cust-priority'\)\.innerHTML = tagFor/.test(src), 'priority target is prefixed');
+    assert(/const note = document\.getElementById\(idp \+ 'cust-signal'\);/.test(src), 'signal target is prefixed');
+    assert(/const ph = document\.getElementById\(idp \+ 'cust-products'\);/.test(src), 'products target is prefixed');
+    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[/.test(src), 'DfC chart target is prefixed');
+    assert(/lineChart\(idp \+ 'chart-cust-pct', /.test(src), 'pct chart target is prefixed');
+  });
+  test('drill-down signal note escapes Excel-derived notes (XSS)', () => {
+    assert(/note\.innerHTML = `<strong>Signal:<\/strong> \$\{escapeHtml\(opp\.notes\)\}`;/.test(src), 'opp.notes must be escaped');
+    assert(!/<strong>Signal:<\/strong> \$\{opp\.notes\}/.test(src), 'raw opp.notes interpolation must be gone');
+  });
+  test('customer modal markup + openers are present', () => {
+    assert(/function openCustomerModal\(name\)/.test(src), 'openCustomerModal defined');
+    assert(/function closeCustomerModal\(\)/.test(src), 'closeCustomerModal defined');
+    assert(/function _ensureCustOverlay\(\)/.test(src), 'overlay builder defined');
+    assert(/id="m-cust-title"/.test(src), 'modal title node present');
+    assert(/id="m-cust-cards"/.test(src), 'modal cards node present');
+    assert(/id="m-cust-signal"/.test(src), 'modal signal node present');
+    assert(/id="m-chart-cust-dfc"/.test(src), 'modal DfC chart container present');
+    assert(/id="m-chart-cust-pct"/.test(src), 'modal pct chart container present');
+    assert(/id="m-cust-products"/.test(src), 'modal products node present');
+    assert(/renderCustomerDetail\(name, 'm-'\);/.test(src), 'modal renders the breakdown with the m- prefix');
+    assert(/if \(title\) title\.textContent = name;/.test(src), 'modal title set via textContent (safe)');
+  });
+  test('matrix customer clicks open the modal instead of navigating', () => {
+    assert(/e\.target\.closest\('#chart-quadrant \[data-customer\], #opp-tbody tr\[data-customer\]'\)/.test(src),
+      'interceptor targets heatmap + action-queue rows');
+    assert(/if \(e\.target\.closest\('\.prio-badge'\)\) return;/.test(src), 'priority badges are skipped (explainer wins)');
+    assert(/openCustomerModal\(name\);/.test(src), 'interceptor opens the modal');
+    assert(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?#chart-quadrant \[data-customer\][\s\S]*?e\.stopPropagation\(\);[\s\S]*?e\.preventDefault\(\);[\s\S]*?\}, true\);/.test(src),
+      'capture-phase handler stops propagation + default (no selectCustomer navigation)');
+  });
+  test('stacked Escape disambiguation via window-capture sentinel', () => {
+    assert(/_custPrioWasOpenOnEscape = \(typeof _prioOverlay !== 'undefined'\) && !!\(_prioOverlay && !_prioOverlay\.hasAttribute\('hidden'\)\);/.test(src),
+      'window-capture sentinel records prio-open state (guarded against undefined)');
+    assert(/if \(_custPrioWasOpenOnEscape\) \{ _custPrioWasOpenOnEscape = false; return; \}/.test(src),
+      'customer Escape handler defers to the priority modal when stacked');
+  });
+  test('modal product table has its own scoped SKU toggle', () => {
+    assert(/mprod\.addEventListener\('click', \(e\) => \{/.test(src), 'modal SKU listener bound');
+    assert(/mprod\.querySelectorAll\('\.' \+ sid\)/.test(src), 'SKU rows queried within the modal subtree');
+    assert(/if \(!head \|\| !mprod\.contains\(head\)\) return;/.test(src), 'containment guard present');
   });
 }
 

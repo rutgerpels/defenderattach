@@ -139,6 +139,7 @@ def build_html() -> str:
     html = _product_mix_donut(html)
     html = _threshold_priority(html)
     html = _inject_priority_explainer(html)
+    html = _inject_customer_modal(html)
     html = _harden_csvcell(html)
 
     closing_body = "</body>"
@@ -175,6 +176,21 @@ def build_html() -> str:
     _assert_contains(html, "function priorityGradingRules()", "priority grading rubric")
     _assert_contains(html, 'class="tag \' + cls + \' prio-badge"', "clickable priority badge")
     _assert_contains(html, "e.target.closest('.prio-badge')", "capture-phase badge click handler")
+
+    # Customer breakdown modal (opens from the Opportunity Matrix instead of navigating).
+    _assert_contains(html, "function renderCustomerDetail(name, idp)", "renderCustomerDetail idp refactor")
+    _assert_contains(html, "function openCustomerModal(", "customer modal opener")
+    _assert_contains(html, "function _ensureCustOverlay(", "customer modal overlay factory")
+    _assert_contains(html, 'id="m-cust-title"', "customer modal title node")
+    _assert_contains(html, 'id="m-cust-products"', "customer modal product table")
+    _assert_contains(html, 'id="m-chart-cust-dfc"', "customer modal dfc chart container")
+    _assert_contains(html, 'id="m-chart-cust-pct"', "customer modal pct chart container")
+    _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer]", "opportunity matrix click interceptor")
+    _assert_contains(html, "renderCustomerDetail(name, 'm-')", "modal renders breakdown via idp")
+    _assert_contains(html, "${escapeHtml(opp.notes)}", "escaped drill-down signal note")
+    _assert_absent(html, "<strong>Signal:</strong> ${opp.notes}", "unescaped drill-down signal note")
+    _assert_absent(html, "lineChart('chart-cust-dfc', [", "stale unprefixed cust dfc chart call")
+    _assert_absent(html, "lineChart('chart-cust-pct', [", "stale unprefixed cust pct chart call")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
     _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
@@ -1376,6 +1392,236 @@ document.addEventListener('keydown', function (e) {
         "function renderAll() {",
         script + "\nfunction renderAll() {",
         "priority explainer injection point",
+    )
+
+
+def _inject_customer_modal(html: str) -> str:
+    """Open a customer-breakdown splash modal from the Opportunity Matrix.
+
+    On the Opportunity Matrix page, clicking a customer (heatmap row or action
+    queue row) used to navigate to the Customer Drill-Down tab. Instead we now
+    pop a modal that reuses the drill-down renderer to show that customer's full
+    breakdown in place.
+
+    Implementation notes:
+    * ``renderCustomerDetail`` is refactored to accept an id-prefix (``idp``) so
+      it can target either the drill-down panel (no prefix) or the modal's
+      ``m-``-prefixed clones. The same refactor escapes ``opp.notes`` (a
+      DOM-XSS sink that previously interpolated Excel-derived text raw).
+    * A single capture-phase click listener on ``document`` intercepts customer
+      clicks within ``#chart-quadrant`` / ``#opp-tbody`` before the row's
+      bubbling ``selectCustomer`` handler runs, so no navigation happens. It
+      early-returns on ``.prio-badge`` so the priority explainer still wins.
+    * This pass runs AFTER ``_inject_priority_explainer`` so its document
+      listeners register after the explainer's; in the capture phase that means
+      both fire and each skips the other's targets. A window-capture sentinel
+      disambiguates a single Escape press when both modals are stacked.
+    """
+    # --- Refactor renderCustomerDetail to accept an id-prefix + escape notes. --
+    html = _replace_once(
+        html,
+        "function renderCustomerDetail(name) {",
+        "function renderCustomerDetail(name, idp) {\n  idp = idp || '';",
+        "renderCustomerDetail idp signature",
+    )
+    html = _replace_once(
+        html,
+        "document.getElementById('cust-priority').innerHTML = tagFor(opp.opportunity);",
+        "document.getElementById(idp + 'cust-priority').innerHTML = tagFor(opp.opportunity);",
+        "cust-priority id prefix",
+    )
+    html = _replace_once(
+        html,
+        "document.getElementById('cust-cards').innerHTML = `",
+        "document.getElementById(idp + 'cust-cards').innerHTML = `",
+        "cust-cards id prefix",
+    )
+    html = _replace_once(
+        html,
+        "const note = document.getElementById('cust-signal');",
+        "const note = document.getElementById(idp + 'cust-signal');",
+        "cust-signal id prefix",
+    )
+    html = _replace_once(
+        html,
+        "note.innerHTML = `<strong>Signal:</strong> ${opp.notes}`;",
+        "note.innerHTML = `<strong>Signal:</strong> ${escapeHtml(opp.notes)}`;",
+        "escape drill-down signal note (XSS)",
+    )
+    html = _replace_once(
+        html,
+        "lineChart('chart-cust-dfc', [",
+        "lineChart(idp + 'chart-cust-dfc', [",
+        "chart-cust-dfc id prefix",
+    )
+    html = _replace_once(
+        html,
+        "lineChart('chart-cust-pct', [{label: 'DfC % of total'",
+        "lineChart(idp + 'chart-cust-pct', [{label: 'DfC % of total'",
+        "chart-cust-pct id prefix",
+    )
+    html = _replace_once(
+        html,
+        "const ph = document.getElementById('cust-products');",
+        "const ph = document.getElementById(idp + 'cust-products');",
+        "cust-products id prefix",
+    )
+
+    script = r'''
+// ---- Customer breakdown modal (Opportunity Matrix) ------------------------
+let _custOverlay = null;
+let _custLastFocus = null;
+let _custPrioWasOpenOnEscape = false;
+
+function _ensureCustOverlay() {
+  if (_custOverlay) return _custOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.cust-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:3900;padding:40px 16px;overflow:auto}' +
+    '.cust-overlay[hidden]{display:none}' +
+    '.cust-dialog{position:relative;background:#faf9f8;border-radius:10px;max-width:1040px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.cust-close{position:absolute;top:8px;right:14px;border:none;background:transparent;font-size:28px;' +
+    'line-height:1;cursor:pointer;color:#605e5c;z-index:1}' +
+    '.cust-close:hover{color:#201f1e}' +
+    '.cust-close:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.cust-body{padding:22px 26px 28px}' +
+    '.cust-body h2{margin:0 0 16px;font-size:20px;color:#201f1e;padding-right:32px}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cust-modal';
+  overlay.className = 'cust-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="cust-dialog" role="dialog" aria-modal="true" aria-labelledby="m-cust-title" data-customer="">' +
+    '<button class="cust-close" type="button" aria-label="Close">&times;</button>' +
+    '<div class="cust-body">' +
+      '<h2 id="m-cust-title"></h2>' +
+      '<div class="controls" style="margin-bottom:14px;"><span id="m-cust-priority"></span></div>' +
+      '<div class="cards" id="m-cust-cards"></div>' +
+      '<div class="note" id="m-cust-signal"></div>' +
+      '<div class="grid-2">' +
+        '<div class="chart-box">' +
+          '<div class="title">Defender for Cloud vs. other Azure workloads</div>' +
+          '<div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>' +
+          '<div class="svg-container" id="m-chart-cust-dfc"></div>' +
+          '<div class="legend">' +
+            '<span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>' +
+            '<span class="legend-item"><span class="legend-swatch" style="background:#605e5c"></span>Other Azure (Total - DfC)</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="chart-box">' +
+          '<div class="title">DfC penetration over time</div>' +
+          '<div class="sub">DfC as % of total ACR for this customer</div>' +
+          '<div class="svg-container" id="m-chart-cust-pct"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="chart-box">' +
+        '<div class="title">Product breakdown</div>' +
+        '<div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>' +
+        '<div id="m-cust-products"></div>' +
+      '</div>' +
+    '</div></div>';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCustomerModal(); });
+  overlay.querySelector('.cust-close').addEventListener('click', closeCustomerModal);
+
+  // SKU drill-down toggle scoped to the modal's product table (mirrors the
+  // drill-down panel listener but rooted at #m-cust-products).
+  const mprod = overlay.querySelector('#m-cust-products');
+  mprod.addEventListener('click', (e) => {
+    const head = e.target.closest('[data-sku-toggle]');
+    if (!head || !mprod.contains(head)) return;
+    const sid = head.getAttribute('data-sku-toggle');
+    const rows = mprod.querySelectorAll('.' + sid);
+    let target = null;
+    rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
+    const caret = head.querySelector('.sku-caret');
+    if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+  });
+
+  // Lightweight focus trap so keyboard users stay within the dialog.
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const nodes = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const focusable = Array.prototype.filter.call(nodes, el => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
+  document.body.appendChild(overlay);
+  _custOverlay = overlay;
+  return overlay;
+}
+
+function openCustomerModal(name) {
+  if (!DATA || !Array.isArray(DATA.opportunity) || !DATA.customer_data) return;
+  const opp = DATA.opportunity.find(r => r.customer === name);
+  const cd = DATA.customer_data[name];
+  if (!opp || !cd) return;
+  const overlay = _ensureCustOverlay();
+  // Stamp the customer on the dialog so the priority badge's data-customer
+  // lookup (el.closest('[data-customer]')) resolves inside the modal.
+  overlay.querySelector('.cust-dialog').setAttribute('data-customer', name);
+  const title = document.getElementById('m-cust-title');
+  if (title) title.textContent = name;
+  renderCustomerDetail(name, 'm-');
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.cust-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closeCustomerModal() {
+  if (_custOverlay) _custOverlay.setAttribute('hidden', '');
+  if (_custLastFocus && typeof _custLastFocus.focus === 'function') {
+    try { _custLastFocus.focus(); } catch (_) {}
+  }
+  _custLastFocus = null;
+}
+
+// Capture phase: intercept a customer click in the Opportunity Matrix before
+// the row's bubbling selectCustomer handler so the breakdown opens in a modal
+// instead of navigating to the drill-down tab. Priority badges are skipped so
+// the priority explainer still wins.
+document.addEventListener('click', function (e) {
+  if (!e.target.closest) return;
+  if (e.target.closest('.prio-badge')) return;
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer]');
+  if (!el) return;
+  const name = el.getAttribute('data-customer');
+  if (!name) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _custLastFocus = (typeof el.focus === 'function') ? el : null;
+  openCustomerModal(name);
+}, true);
+
+// Escape closes the customer modal. A window-capture sentinel (fires before any
+// document-capture handler) records whether the priority explainer was the
+// modal being dismissed by this same key press, so a stacked Escape does not
+// also close the customer modal underneath it.
+window.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    _custPrioWasOpenOnEscape = (typeof _prioOverlay !== 'undefined') && !!(_prioOverlay && !_prioOverlay.hasAttribute('hidden'));
+  }
+}, true);
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  if (!_custOverlay || _custOverlay.hasAttribute('hidden')) return;
+  if (_custPrioWasOpenOnEscape) { _custPrioWasOpenOnEscape = false; return; }
+  closeCustomerModal();
+}, true);
+
+'''
+    return _replace_once(
+        html,
+        "function renderAll() {",
+        script + "\nfunction renderAll() {",
+        "customer modal injection point",
     )
 
 

@@ -1135,20 +1135,21 @@ function selectCustomer(name) {
   window.scrollTo({top: 0, behavior: 'smooth'});
 }
 
-function renderCustomerDetail(name) {
+function renderCustomerDetail(name, idp) {
+  idp = idp || '';
   const opp = DATA.opportunity.find(r => r.customer === name);
   const cd = DATA.customer_data[name];
   if (!opp || !cd) return;
-  document.getElementById('cust-priority').innerHTML = tagFor(opp.opportunity);
-  document.getElementById('cust-cards').innerHTML = `
+  document.getElementById(idp + 'cust-priority').innerHTML = tagFor(opp.opportunity);
+  document.getElementById(idp + 'cust-cards').innerHTML = `
     <div class="card"><div class="label">Total Monthly ACR</div><div class="val">${fmt.money2(opp.total_current)}</div><div class="delta ${fmt.pctClass(opp.total_mom)}">${fmt.pct(opp.total_mom)} MoM</div></div>
     <div class="card"><div class="label">Defender for Cloud</div><div class="val">${fmt.money2(opp.dfc_current)}</div><div class="delta ${fmt.pctClass(opp.dfc_mom)}">${fmt.pct(opp.dfc_mom)} MoM</div></div>
     <div class="card"><div class="label">DfC % of Portfolio</div><div class="val">${fmt.pctRaw(opp.dfc_ratio)}</div><div class="delta">share of total</div></div>
     <div class="card"><div class="label">DfC 3-Month Trend</div><div class="val ${fmt.pctClass(opp.dfc_3m)}">${fmt.pct(opp.dfc_3m)}</div><div class="delta">last 3 months</div></div>
     <div class="card"><div class="label">Other Azure 3-Month Trend</div><div class="val ${fmt.pctClass(opp.other_3m)}">${fmt.pct(opp.other_3m)}</div><div class="delta">last 3 months</div></div>
   `;
-  const note = document.getElementById('cust-signal');
-  note.innerHTML = `<strong>Signal:</strong> ${opp.notes}`;
+  const note = document.getElementById(idp + 'cust-signal');
+  note.innerHTML = `<strong>Signal:</strong> ${escapeHtml(opp.notes)}`;
   note.style.borderLeftColor = opp.opportunity === 'High' ? '#d13438' : opp.opportunity === 'Medium' ? '#ff8c00' : '#107c10';
   note.style.background = opp.opportunity === 'High' ? '#fdf3f4' : opp.opportunity === 'Medium' ? '#fffaf0' : '#f3f9ef';
   note.style.color = opp.opportunity === 'High' ? '#5d1014' : opp.opportunity === 'Medium' ? '#5d3a00' : '#0e3a0e';
@@ -1158,7 +1159,7 @@ function renderCustomerDetail(name) {
   const otherSeries = cWeekly ? cd.other_weekly : cd.other_series;
   const totalSeries = cWeekly ? cd.total_weekly : cd.total_series;
   const cLabels = cWeekly ? DATA.week_labels : DATA.month_labels;
-  lineChart('chart-cust-dfc', [
+  lineChart(idp + 'chart-cust-dfc', [
     {label: 'Defender for Cloud', values: dfcSeries, color: '#0078d4'},
     {label: 'Other Azure', values: otherSeries, color: '#605e5c', dash: '4 3'},
   ], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});
@@ -1166,9 +1167,9 @@ function renderCustomerDetail(name) {
     const t = totalSeries[i];
     return t > 0 ? (v / t) * 100 : 0;
   });
-  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});
+  lineChart(idp + 'chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});
 
-  const ph = document.getElementById('cust-products');
+  const ph = document.getElementById(idp + 'cust-products');
   ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">Monthly ACR</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +
     cd.products.map((p, pi) => {
       const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';
@@ -1964,6 +1965,156 @@ document.addEventListener('keydown', function (e) {
     const customer = _prioBadgeCustomer(e.target);
     if (customer) openPriorityExplainer(customer);
   }
+}, true);
+
+
+
+// ---- Customer breakdown modal (Opportunity Matrix) ------------------------
+let _custOverlay = null;
+let _custLastFocus = null;
+let _custPrioWasOpenOnEscape = false;
+
+function _ensureCustOverlay() {
+  if (_custOverlay) return _custOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.cust-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:3900;padding:40px 16px;overflow:auto}' +
+    '.cust-overlay[hidden]{display:none}' +
+    '.cust-dialog{position:relative;background:#faf9f8;border-radius:10px;max-width:1040px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.cust-close{position:absolute;top:8px;right:14px;border:none;background:transparent;font-size:28px;' +
+    'line-height:1;cursor:pointer;color:#605e5c;z-index:1}' +
+    '.cust-close:hover{color:#201f1e}' +
+    '.cust-close:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.cust-body{padding:22px 26px 28px}' +
+    '.cust-body h2{margin:0 0 16px;font-size:20px;color:#201f1e;padding-right:32px}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cust-modal';
+  overlay.className = 'cust-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="cust-dialog" role="dialog" aria-modal="true" aria-labelledby="m-cust-title" data-customer="">' +
+    '<button class="cust-close" type="button" aria-label="Close">&times;</button>' +
+    '<div class="cust-body">' +
+      '<h2 id="m-cust-title"></h2>' +
+      '<div class="controls" style="margin-bottom:14px;"><span id="m-cust-priority"></span></div>' +
+      '<div class="cards" id="m-cust-cards"></div>' +
+      '<div class="note" id="m-cust-signal"></div>' +
+      '<div class="grid-2">' +
+        '<div class="chart-box">' +
+          '<div class="title">Defender for Cloud vs. other Azure workloads</div>' +
+          '<div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>' +
+          '<div class="svg-container" id="m-chart-cust-dfc"></div>' +
+          '<div class="legend">' +
+            '<span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>' +
+            '<span class="legend-item"><span class="legend-swatch" style="background:#605e5c"></span>Other Azure (Total - DfC)</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="chart-box">' +
+          '<div class="title">DfC penetration over time</div>' +
+          '<div class="sub">DfC as % of total ACR for this customer</div>' +
+          '<div class="svg-container" id="m-chart-cust-pct"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="chart-box">' +
+        '<div class="title">Product breakdown</div>' +
+        '<div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>' +
+        '<div id="m-cust-products"></div>' +
+      '</div>' +
+    '</div></div>';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCustomerModal(); });
+  overlay.querySelector('.cust-close').addEventListener('click', closeCustomerModal);
+
+  // SKU drill-down toggle scoped to the modal's product table (mirrors the
+  // drill-down panel listener but rooted at #m-cust-products).
+  const mprod = overlay.querySelector('#m-cust-products');
+  mprod.addEventListener('click', (e) => {
+    const head = e.target.closest('[data-sku-toggle]');
+    if (!head || !mprod.contains(head)) return;
+    const sid = head.getAttribute('data-sku-toggle');
+    const rows = mprod.querySelectorAll('.' + sid);
+    let target = null;
+    rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
+    const caret = head.querySelector('.sku-caret');
+    if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+  });
+
+  // Lightweight focus trap so keyboard users stay within the dialog.
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const nodes = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const focusable = Array.prototype.filter.call(nodes, el => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
+  document.body.appendChild(overlay);
+  _custOverlay = overlay;
+  return overlay;
+}
+
+function openCustomerModal(name) {
+  if (!DATA || !Array.isArray(DATA.opportunity) || !DATA.customer_data) return;
+  const opp = DATA.opportunity.find(r => r.customer === name);
+  const cd = DATA.customer_data[name];
+  if (!opp || !cd) return;
+  const overlay = _ensureCustOverlay();
+  // Stamp the customer on the dialog so the priority badge's data-customer
+  // lookup (el.closest('[data-customer]')) resolves inside the modal.
+  overlay.querySelector('.cust-dialog').setAttribute('data-customer', name);
+  const title = document.getElementById('m-cust-title');
+  if (title) title.textContent = name;
+  renderCustomerDetail(name, 'm-');
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.cust-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closeCustomerModal() {
+  if (_custOverlay) _custOverlay.setAttribute('hidden', '');
+  if (_custLastFocus && typeof _custLastFocus.focus === 'function') {
+    try { _custLastFocus.focus(); } catch (_) {}
+  }
+  _custLastFocus = null;
+}
+
+// Capture phase: intercept a customer click in the Opportunity Matrix before
+// the row's bubbling selectCustomer handler so the breakdown opens in a modal
+// instead of navigating to the drill-down tab. Priority badges are skipped so
+// the priority explainer still wins.
+document.addEventListener('click', function (e) {
+  if (!e.target.closest) return;
+  if (e.target.closest('.prio-badge')) return;
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer]');
+  if (!el) return;
+  const name = el.getAttribute('data-customer');
+  if (!name) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _custLastFocus = (typeof el.focus === 'function') ? el : null;
+  openCustomerModal(name);
+}, true);
+
+// Escape closes the customer modal. A window-capture sentinel (fires before any
+// document-capture handler) records whether the priority explainer was the
+// modal being dismissed by this same key press, so a stacked Escape does not
+// also close the customer modal underneath it.
+window.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    _custPrioWasOpenOnEscape = (typeof _prioOverlay !== 'undefined') && !!(_prioOverlay && !_prioOverlay.hasAttribute('hidden'));
+  }
+}, true);
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  if (!_custOverlay || _custOverlay.hasAttribute('hidden')) return;
+  if (_custPrioWasOpenOnEscape) { _custPrioWasOpenOnEscape = false; return; }
+  closeCustomerModal();
 }, true);
 
 
