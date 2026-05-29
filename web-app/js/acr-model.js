@@ -380,6 +380,8 @@
         for (const c of customers) { const g = groupWeekly.get(c); if (g && g.has(p)) addArr(weekly, g.get(p)); }
         productWeekly[p] = weekly.map(roundMoney);
       }
+      // Mirror the monthly guard: keep the Defender line present in weekly mode too.
+      if (!productWeekly[DEFENDER_SERVICE]) productWeekly[DEFENDER_SERVICE] = zerosW();
     }
 
     // Track-products: build from the actual product list (DfC pinned first), ranked by last-full-month ACR.

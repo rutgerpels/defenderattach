@@ -275,6 +275,11 @@ tr.clickable:hover { background: #f3f2f1; }
         <option value="indexed">Indexed to first month (=100)</option>
         <option value="absolute" selected>Absolute monthly ACR</option>
       </select>
+      <span id="grain-ctl" hidden><label style="margin-left:12px;">Granularity: </label>
+      <select id="product-trend-grain">
+        <option value="monthly" selected>Monthly</option>
+        <option value="weekly">Weekly (week-over-week)</option>
+      </select></span>
     </div>
     <div class="svg-container" id="chart-product-trend"></div>
     <div class="legend" id="legend-product-trend"></div>
@@ -340,6 +345,14 @@ tr.clickable:hover { background: #f3f2f1; }
   <div class="cards" id="cust-cards"></div>
 
   <div class="note" id="cust-signal"></div>
+
+  <div class="controls" id="cust-grain-ctl" hidden style="margin-bottom:8px;">
+    <label>Granularity: </label>
+    <select id="cust-trend-grain">
+      <option value="monthly" selected>Monthly</option>
+      <option value="weekly">Weekly (week-over-week)</option>
+    </select>
+  </div>
 
   <div class="grid-2">
     <div class="chart-box">
@@ -978,13 +991,30 @@ function renderKpis() {
   document.getElementById('kpi-dfc-pct').textContent = dfcPct.toFixed(1) + '%';
 }
 
+function initGrainControls() {
+  const show = !!DATA.weekly_enabled;
+  ['grain-ctl', 'cust-grain-ctl'].forEach(id => { const el = document.getElementById(id); if (el) el.hidden = !show; });
+}
+
+function renderDfcTrend() {
+  const g = document.getElementById('product-trend-grain');
+  const weekly = !!(g && g.value === 'weekly' && DATA.weekly_enabled && DATA.dfc_total_weekly);
+  const values = weekly ? DATA.dfc_total_weekly : DATA.dfc_total_monthly;
+  const labels = weekly ? DATA.week_labels : DATA.month_labels;
+  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#0078d4'}], {labels});
+}
+
 function renderProductTrend() {
   const mode = document.getElementById('product-trend-mode').value;
+  const grainEl = document.getElementById('product-trend-grain');
+  const weekly = !!(grainEl && grainEl.value === 'weekly' && DATA.weekly_enabled && DATA.product_weekly);
+  const src = weekly ? DATA.product_weekly : DATA.product_monthly;
+  const labels = weekly ? DATA.week_labels : DATA.month_labels;
   const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)
-    .filter(p => DATA.product_monthly[p]);
+    .filter(p => src[p]);
   const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };
-  const series = tracks.map(p => ({label: p, values: DATA.product_monthly[p], color: colorFor(p)}));
-  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300});
+  const series = tracks.map(p => ({label: p, values: src[p], color: colorFor(p)}));
+  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300, labels});
   document.getElementById('legend-product-trend').innerHTML = tracks.map(p =>
     `<span class="legend-item"><span class="legend-swatch" style="background:${colorFor(p)}"></span>${escapeHtml(p)}</span>`).join('');
 }
@@ -1101,15 +1131,21 @@ function renderCustomerDetail(name) {
   note.style.background = opp.opportunity === 'High' ? '#fdf3f4' : opp.opportunity === 'Medium' ? '#fffaf0' : '#f3f9ef';
   note.style.color = opp.opportunity === 'High' ? '#5d1014' : opp.opportunity === 'Medium' ? '#5d3a00' : '#0e3a0e';
 
+  const cg = document.getElementById('cust-trend-grain');
+  const cWeekly = !!(cg && cg.value === 'weekly' && DATA.weekly_enabled && Array.isArray(cd.dfc_weekly) && Array.isArray(cd.other_weekly) && Array.isArray(cd.total_weekly));
+  const dfcSeries = cWeekly ? cd.dfc_weekly : cd.dfc_series;
+  const otherSeries = cWeekly ? cd.other_weekly : cd.other_series;
+  const totalSeries = cWeekly ? cd.total_weekly : cd.total_series;
+  const cLabels = cWeekly ? DATA.week_labels : DATA.month_labels;
   lineChart('chart-cust-dfc', [
-    {label: 'Defender for Cloud', values: cd.dfc_series, color: '#0078d4'},
-    {label: 'Other Azure', values: cd.other_series, color: '#605e5c', dash: '4 3'},
-  ]);
-  const pctSeries = cd.dfc_series.map((v, i) => {
-    const t = cd.total_series[i];
+    {label: 'Defender for Cloud', values: dfcSeries, color: '#0078d4'},
+    {label: 'Other Azure', values: otherSeries, color: '#605e5c', dash: '4 3'},
+  ], {labels: cLabels});
+  const pctSeries = dfcSeries.map((v, i) => {
+    const t = totalSeries[i];
     return t > 0 ? (v / t) * 100 : 0;
   });
-  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}]);
+  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels});
 
   const ph = document.getElementById('cust-products');
   ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">Monthly ACR</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +
@@ -1140,6 +1176,12 @@ function renderCustomerDetail(name) {
 
 // Wire static event listeners
 document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);
+(function(){
+  const g = document.getElementById('product-trend-grain');
+  if (g) g.addEventListener('change', () => { renderProductTrend(); renderDfcTrend(); });
+  const cg = document.getElementById('cust-trend-grain');
+  if (cg) cg.addEventListener('change', () => { const cs = document.getElementById('customer-select'); if (cs && cs.value) renderCustomerDetail(cs.value); });
+})();
 document.getElementById('cust-products').addEventListener('click', (e) => {
   const head = e.target.closest('[data-sku-toggle]');
   if (!head) return;
@@ -1669,7 +1711,8 @@ function renderQuadrant() {
 function renderAll() {
   if (!DATA.customers || DATA.customers.length === 0) return;
   renderKpis();
-  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values: DATA.dfc_total_monthly, color: '#0078d4'}]);
+  initGrainControls();
+  renderDfcTrend();
   const top15 = DATA.opportunity.filter(r => r.dfc_current > 0)
     .sort((a, b) => b.dfc_current - a.dfc_current).slice(0, 15)
     .map(r => ({label: r.customer, value: r.dfc_current, color: '#0078d4'}));

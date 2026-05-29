@@ -135,6 +135,7 @@ def build_html() -> str:
     html = _harden_heatmap(html)
     html = _harden_charts(html)
     html = _taxonomy_and_skus(html)
+    html = _weekly_views(html)
     html = _harden_csvcell(html)
 
     closing_body = "</body>"
@@ -186,6 +187,14 @@ def build_html() -> str:
     _assert_contains(html, "showTooltip(`<b>${escapeHtml(label)}</b>", "escaped line chart tooltip label")
     _assert_absent(html, "data-label=\"${s.label}\"", "unescaped line chart data-label")
     _assert_absent(html, "color: PRODUCT_COLORS[p]}));", "stale hardcoded trend colours")
+
+    _assert_contains(html, 'id="product-trend-grain"', "overview weekly/monthly granularity control")
+    _assert_contains(html, 'id="cust-trend-grain"', "customer weekly/monthly granularity control")
+    _assert_contains(html, "function renderDfcTrend()", "grain-aware DfC overview trend")
+    _assert_contains(html, "function initGrainControls()", "granularity control init")
+    _assert_contains(html, "DATA.product_weekly", "weekly product series wired into trend")
+    _assert_contains(html, "cd.dfc_weekly", "weekly customer series wired into drill-down")
+    _assert_absent(html, "lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values: DATA.dfc_total_monthly, color: '#0078d4'}]);", "stale month-only DfC overview trend call")
 
     return html
 
@@ -620,6 +629,152 @@ def _taxonomy_and_skus(html: str) -> str:
         "document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);",
         sku_toggle,
         "SKU drill-down toggle handler",
+    )
+
+    return html
+
+
+def _weekly_views(html: str) -> str:
+    """Add a Monthly/Weekly granularity toggle to the trend visuals.
+
+    The new-format model emits a continuous weekly series (``weekly_enabled``,
+    ``week_labels``, ``product_weekly``, ``dfc_total_weekly`` and per-customer
+    ``dfc_weekly``/``other_weekly``/``total_weekly``). The legacy format omits
+    these, so the controls stay hidden unless ``DATA.weekly_enabled`` is true.
+
+    Two independent controls (overview + customer drill-down) switch their line
+    charts between monthly and weekly granularity, re-using ``lineChart``'s
+    ``opts.labels`` to relabel the x-axis. Runs after ``_taxonomy_and_skus`` so
+    it can target that pass's rewritten ``renderProductTrend`` body.
+    """
+
+    # 1. Overview controls: add a (hidden-by-default) granularity select.
+    html = _replace_once(
+        html,
+        '      <select id="product-trend-mode">\n'
+        '        <option value="indexed">Indexed to first month (=100)</option>\n'
+        '        <option value="absolute" selected>Absolute monthly ACR</option>\n'
+        "      </select>",
+        '      <select id="product-trend-mode">\n'
+        '        <option value="indexed">Indexed to first month (=100)</option>\n'
+        '        <option value="absolute" selected>Absolute monthly ACR</option>\n'
+        "      </select>\n"
+        '      <span id="grain-ctl" hidden><label style="margin-left:12px;">Granularity: </label>\n'
+        '      <select id="product-trend-grain">\n'
+        '        <option value="monthly" selected>Monthly</option>\n'
+        '        <option value="weekly">Weekly (week-over-week)</option>\n'
+        "      </select></span>",
+        "overview granularity control",
+    )
+
+    # 2. Customer drill-down controls: add a (hidden-by-default) granularity select.
+    html = _replace_once(
+        html,
+        '  <div class="note" id="cust-signal"></div>\n\n  <div class="grid-2">',
+        '  <div class="note" id="cust-signal"></div>\n\n'
+        '  <div class="controls" id="cust-grain-ctl" hidden style="margin-bottom:8px;">\n'
+        "    <label>Granularity: </label>\n"
+        '    <select id="cust-trend-grain">\n'
+        '      <option value="monthly" selected>Monthly</option>\n'
+        '      <option value="weekly">Weekly (week-over-week)</option>\n'
+        "    </select>\n"
+        "  </div>\n\n"
+        '  <div class="grid-2">',
+        "customer granularity control",
+    )
+
+    # 3. Product trend: pick monthly vs weekly source + x-axis labels.
+    html = _replace_once(
+        html,
+        "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
+        "    .filter(p => DATA.product_monthly[p]);\n"
+        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+        "  const series = tracks.map(p => ({label: p, values: DATA.product_monthly[p], color: colorFor(p)}));\n"
+        "  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300});",
+        "  const grainEl = document.getElementById('product-trend-grain');\n"
+        "  const weekly = !!(grainEl && grainEl.value === 'weekly' && DATA.weekly_enabled && DATA.product_weekly);\n"
+        "  const src = weekly ? DATA.product_weekly : DATA.product_monthly;\n"
+        "  const labels = weekly ? DATA.week_labels : DATA.month_labels;\n"
+        "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
+        "    .filter(p => src[p]);\n"
+        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+        "  const series = tracks.map(p => ({label: p, values: src[p], color: colorFor(p)}));\n"
+        "  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300, labels});",
+        "weekly-aware product trend series",
+    )
+
+    # 4. Inject grain-aware overview DfC trend + control-visibility init.
+    html = _replace_once(
+        html,
+        "function renderProductTrend() {",
+        "function initGrainControls() {\n"
+        "  const show = !!DATA.weekly_enabled;\n"
+        "  ['grain-ctl', 'cust-grain-ctl'].forEach(id => { const el = document.getElementById(id); if (el) el.hidden = !show; });\n"
+        "}\n\n"
+        "function renderDfcTrend() {\n"
+        "  const g = document.getElementById('product-trend-grain');\n"
+        "  const weekly = !!(g && g.value === 'weekly' && DATA.weekly_enabled && DATA.dfc_total_weekly);\n"
+        "  const values = weekly ? DATA.dfc_total_weekly : DATA.dfc_total_monthly;\n"
+        "  const labels = weekly ? DATA.week_labels : DATA.month_labels;\n"
+        "  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#0078d4'}], {labels});\n"
+        "}\n\n"
+        "function renderProductTrend() {",
+        "grain-aware overview trend functions",
+    )
+
+    # 5. renderAll: init controls and route the DfC overview trend through the helper.
+    html = _replace_once(
+        html,
+        "  renderKpis();\n"
+        "  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values: DATA.dfc_total_monthly, color: '#0078d4'}]);",
+        "  renderKpis();\n"
+        "  initGrainControls();\n"
+        "  renderDfcTrend();",
+        "renderAll DfC trend routing",
+    )
+
+    # 6. Customer drill-down charts: monthly vs weekly series + labels.
+    html = _replace_once(
+        html,
+        "  lineChart('chart-cust-dfc', [\n"
+        "    {label: 'Defender for Cloud', values: cd.dfc_series, color: '#0078d4'},\n"
+        "    {label: 'Other Azure', values: cd.other_series, color: '#605e5c', dash: '4 3'},\n"
+        "  ]);\n"
+        "  const pctSeries = cd.dfc_series.map((v, i) => {\n"
+        "    const t = cd.total_series[i];\n"
+        "    return t > 0 ? (v / t) * 100 : 0;\n"
+        "  });\n"
+        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}]);",
+        "  const cg = document.getElementById('cust-trend-grain');\n"
+        "  const cWeekly = !!(cg && cg.value === 'weekly' && DATA.weekly_enabled && Array.isArray(cd.dfc_weekly) && Array.isArray(cd.other_weekly) && Array.isArray(cd.total_weekly));\n"
+        "  const dfcSeries = cWeekly ? cd.dfc_weekly : cd.dfc_series;\n"
+        "  const otherSeries = cWeekly ? cd.other_weekly : cd.other_series;\n"
+        "  const totalSeries = cWeekly ? cd.total_weekly : cd.total_series;\n"
+        "  const cLabels = cWeekly ? DATA.week_labels : DATA.month_labels;\n"
+        "  lineChart('chart-cust-dfc', [\n"
+        "    {label: 'Defender for Cloud', values: dfcSeries, color: '#0078d4'},\n"
+        "    {label: 'Other Azure', values: otherSeries, color: '#605e5c', dash: '4 3'},\n"
+        "  ], {labels: cLabels});\n"
+        "  const pctSeries = dfcSeries.map((v, i) => {\n"
+        "    const t = totalSeries[i];\n"
+        "    return t > 0 ? (v / t) * 100 : 0;\n"
+        "  });\n"
+        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels});",
+        "weekly-aware customer drill-down charts",
+    )
+
+    # 7. Wire the granularity selects (re-render their panel's trend charts).
+    html = _replace_once(
+        html,
+        "document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);",
+        "document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);\n"
+        "(function(){\n"
+        "  const g = document.getElementById('product-trend-grain');\n"
+        "  if (g) g.addEventListener('change', () => { renderProductTrend(); renderDfcTrend(); });\n"
+        "  const cg = document.getElementById('cust-trend-grain');\n"
+        "  if (cg) cg.addEventListener('change', () => { const cs = document.getElementById('customer-select'); if (cs && cs.value) renderCustomerDetail(cs.value); });\n"
+        "})();",
+        "granularity control listeners",
     )
 
     return html

@@ -446,5 +446,38 @@ console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
   });
 }
 
+console.log('\nweb-app/index.html (weekly granularity views)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  test('exposes monthly/weekly granularity controls, hidden by default', () => {
+    assert(/id="product-trend-grain"/.test(src), 'overview grain select present');
+    assert(/id="cust-trend-grain"/.test(src), 'customer grain select present');
+    assert(/id="grain-ctl" hidden/.test(src), 'overview grain control hidden by default');
+    assert(/id="cust-grain-ctl" hidden/.test(src), 'customer grain control hidden by default');
+  });
+  test('grain controls are only shown when weekly data is available', () => {
+    assert(/function initGrainControls\(\)/.test(src), 'initGrainControls defined');
+    assert(/const show = !!DATA\.weekly_enabled;/.test(src), 'visibility gated on weekly_enabled');
+    assert(/initGrainControls\(\);/.test(src), 'initGrainControls invoked in renderAll');
+  });
+  test('overview trends switch between monthly and weekly series', () => {
+    assert(/function renderDfcTrend\(\)/.test(src), 'grain-aware DfC trend defined');
+    assert(/weekly \? DATA\.dfc_total_weekly : DATA\.dfc_total_monthly/.test(src), 'DfC weekly source wired');
+    assert(/const src = weekly \? DATA\.product_weekly : DATA\.product_monthly;/.test(src), 'product weekly source wired');
+    assert(/labels = weekly \? DATA\.week_labels : DATA\.month_labels/.test(src), 'weekly x-axis labels wired');
+    assert(!/lineChart\('chart-dfc-trend', \[\{label: 'Defender for Cloud', values: DATA\.dfc_total_monthly, color: '#0078d4'\}\]\);/.test(src), 'no stale month-only DfC trend call');
+  });
+  test('customer drill-down charts switch granularity', () => {
+    assert(/const cWeekly = !!\(cg && cg\.value === 'weekly' && DATA\.weekly_enabled && Array\.isArray\(cd\.dfc_weekly\) && Array\.isArray\(cd\.other_weekly\) && Array\.isArray\(cd\.total_weekly\)\);/.test(src), 'customer weekly guard present');
+    assert(/const dfcSeries = cWeekly \? cd\.dfc_weekly : cd\.dfc_series;/.test(src), 'customer DfC series switched');
+    assert(/lineChart\('chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels\}\);/.test(src), 'customer DfC chart relabelled');
+    assert(/lineChart\('chart-cust-pct', .*\{labels: cLabels\}\);/.test(src), 'customer % chart relabelled');
+  });
+  test('granularity selects are wired to re-render their panels', () => {
+    assert(/g\.addEventListener\('change', \(\) => \{ renderProductTrend\(\); renderDfcTrend\(\); \}\);/.test(src), 'overview grain listener present');
+    assert(/cg\.addEventListener\('change', \(\) => \{ const cs = document\.getElementById\('customer-select'\); if \(cs && cs\.value\) renderCustomerDetail\(cs\.value\); \}\);/.test(src), 'customer grain listener present');
+  });
+}
+
 console.log(`\nResults: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
