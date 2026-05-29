@@ -723,7 +723,7 @@ function lineChart(containerId, series, opts = {}) {
     if (pathD) svg += `<path d="${pathD}" fill="none" stroke="${color}" stroke-width="2" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''}/>`;
     s.vals.forEach((v, i) => {
       const yp = y(v); if (yp == null) return;
-      svg += `<circle cx="${x(i)}" cy="${yp}" r="3" fill="${color}" data-month="${labels[i]}" data-label="${s.label}" data-val="${v != null ? v.toFixed(2) : '–'}"/>`;
+      svg += `<circle cx="${x(i)}" cy="${yp}" r="3" fill="${color}" data-month="${labels[i]}" data-label="${escapeHtml(s.label)}" data-val="${v != null ? v.toFixed(2) : '–'}"/>`;
     });
   });
   svg += `</svg>`;
@@ -735,7 +735,7 @@ function lineChart(containerId, series, opts = {}) {
       const label = c.getAttribute('data-label');
       const val = c.getAttribute('data-val');
       const display = indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2});
-      showTooltip(`<b>${label}</b><br/>${month}: ${display}`, e.pageX, e.pageY);
+      showTooltip(`<b>${escapeHtml(label)}</b><br/>${month}: ${display}`, e.pageX, e.pageY);
     });
     c.addEventListener('mouseleave', hideTooltip);
   });
@@ -962,7 +962,8 @@ function renderKpis() {
   document.getElementById('kpi-low').textContent = DATA.counts.low;
   document.getElementById('kpi-small').textContent = DATA.counts.too_small;
 
-  const lastIdx = DATA.months.length - 1;
+  const lastIdx = (DATA.partial_month_idx >= 0 && DATA.partial_month_idx === DATA.months.length - 1)
+    ? Math.max(0, DATA.months.length - 2) : DATA.months.length - 1;
   const priorIdx = Math.max(0, lastIdx - 1);
   const dfcCurrent = DATA.dfc_total_monthly[lastIdx];
   const dfcPrior = DATA.dfc_total_monthly[priorIdx];
@@ -979,12 +980,13 @@ function renderKpis() {
 
 function renderProductTrend() {
   const mode = document.getElementById('product-trend-mode').value;
-  const series = TRACK_PRODUCTS
-    .filter(p => DATA.product_monthly[p])
-    .map(p => ({label: p, values: DATA.product_monthly[p], color: PRODUCT_COLORS[p]}));
+  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)
+    .filter(p => DATA.product_monthly[p]);
+  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };
+  const series = tracks.map(p => ({label: p, values: DATA.product_monthly[p], color: colorFor(p)}));
   lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300});
-  document.getElementById('legend-product-trend').innerHTML = TRACK_PRODUCTS.filter(p => DATA.product_monthly[p]).map(p =>
-    `<span class="legend-item"><span class="legend-swatch" style="background:${PRODUCT_COLORS[p]}"></span>${p}</span>`).join('');
+  document.getElementById('legend-product-trend').innerHTML = tracks.map(p =>
+    `<span class="legend-item"><span class="legend-swatch" style="background:${colorFor(p)}"></span>${escapeHtml(p)}</span>`).join('');
 }
 
 function renderQuadrant() {
@@ -1111,20 +1113,43 @@ function renderCustomerDetail(name) {
 
   const ph = document.getElementById('cust-products');
   ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">Monthly ACR</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +
-    cd.products.map(p => {
+    cd.products.map((p, pi) => {
       const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';
-      return `<div class="product-row">
-        <div class="name">${p.product === 'Defender for Cloud' ? '<strong style="color:#0078d4">' + p.product + '</strong>' : p.product}</div>
+      const nameEsc = escapeHtml(p.product);
+      const nameHtml = p.product === 'Defender for Cloud' ? '<strong style="color:#0078d4">' + nameEsc + '</strong>' : nameEsc;
+      const skus = Array.isArray(p.skus) ? p.skus : [];
+      const sid = 'sku-' + pi;
+      const caret = skus.length ? `<span class="sku-caret" style="cursor:pointer;user-select:none;color:#605e5c;margin-right:6px;">\u25b8</span>` : '<span style="display:inline-block;width:14px;"></span>';
+      const head = `<div class="product-row"${skus.length ? ` data-sku-toggle="${sid}" style="cursor:pointer;"` : ''}>
+        <div class="name">${caret}${nameHtml}</div>
         <div class="num">${fmt.money2(p.current)}</div>
         <div class="num ${fmt.pctClass(p.mom)}">${fmt.pct(p.mom)}</div>
         <div class="num ${fmt.pctClass(p.three_m)}">${fmt.pct(p.three_m)}</div>
         <div>${sparkline(p.series, 140, 26, sparkColor)}</div>
       </div>`;
+      const subs = skus.map(s => `<div class="product-row sku-row ${sid}" hidden style="background:#faf9f8;">
+        <div class="name" style="padding-left:22px;color:#605e5c;">${escapeHtml(s.sku)}</div>
+        <div class="num">${fmt.money2(s.current)}</div>
+        <div class="num ${fmt.pctClass(s.mom)}">${fmt.pct(s.mom)}</div>
+        <div class="num ${fmt.pctClass(s.three_m)}">${fmt.pct(s.three_m)}</div>
+        <div>${sparkline(s.series, 140, 26, '#a19f9d')}</div>
+      </div>`).join('');
+      return head + subs;
     }).join('');
 }
 
 // Wire static event listeners
 document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);
+document.getElementById('cust-products').addEventListener('click', (e) => {
+  const head = e.target.closest('[data-sku-toggle]');
+  if (!head) return;
+  const sid = head.getAttribute('data-sku-toggle');
+  const rows = document.querySelectorAll('#cust-products .' + sid);
+  let target = null;
+  rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
+  const caret = head.querySelector('.sku-caret');
+  if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+});
 document.getElementById('quadrant-filter').addEventListener('change', renderQuadrant);
 document.getElementById('search-input').addEventListener('input', renderAllTable);
 document.getElementById('filter-priority').addEventListener('change', renderAllTable);

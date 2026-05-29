@@ -282,5 +282,169 @@ console.log('\nacr-model.js');
   });
 }
 
+// ---- acr-model: new ServiceLevel1/ServiceLevel2 weekly format ----
+console.log('\nacr-model.js (new weekly format)');
+{
+  const sb = makeSandbox();
+  loadInto(sb, 'js/acr-model.js');
+
+  // 3-row header: row0 fiscal-month band, row1 week-start (or 'Total'), row2 dims + '$ ACR'.
+  // Cols: Timezone(0) TPAccountName(1) ServiceLevel1(2) ServiceLevel2(3),
+  // then weekly/Total $ ACR cols 4..11 and a grand-Total col 12.
+  const h0 = ['FiscalMonth', null, null, null,
+              'FY26-Mar', 'FY26-Mar', 'FY26-Mar', 'FY26-Apr', 'FY26-Apr', 'FY26-Apr', 'FY26-May', 'FY26-May', 'Total'];
+  const h1 = ['FiscalWeekStartDate', null, null, null,
+              '2026-03-01', '2026-03-29', 'Total', '2026-03-29', '2026-04-12', 'Total', '2026-05-03', 'Total', null];
+  const h2 = ['Timezone', 'TPAccountName', 'ServiceLevel1', 'ServiceLevel2',
+              '$ ACR', '$ ACR', '$ ACR', '$ ACR', '$ ACR', '$ ACR', '$ ACR', '$ ACR', '$ ACR'];
+  const rows = [
+    h0, h1, h2,
+    ['UTC', 'Acme', 'Security', 'Microsoft Defender for Cloud',          10, 10, 20, 10, 10, 20, 30, 30, 70],
+    ['UTC', 'Acme', 'Compute', 'Virtual Machines',                      100, 100, 200, 100, 100, 200, 300, 300, 700],
+    ['UTC', 'Acme', 'Compute', 'Total',                                 100, 100, 200, 100, 100, 200, 300, 300, 700], // S1 subtotal — must be skipped
+    ['UTC', 'Acme', 'Management and Governance', 'Sentinel',              5, 5, 10, 5, 5, 10, 10, 10, 30],
+    ['UTC', 'Acme', 'Total', null,                                      115, 115, 230, 115, 115, 230, 340, 340, 800],
+    ['UTC', 'Beta', 'Compute', '<img src=x onerror=alert(1)>',           50, 50, 100, 50, 50, 100, 200, 200, 400],
+    ['UTC', 'Beta', 'Total', null,                                       50, 50, 100, 50, 50, 100, 200, 200, 400],
+    ['UTC', 'Total', 'Total', null,                                     165, 165, 330, 165, 165, 330, 540, 540, 1200], // grand-total customer — excluded
+    ['Applied filters: Foo=Bar', null, null, null, null, null, null, null, null, null, null, null, null], // footer — excluded
+  ];
+  const m = sb.AcrModel.build(rows, 'new.xlsx');
+
+  test('detects and tags the new format', () => assertEqual(m.format, 'new', 'format'));
+  test('excludes grand-total customer and applied-filters footer', () => {
+    assertEqual(JSON.stringify(m.customers), JSON.stringify(['Acme', 'Beta']), 'customers');
+  });
+  test('treats the latest month as partial and scores on the last full month', () => {
+    assertEqual(m.partial_month_idx, 2, 'partial_month_idx');
+    assertEqual(m.last_full_month, 'FY26-Apr', 'last_full_month');
+    assertEqual(m.months.length, 3, 'months count');
+  });
+  test('splits Sentinel and DfC out of their parent categories', () => {
+    assert(m.products.includes('Defender for Cloud'), 'DfC product present');
+    assert(m.products.includes('Sentinel'), 'Sentinel product present');
+    assert(!m.products.includes('Security'), 'Security parent must not appear (DfC reassigned)');
+    assert(!m.products.includes('Management and Governance'), 'M&G parent must not appear (Sentinel reassigned)');
+  });
+  test('does not double-count S1 subtotal rows', () => {
+    const compute = m.customer_data['Acme'].products.find(p => p.product === 'Compute');
+    assert(compute, 'Compute product present for Acme');
+    assertEqual(compute.series[1], 200, 'Acme Compute Apr should be 200, not 400');
+  });
+  test('emits zero DfC series for customers without DfC', () => {
+    assert(m.customer_data['Beta'].dfc_series.every(v => v === 0), 'Beta DfC must be all zeros');
+  });
+  test('reconciles product groups to the account total each month', () => {
+    for (let i = 0; i < m.months.length; i++) {
+      const sum = m.products.reduce((a, p) => a + (m.product_monthly[p][i] || 0), 0);
+      assert(Math.abs(sum - m.product_monthly['Total'][i]) < 0.5,
+        `month ${i}: products ${sum} vs Total ${m.product_monthly['Total'][i]}`);
+    }
+  });
+  test('builds track_products from real keys with DfC first and valid hex colours', () => {
+    assertEqual(m.track_products[0], 'Defender for Cloud', 'DfC first');
+    assert(m.track_products.every(p => m.product_monthly[p]), 'track_products reference real keys');
+    assert(Object.values(m.product_colors).every(v => /^#[0-9a-fA-F]{6}$/.test(v)), 'all colours hex');
+  });
+  test('merges boundary weeks into a continuous weekly series', () => {
+    assert(m.weekly_enabled, 'weekly enabled');
+    assertEqual(JSON.stringify(m.week_labels), JSON.stringify(['Mar 01', 'Mar 29', 'Apr 12', 'May 03']), 'week labels');
+    // 03-29 is split across Mar and Apr; merged value for Acme total = 115 + 115 = 230.
+    assertEqual(m.customer_data['Acme'].total_weekly[1], 230, 'merged boundary week');
+  });
+  test('carries SKU drill-down on product breakdown entries', () => {
+    const hasSkus = m.customer_data['Acme'].products.some(p => Array.isArray(p.skus) && p.skus.length);
+    assert(hasSkus, 'expected at least one product with skus[]');
+  });
+
+  // ---- edge cases surfaced in review ----
+  const mkHeader = (months, weeks) => {
+    const h0 = ['FiscalMonth', null, null, null];
+    const h1 = ['FiscalWeekStartDate', null, null, null];
+    const h2 = ['Timezone', 'TPAccountName', 'ServiceLevel1', 'ServiceLevel2'];
+    months.forEach((mo, i) => {
+      weeks[i].forEach(w => { h0.push(mo); h1.push(w); h2.push('$ ACR'); });
+      h0.push(mo); h1.push('Total'); h2.push('$ ACR');
+    });
+    h0.push('Total'); h1.push(null); h2.push('$ ACR');
+    return [h0, h1, h2];
+  };
+
+  test('keeps a zero DfC line for segments with no Defender spend', () => {
+    const rows2 = [
+      ...mkHeader(['FY26-Mar', 'FY26-Apr'], [['2026-03-01'], ['2026-04-05']]),
+      ['UTC', 'NoDfc', 'Compute', 'Virtual Machines', 100, 100, 200, 200, 300],
+      ['UTC', 'NoDfc', 'Total', null,                  100, 100, 200, 200, 300],
+    ];
+    const z = sb.AcrModel.build(rows2, 'nodfc.xlsx');
+    assert(!z.products.includes('Defender for Cloud'), 'no DfC product when there is no DfC spend');
+    assert(Array.isArray(z.product_monthly['Defender for Cloud']), 'DfC must still exist in product_monthly');
+    assert(z.product_monthly['Defender for Cloud'].every(v => v === 0), 'DfC line must be all zeros');
+    assertEqual(z.track_products[0], 'Defender for Cloud', 'DfC still pinned first in track_products');
+  });
+
+  test('rejects a single-month workbook (no completed month to score on)', () => {
+    const rows1 = [
+      ...mkHeader(['FY26-Mar'], [['2026-03-01']]),
+      ['UTC', 'Solo', 'Compute', 'Virtual Machines', 100, 100, 100],
+      ['UTC', 'Solo', 'Total', null,                  100, 100, 100],
+    ];
+    let threw = false;
+    try { sb.AcrModel.build(rows1, 'one-month.xlsx'); } catch (e) { threw = /one fiscal month|completed month/i.test(e.message); }
+    assert(threw, 'expected build to throw for a single-month export');
+  });
+
+  test('parses real Date week-start cells (not just ISO strings)', () => {
+    const rows3 = [
+      ...mkHeader(['FY26-Mar', 'FY26-Apr'], [[new Date(2026, 2, 1)], [new Date(2026, 3, 5)]]),
+      ['UTC', 'Acme', 'Compute', 'Virtual Machines', 100, 100, 200, 200, 300],
+      ['UTC', 'Acme', 'Total', null,                  100, 100, 200, 200, 300],
+    ];
+    const d = sb.AcrModel.build(rows3, 'dates.xlsx');
+    assert(d.weekly_enabled, 'weekly should enable with valid Date headers');
+    assertEqual(JSON.stringify(d.week_labels), JSON.stringify(['Mar 01', 'Apr 05']), 'Date-derived week labels');
+  });
+
+  test('disables weekly output when a week-start header is unparseable', () => {
+    const rows4 = [
+      ...mkHeader(['FY26-Mar', 'FY26-Apr'], [['not-a-date'], ['2026-04-05']]),
+      ['UTC', 'Acme', 'Compute', 'Virtual Machines', 100, 100, 200, 200, 300],
+      ['UTC', 'Acme', 'Total', null,                  100, 100, 200, 200, 300],
+    ];
+    const b = sb.AcrModel.build(rows4, 'bad-week.xlsx');
+    assertEqual(b.weekly_enabled, false, 'weekly must disable on unparseable header');
+    assert(!('week_labels' in b), 'week_labels omitted when weekly disabled');
+  });
+}
+
+// ---- generated index.html: taxonomy/SKU hardening ----
+console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  test('product trend prefers DATA.track_products with validated colours', () => {
+    assert(/DATA\.track_products && DATA\.track_products\.length/.test(src), 'taxonomy-aware track list');
+    assert(/const colorFor = p =>/.test(src), 'colorFor helper present');
+    assert(/\/\^#\[0-9a-fA-F\]\{6\}\$\/\.test\(c\)/.test(src), 'hex allowlist validation');
+  });
+  test('escapes Excel-derived product and SKU names', () => {
+    assert(/const nameEsc = escapeHtml\(p\.product\);/.test(src), 'product name escaped');
+    assert(/\$\{escapeHtml\(s\.sku\)\}/.test(src), 'SKU name escaped');
+    assert(/\$\{escapeHtml\(p\)\}<\/span>/.test(src), 'legend label escaped');
+    assert(!/style="background:\$\{PRODUCT_COLORS\[p\]\}"><\/span>\$\{p\}/.test(src), 'no unescaped legend label');
+  });
+  test('escapes Excel-derived series labels in the line chart', () => {
+    assert(/data-label="\$\{escapeHtml\(s\.label\)\}"/.test(src), 'line chart data-label escaped');
+    assert(/showTooltip\(`<b>\$\{escapeHtml\(label\)\}<\/b>/.test(src), 'line chart tooltip label escaped');
+    assert(!/data-label="\$\{s\.label\}"/.test(src), 'no unescaped line chart data-label');
+  });
+  test('renders collapsible SKU rows with a toggle handler', () => {
+    assert(/data-sku-toggle/.test(src), 'SKU toggle markup present');
+    assert(/closest\('\[data-sku-toggle\]'\)/.test(src), 'delegated toggle handler present');
+  });
+  test('KPI uses the last full month when the latest month is partial', () => {
+    assert(/Math\.max\(0, DATA\.months\.length - 2\) : DATA\.months\.length - 1/.test(src), 'partial-month KPI guard');
+  });
+}
+
 console.log(`\nResults: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

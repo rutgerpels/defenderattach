@@ -134,6 +134,7 @@ def build_html() -> str:
 
     html = _harden_heatmap(html)
     html = _harden_charts(html)
+    html = _taxonomy_and_skus(html)
     html = _harden_csvcell(html)
 
     closing_body = "</body>"
@@ -174,6 +175,17 @@ def build_html() -> str:
     _assert_contains(html, "if (!DATA.customers || DATA.customers.length === 0) return;", "renderAll empty-state guard")
     _assert_contains(html, "ACR_CACHE_KEY", "session-storage persistence")
     _assert_contains(html, "sessionStorage.setItem(ACR_CACHE_KEY", "persistence write on import")
+    _assert_contains(html, "DATA.track_products && DATA.track_products.length", "taxonomy-aware trend chart")
+    _assert_contains(html, "const colorFor = p =>", "validated trend colour helper")
+    _assert_contains(html, "${escapeHtml(p)}</span>", "escaped product trend legend label")
+    _assert_contains(html, "const nameEsc = escapeHtml(p.product);", "escaped customer product name")
+    _assert_contains(html, "${escapeHtml(s.sku)}", "escaped SKU name in drill-down")
+    _assert_contains(html, "data-sku-toggle", "SKU drill-down toggle markup")
+    _assert_contains(html, "Math.max(0, DATA.months.length - 2) : DATA.months.length - 1", "partial-month KPI guard")
+    _assert_contains(html, "data-label=\"${escapeHtml(s.label)}\"", "escaped line chart data-label")
+    _assert_contains(html, "showTooltip(`<b>${escapeHtml(label)}</b>", "escaped line chart tooltip label")
+    _assert_absent(html, "data-label=\"${s.label}\"", "unescaped line chart data-label")
+    _assert_absent(html, "color: PRODUCT_COLORS[p]}));", "stale hardcoded trend colours")
 
     return html
 
@@ -501,6 +513,118 @@ def _strip_bundled_data(html: str) -> str:
     return html[:start] + replacement + html[end:]
 
 
+def _taxonomy_and_skus(html: str) -> str:
+    """Make the product views taxonomy-aware and add SKU drill-down.
+
+    The new-format model emits Excel-derived product/SKU names, a per-dataset
+    ``track_products`` list and a ``product_colors`` map. Three changes:
+
+    * KPI "current month" derives from the last FULL month when the latest
+      month is partial (``partial_month_idx``), so a half-finished month does
+      not distort headline ACR / MoM / share figures.
+    * The product-trend chart prefers ``DATA.track_products`` /
+      ``DATA.product_colors`` (falling back to the hardcoded template lists),
+      escapes every legend label, and validates colours against a hex
+      allowlist before injecting them into inline styles.
+    * The customer drill-down escapes product names (now user-controlled) and
+      renders collapsible SKU sub-rows under each product, also escaped.
+    """
+
+    # 1. KPI: score on the last full month when the latest month is partial.
+    html = _replace_once(
+        html,
+        "  const lastIdx = DATA.months.length - 1;",
+        "  const lastIdx = (DATA.partial_month_idx >= 0 && DATA.partial_month_idx === DATA.months.length - 1)\n"
+        "    ? Math.max(0, DATA.months.length - 2) : DATA.months.length - 1;",
+        "KPI last-full-month index",
+    )
+
+    # 2a. Product trend: taxonomy-aware series with validated colours.
+    html = _replace_once(
+        html,
+        "  const series = TRACK_PRODUCTS\n"
+        "    .filter(p => DATA.product_monthly[p])\n"
+        "    .map(p => ({label: p, values: DATA.product_monthly[p], color: PRODUCT_COLORS[p]}));",
+        "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
+        "    .filter(p => DATA.product_monthly[p]);\n"
+        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+        "  const series = tracks.map(p => ({label: p, values: DATA.product_monthly[p], color: colorFor(p)}));",
+        "taxonomy-aware product trend series",
+    )
+
+    # 2b. Product trend legend: escape labels, validated colour swatches.
+    html = _replace_once(
+        html,
+        "  document.getElementById('legend-product-trend').innerHTML = TRACK_PRODUCTS.filter(p => DATA.product_monthly[p]).map(p =>\n"
+        "    `<span class=\"legend-item\"><span class=\"legend-swatch\" style=\"background:${PRODUCT_COLORS[p]}\"></span>${p}</span>`).join('');",
+        "  document.getElementById('legend-product-trend').innerHTML = tracks.map(p =>\n"
+        "    `<span class=\"legend-item\"><span class=\"legend-swatch\" style=\"background:${colorFor(p)}\"></span>${escapeHtml(p)}</span>`).join('');",
+        "escaped product trend legend",
+    )
+
+    # 3. Customer drill-down: escape product names + collapsible SKU sub-rows.
+    html = _replace_once(
+        html,
+        "    cd.products.map(p => {\n"
+        "      const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';\n"
+        "      return `<div class=\"product-row\">\n"
+        "        <div class=\"name\">${p.product === 'Defender for Cloud' ? '<strong style=\"color:#0078d4\">' + p.product + '</strong>' : p.product}</div>\n"
+        "        <div class=\"num\">${fmt.money2(p.current)}</div>\n"
+        "        <div class=\"num ${fmt.pctClass(p.mom)}\">${fmt.pct(p.mom)}</div>\n"
+        "        <div class=\"num ${fmt.pctClass(p.three_m)}\">${fmt.pct(p.three_m)}</div>\n"
+        "        <div>${sparkline(p.series, 140, 26, sparkColor)}</div>\n"
+        "      </div>`;\n"
+        "    }).join('');",
+        "    cd.products.map((p, pi) => {\n"
+        "      const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';\n"
+        "      const nameEsc = escapeHtml(p.product);\n"
+        "      const nameHtml = p.product === 'Defender for Cloud' ? '<strong style=\"color:#0078d4\">' + nameEsc + '</strong>' : nameEsc;\n"
+        "      const skus = Array.isArray(p.skus) ? p.skus : [];\n"
+        "      const sid = 'sku-' + pi;\n"
+        "      const caret = skus.length ? `<span class=\"sku-caret\" style=\"cursor:pointer;user-select:none;color:#605e5c;margin-right:6px;\">\\u25b8</span>` : '<span style=\"display:inline-block;width:14px;\"></span>';\n"
+        "      const head = `<div class=\"product-row\"${skus.length ? ` data-sku-toggle=\"${sid}\" style=\"cursor:pointer;\"` : ''}>\n"
+        "        <div class=\"name\">${caret}${nameHtml}</div>\n"
+        "        <div class=\"num\">${fmt.money2(p.current)}</div>\n"
+        "        <div class=\"num ${fmt.pctClass(p.mom)}\">${fmt.pct(p.mom)}</div>\n"
+        "        <div class=\"num ${fmt.pctClass(p.three_m)}\">${fmt.pct(p.three_m)}</div>\n"
+        "        <div>${sparkline(p.series, 140, 26, sparkColor)}</div>\n"
+        "      </div>`;\n"
+        "      const subs = skus.map(s => `<div class=\"product-row sku-row ${sid}\" hidden style=\"background:#faf9f8;\">\n"
+        "        <div class=\"name\" style=\"padding-left:22px;color:#605e5c;\">${escapeHtml(s.sku)}</div>\n"
+        "        <div class=\"num\">${fmt.money2(s.current)}</div>\n"
+        "        <div class=\"num ${fmt.pctClass(s.mom)}\">${fmt.pct(s.mom)}</div>\n"
+        "        <div class=\"num ${fmt.pctClass(s.three_m)}\">${fmt.pct(s.three_m)}</div>\n"
+        "        <div>${sparkline(s.series, 140, 26, '#a19f9d')}</div>\n"
+        "      </div>`).join('');\n"
+        "      return head + subs;\n"
+        "    }).join('');",
+        "SKU drill-down rows in customer table",
+    )
+
+    # 4. Delegated click handler that expands/collapses the SKU sub-rows.
+    sku_toggle = (
+        "document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);\n"
+        "document.getElementById('cust-products').addEventListener('click', (e) => {\n"
+        "  const head = e.target.closest('[data-sku-toggle]');\n"
+        "  if (!head) return;\n"
+        "  const sid = head.getAttribute('data-sku-toggle');\n"
+        "  const rows = document.querySelectorAll('#cust-products .' + sid);\n"
+        "  let target = null;\n"
+        "  rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });\n"
+        "  const caret = head.querySelector('.sku-caret');\n"
+        "  if (caret) caret.textContent = target ? '\\u25b8' : '\\u25be';\n"
+        "});"
+    )
+    html = _replace_once(
+        html,
+        "document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);",
+        sku_toggle,
+        "SKU drill-down toggle handler",
+    )
+
+    return html
+
+
 def _harden_charts(html: str) -> str:
     """Escape Excel-derived customer labels in the SVG chart helpers.
 
@@ -569,6 +693,25 @@ def _harden_charts(html: str) -> str:
         "<b>${escapeHtml(c.getAttribute('data-customer'))}</b>",
         "quadrant chart tooltip customer",
         2,
+    )
+
+    # 7. Line chart: data-label attribute on each point (Excel-derived product/SKU
+    #    names in the new format flow in here via renderProductTrend's series labels).
+    html = _replace_exact(
+        html,
+        'data-label="${s.label}"',
+        'data-label="${escapeHtml(s.label)}"',
+        "line chart data-label attribute",
+        1,
+    )
+
+    # 8. Line chart tooltip: <b>${label}</b> read back from data-label.
+    html = _replace_exact(
+        html,
+        "showTooltip(`<b>${label}</b>",
+        "showTooltip(`<b>${escapeHtml(label)}</b>",
+        "line chart tooltip label",
+        1,
     )
 
     return html

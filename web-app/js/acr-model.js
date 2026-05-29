@@ -35,9 +35,411 @@
     return (end - start) / start;
   }
 
+  const DEFENDER_NEW_S2 = 'Microsoft Defender for Cloud';
+  const SENTINEL_S2 = 'Sentinel';
+  // Deterministic, hex-validated palette for trend lines (DfC/Sentinel pinned).
+  const TREND_PALETTE = ['#107c10', '#ff8c00', '#8764b8', '#d13438', '#00b294',
+                         '#5c2d91', '#e3008c', '#0099bc', '#498205', '#c19c00'];
+  const MAX_TRACK_PRODUCTS = 8;
+
+  // Detect which workbook layout we were handed by inspecting header rows.
+  // New layout: third row carries TPAccountName/ServiceLevel1/ServiceLevel2 + repeated '$ ACR',
+  //             first row carries FY##-MMM fiscal-month bands.
+  // Old layout: second row carries TPAccountName + ServiceCompGrouping.
+  function detectFormat(rows) {
+    const lc = v => String(v == null ? '' : v).replace(/\u00a0/g, ' ').trim().toLowerCase();
+    const r0 = (rows[0] || []).map(lc);
+    const r1 = (rows[1] || []).map(lc);
+    const r2 = (rows[2] || []).map(lc);
+    const hasFiscalBand = r0.some(v => /^fy\d{2}-/.test(v));
+    const isNew = rows.length > 3
+      && r2.includes('tpaccountname')
+      && r2.includes('servicelevel1')
+      && r2.includes('servicelevel2')
+      && r2.includes('$ acr')
+      && hasFiscalBand;
+    const isOld = r1.includes('tpaccountname') && r1.includes('servicecompgrouping');
+    if (isNew && isOld) {
+      throw new Error('Workbook header matched both the old and new layouts; cannot disambiguate the format.');
+    }
+    if (isNew) return 'new';
+    if (isOld) return 'old';
+    return 'unknown';
+  }
+
+  // Dispatcher: route to the legacy ServiceCompGrouping builder or the new
+  // ServiceLevel1/ServiceLevel2 weekly-grain builder, both emitting the same DATA contract.
+  function build(rows, sourceName = '') {
+    if (!Array.isArray(rows) || rows.length < 3) {
+      throw new Error('Worksheet has fewer than 3 rows; expected a header followed by data.');
+    }
+    const format = detectFormat(rows);
+    if (format === 'new') return buildNew(rows, sourceName);
+    if (format === 'old') return buildOld(rows, sourceName);
+    throw new Error('Unrecognised workbook layout. Expected either a TPAccountName/ServiceCompGrouping export or a TPAccountName/ServiceLevel1/ServiceLevel2 weekly export.');
+  }
+
+  // --- Week-start header helpers (cells may be Date, Excel serial, or ISO string) ---
+  // Returns [year, monthIndex, day] using calendar parts, stable across timezones.
+  function weekParts(value) {
+    if (value && typeof value === 'object' && typeof value.getTime === 'function' && !isNaN(value.getTime())) {
+      return [value.getFullYear(), value.getMonth(), value.getDate()];
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      // Excel serial date -> calendar day (epoch 1899-12-30), read in UTC to avoid drift.
+      const d = new Date(Math.round((value - 25569) * 86400 * 1000));
+      return [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()];
+    }
+    const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
+    if (m) return [Number(m[1]), Number(m[2]) - 1, Number(m[3])];
+    return null;
+  }
+  const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function weekKey(value) {
+    const p = weekParts(value);
+    return p ? p[0] + '-' + String(p[1] + 1).padStart(2, '0') + '-' + String(p[2]).padStart(2, '0') : String(value).slice(0, 10);
+  }
+  function weekSort(value) {
+    const p = weekParts(value);
+    return p ? Date.UTC(p[0], p[1], p[2]) : 0;
+  }
+  function weekStartLabel(value) {
+    const p = weekParts(value);
+    return p ? MONTH_ABBR[p[1]] + ' ' + String(p[2]).padStart(2, '0') : String(value).slice(0, 10);
+  }
+
+  function isHexColor(v) { return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v); }
+
+  // New-format builder: ServiceLevel1 categories with ServiceLevel2 SKU leaves and
+  // weekly $ ACR columns. Emits the identical DATA contract consumed by the dashboard,
+  // plus SKU drill-down (skus[]), weekly series, and a taxonomy-aware product list.
+  function buildNew(rows, sourceName = '') {
+    const h0 = (rows[0] || []).map(cleanText);
+    const h1 = rows[1] || [];
+    const h2 = (rows[2] || []).map(cleanText);
+    const lc = s => String(s == null ? '' : s).toLowerCase();
+    const find2 = name => { const t = name.toLowerCase(); for (let i = 0; i < h2.length; i++) if (lc(h2[i]) === t) return i; return -1; };
+    const tzCol = find2('Timezone');
+    const tpCol = find2('TPAccountName');
+    const s1Col = find2('ServiceLevel1');
+    const s2Col = find2('ServiceLevel2');
+    if (tpCol < 0 || s1Col < 0 || s2Col < 0) {
+      throw new Error('New-format workbook is missing one of the required columns: TPAccountName, ServiceLevel1, ServiceLevel2.');
+    }
+
+    // Classify every '$ ACR' column as a month subtotal ('Total' week), a weekly bucket, or the grand total.
+    const monthTotalCol = new Map();   // fiscalMonth -> column index
+    const weeklyCols = [];             // {month, key, label, sort, index}
+    let weekParseError = false;
+    for (let i = 0; i < h2.length; i++) {
+      if (cleanText(h2[i]) !== '$ ACR') continue;
+      const month = cleanText(h0[i]);
+      const wkText = cleanText(h1[i]);
+      if (/^FY\d{2}-/.test(month)) {
+        if (wkText === 'Total') monthTotalCol.set(month, i);
+        else if (wkText) {
+          if (!weekParts(h1[i])) weekParseError = true;   // unrecognized week-start header
+          weeklyCols.push({ month, key: weekKey(h1[i]), label: weekStartLabel(h1[i]), sort: weekSort(h1[i]), index: i });
+        }
+      }
+    }
+    const months = [...monthTotalCol.keys()].sort((a, b) => {
+      const ra = fiscalMonthRank(a), rb = fiscalMonthRank(b);
+      return ra[0] - rb[0] || ra[1] - rb[1];
+    });
+    if (!months.length) {
+      throw new Error("No monthly '$ ACR' subtotal columns were found in the new-format workbook.");
+    }
+    if (months.length < 2) {
+      throw new Error('The weekly export contains only one fiscal month (' + months[0] +
+        "). At least one completed month before the in-progress month is required to score opportunities.");
+    }
+    const monthLabels = months.map(m => m.includes('-') ? m.split('-', 2)[1] : m);
+    const monthCols = months.map(m => monthTotalCol.get(m));
+
+    // Merge boundary weeks that share a week-start date (split across two fiscal months).
+    const weekColsByKey = new Map();
+    const weekLabelByKey = new Map();
+    const weekSortByKey = new Map();
+    for (const w of weeklyCols) {
+      if (!weekColsByKey.has(w.key)) { weekColsByKey.set(w.key, []); weekLabelByKey.set(w.key, w.label); weekSortByKey.set(w.key, w.sort); }
+      weekColsByKey.get(w.key).push(w.index);
+    }
+    const weekOrder = [...weekColsByKey.keys()].sort((a, b) => weekSortByKey.get(a) - weekSortByKey.get(b));
+    const weekLabels = weekOrder.map(k => weekLabelByKey.get(k));
+
+    const num = v => (typeof v === 'number' ? v : (v == null || v === '' ? 0 : (parseFloat(v) || 0)));
+    const zerosM = () => months.map(() => 0);
+    const zerosW = () => weekOrder.map(() => 0);
+    const monthlyOf = row => monthCols.map(ci => num(row[ci]));
+    const weeklyOf = row => weekOrder.map(k => weekColsByKey.get(k).reduce((acc, ci) => acc + num(row[ci]), 0));
+    const addArr = (target, src) => { for (let i = 0; i < target.length; i++) target[i] += src[i]; };
+
+    const customersSet = new Set();
+    const productsSet = new Set();
+    const totalMonthly = new Map();   // cust -> number[months]
+    const totalWeekly = new Map();    // cust -> number[weeks]
+    const groupMonthly = new Map();   // cust -> Map(group -> number[months])
+    const groupWeekly = new Map();    // cust -> Map(group -> number[weeks])
+    const skuMonthly = new Map();     // cust -> Map(group -> Map(sku -> number[months]))
+
+    const groupOf = (s1, s2) => (s2 === DEFENDER_NEW_S2 ? DEFENDER_SERVICE : (s2 === SENTINEL_S2 ? 'Sentinel' : s1));
+
+    for (let r = 3; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const tz = cleanText(tzCol >= 0 ? row[tzCol] : row[0]);
+      if (tz.toLowerCase().startsWith('applied filters')) continue;   // trailing filter banner
+      const cust = cleanText(row[tpCol]);
+      if (!cust || cust === 'Total') continue;                        // skip grand-total customer
+      const s1 = cleanText(row[s1Col]);
+      const s2 = cleanText(row[s2Col]);
+      const mser = monthlyOf(row);
+
+      if (s1 === 'Total') {
+        // Account-total pivot row: authoritative per-customer total.
+        customersSet.add(cust);
+        if (!totalMonthly.has(cust)) { totalMonthly.set(cust, zerosM()); totalWeekly.set(cust, zerosW()); }
+        addArr(totalMonthly.get(cust), mser);
+        if (weekOrder.length) addArr(totalWeekly.get(cust), weeklyOf(row));
+        continue;
+      }
+      if (!s1 || !s2 || s2 === 'Total') continue;                     // skip S1 subtotal / blank to avoid double counting
+
+      // SKU leaf row.
+      customersSet.add(cust);
+      const group = groupOf(s1, s2);
+      productsSet.add(group);
+      if (!groupMonthly.has(cust)) { groupMonthly.set(cust, new Map()); groupWeekly.set(cust, new Map()); skuMonthly.set(cust, new Map()); }
+      const gm = groupMonthly.get(cust);
+      if (!gm.has(group)) { gm.set(group, zerosM()); }
+      addArr(gm.get(group), mser);
+      if (weekOrder.length) {
+        const gw = groupWeekly.get(cust);
+        if (!gw.has(group)) gw.set(group, zerosW());
+        addArr(gw.get(group), weeklyOf(row));
+      }
+      const sm = skuMonthly.get(cust);
+      if (!sm.has(group)) sm.set(group, new Map());
+      const skuMap = sm.get(group);
+      if (!skuMap.has(s2)) skuMap.set(s2, zerosM());
+      addArr(skuMap.get(s2), mser);
+    }
+
+    const customers = [...customersSet].sort();
+    const products = [...productsSet].sort();
+
+    // Validate the boundary-week merge before trusting weekly output. An unparseable
+    // week-start header, or any customer whose merged weekly series does not reconcile
+    // with its monthly subtotals, disables weekly output entirely.
+    let weeklyEnabled = weekOrder.length > 0 && !weekParseError;
+    if (weeklyEnabled) {
+      for (const c of customers) {
+        const m = totalMonthly.get(c) || [];
+        const w = totalWeekly.get(c) || [];
+        let sm = 0, sw = 0;
+        m.forEach(v => sm += v);
+        w.forEach(v => sw += v);
+        const tol = Math.max(1, Math.abs(sm) * 0.001);
+        if (Math.abs(sm - sw) > tol) { weeklyEnabled = false; break; }
+      }
+    }
+
+    // Partial-month handling: a weekly date-grain export's latest month is in progress.
+    // Score KPIs/opportunities on the last FULL month; keep the partial month in the charts.
+    const partialIdx = months.length - 1;
+    const latestIdx = partialIdx > 0 ? partialIdx - 1 : partialIdx;   // last full month
+    const priorIdx = Math.max(0, latestIdx - 1);
+    const base3mIdx = Math.max(0, latestIdx - 2);
+    const latestFy = months[latestIdx] ? months[latestIdx].split('-', 2)[0] : '';
+    const fytdIndices = months.map((m, i) => (m.split('-', 2)[0] === latestFy && i <= latestIdx) ? i : -1).filter(i => i >= 0);
+
+    const opportunity = [];
+    const customerData = {};
+
+    for (const customer of customers) {
+      const total = (totalMonthly.get(customer) || zerosM()).map(roundMoney);
+      const gm = groupMonthly.get(customer) || new Map();
+      const dfc = (gm.get(DEFENDER_SERVICE) || zerosM()).map(roundMoney);
+      const other = total.map((t, i) => roundMoney(t - dfc[i]));
+
+      const dfc_current = dfc[latestIdx];
+      const total_current = total[latestIdx];
+      const other_current = other[latestIdx];
+      const dfc_fytd = fytdIndices.reduce((a, i) => a + dfc[i], 0);
+      const total_fytd = fytdIndices.reduce((a, i) => a + total[i], 0);
+      const other_fytd = fytdIndices.reduce((a, i) => a + other[i], 0);
+
+      const dfc_mom = pctChange(dfc[priorIdx], dfc[latestIdx]);
+      const other_mom = pctChange(other[priorIdx], other[latestIdx]);
+      const total_mom = pctChange(total[priorIdx], total[latestIdx]);
+      const dfc_3m = pctChange(dfc[base3mIdx], dfc[latestIdx]);
+      const other_3m = pctChange(other[base3mIdx], other[latestIdx]);
+      const total_3m = pctChange(total[base3mIdx], total[latestIdx]);
+
+      const dfc_3m_delta = dfc[latestIdx] - dfc[base3mIdx];
+      const other_3m_delta = other[latestIdx] - other[base3mIdx];
+      const total_3m_delta = total[latestIdx] - total[base3mIdx];
+
+      const dfc_ratio = total_current > 0 ? (dfc_current / total_current) : 0;
+      const dfc_fytd_ratio = total_fytd > 0 ? (dfc_fytd / total_fytd) : 0;
+
+      // Reconcile SKU groups against the account total; surface any residual explicitly.
+      const groupSum = zerosM();
+      for (const arr of gm.values()) addArr(groupSum, arr);
+      const residual = total.map((t, i) => roundMoney(t - groupSum[i]));
+      const residualMax = Math.max.apply(null, residual.map(Math.abs).concat([0]));
+
+      const skuByGroup = skuMonthly.get(customer) || new Map();
+      const gw = groupWeekly.get(customer) || new Map();
+      const breakdown = [];
+      const groupNames = [...gm.keys()];
+      if (residualMax > 1) { groupNames.push('Other (unmapped)'); }
+      for (const p of groupNames) {
+        const ps = (p === 'Other (unmapped)' ? residual : (gm.get(p) || zerosM())).map(roundMoney);
+        const current = ps[latestIdx];
+        const maxV = Math.max.apply(null, ps.length ? ps : [0]);
+        if (current < 1 && maxV < 1) continue;
+        const skus = [];
+        const skuMap = skuByGroup.get(p);
+        if (skuMap) {
+          for (const [name, arr] of skuMap) {
+            const ss = arr.map(roundMoney);
+            const sc = ss[latestIdx];
+            const sMax = Math.max.apply(null, ss.length ? ss : [0]);
+            if (sc < 1 && sMax < 1) continue;
+            skus.push({ sku: name, current: roundMoney(sc), mom: pctChange(ss[priorIdx], ss[latestIdx]), three_m: pctChange(ss[base3mIdx], ss[latestIdx]), series: ss });
+          }
+          skus.sort((a, b) => b.current - a.current);
+        }
+        const entry = { product: p, current: roundMoney(current), mom: pctChange(ps[priorIdx], ps[latestIdx]), three_m: pctChange(ps[base3mIdx], ps[latestIdx]), series: ps };
+        if (skus.length) entry.skus = skus;
+        breakdown.push(entry);
+      }
+      breakdown.sort((a, b) => b.current - a.current);
+
+      const [priority, notes] = classifyOpportunity({ dfc_current, total_current, dfc_ratio, dfc_3m, other_3m });
+
+      opportunity.push({
+        customer,
+        opportunity: priority,
+        notes,
+        dfc_current: roundMoney(dfc_current),
+        other_current: roundMoney(other_current),
+        total_current: roundMoney(total_current),
+        dfc_monthly_current: roundMoney(dfc_current),
+        other_monthly_current: roundMoney(other_current),
+        total_monthly_current: roundMoney(total_current),
+        dfc_fytd: roundMoney(dfc_fytd),
+        other_fytd: roundMoney(other_fytd),
+        total_fytd: roundMoney(total_fytd),
+        dfc_ratio: round2(dfc_ratio * 100),
+        dfc_fytd_ratio: round2(dfc_fytd_ratio * 100),
+        dfc_mom, other_mom, total_mom, dfc_3m, other_3m, total_3m,
+        dfc_3m_delta: roundMoney(dfc_3m_delta),
+        other_3m_delta: roundMoney(other_3m_delta),
+        total_3m_delta: roundMoney(total_3m_delta),
+        growth_gap: roundMoney(other_3m_delta - dfc_3m_delta),
+      });
+
+      const cd = {
+        dfc_series: dfc,
+        other_series: other,
+        total_series: total,
+        products: breakdown,
+      };
+      if (weeklyEnabled) {
+        const tw = (totalWeekly.get(customer) || zerosW()).map(roundMoney);
+        const dw = (gw.get(DEFENDER_SERVICE) || zerosW()).map(roundMoney);
+        cd.total_weekly = tw;
+        cd.dfc_weekly = dw;
+        cd.other_weekly = tw.map((t, i) => roundMoney(t - dw[i]));
+      }
+      customerData[customer] = cd;
+    }
+
+    // Product aggregations across customers.
+    const productMonthly = {};
+    for (const p of products) {
+      const monthly = zerosM();
+      for (const c of customers) { const g = groupMonthly.get(c); if (g && g.has(p)) addArr(monthly, g.get(p)); }
+      productMonthly[p] = monthly.map(roundMoney);
+    }
+    {
+      const totals = zerosM();
+      for (const c of customers) addArr(totals, totalMonthly.get(c) || zerosM());
+      productMonthly[TOTAL_SERVICE] = totals.map(roundMoney);
+    }
+    // Always surface the Defender line, even for segments with zero DfC spend (the core
+    // opportunity story): the trend chart drops any product missing from product_monthly.
+    if (!productMonthly[DEFENDER_SERVICE]) productMonthly[DEFENDER_SERVICE] = zerosM();
+
+    const productWeekly = {};
+    if (weeklyEnabled) {
+      for (const p of products) {
+        const weekly = zerosW();
+        for (const c of customers) { const g = groupWeekly.get(c); if (g && g.has(p)) addArr(weekly, g.get(p)); }
+        productWeekly[p] = weekly.map(roundMoney);
+      }
+    }
+
+    // Track-products: build from the actual product list (DfC pinned first), ranked by last-full-month ACR.
+    const ranked = products
+      .filter(p => p !== DEFENDER_SERVICE)
+      .map(p => ({ p, v: (productMonthly[p] || [])[latestIdx] || 0 }))
+      .sort((a, b) => b.v - a.v)
+      .map(o => o.p);
+    const trackProducts = [DEFENDER_SERVICE, ...ranked].slice(0, MAX_TRACK_PRODUCTS);
+    const productColors = {};
+    let pi = 0;
+    for (const p of trackProducts) {
+      const c = p === DEFENDER_SERVICE ? '#0078d4' : (p === 'Sentinel' ? '#005a9e' : TREND_PALETTE[pi++ % TREND_PALETTE.length]);
+      if (isHexColor(c)) productColors[p] = c;
+    }
+
+    const priorityRank = { High: 0, Medium: 1, Low: 2, 'Too small': 3 };
+    opportunity.sort((a, b) => priorityRank[a.opportunity] - priorityRank[b.opportunity] || b.total_current - a.total_current);
+
+    const result = {
+      format: 'new',
+      months,
+      month_labels: monthLabels,
+      partial_month_idx: partialIdx,
+      last_full_month: months[latestIdx] || '',
+      prior_month: months[priorIdx] || '',
+      current_fiscal_year: latestFy,
+      classification_basis: months[latestIdx] || '',
+      fytd_months: fytdIndices.map(i => months[i]),
+      customers,
+      products,
+      opportunity,
+      customer_data: customerData,
+      product_monthly: productMonthly,
+      dfc_total_monthly: productMonthly[DEFENDER_SERVICE] || zerosM(),
+      track_products: trackProducts,
+      product_colors: productColors,
+      counts: {
+        high: opportunity.filter(r => r.opportunity === 'High').length,
+        medium: opportunity.filter(r => r.opportunity === 'Medium').length,
+        low: opportunity.filter(r => r.opportunity === 'Low').length,
+        too_small: opportunity.filter(r => r.opportunity === 'Too small').length,
+        total: customers.length,
+      },
+      source_name: sourceName,
+    };
+    if (weeklyEnabled) {
+      result.week_labels = weekLabels;
+      result.product_weekly = productWeekly;
+      result.dfc_total_weekly = productWeekly[DEFENDER_SERVICE] || zerosW();
+      result.weekly_enabled = true;
+    } else {
+      result.weekly_enabled = false;
+    }
+    return result;
+  }
+
   // Parses rows from XLSX.utils.sheet_to_json(sheet, {header:1}) for the Export sheet.
   // Builds the same shape as dashboard_model.build_dashboard_model in Python.
-  function build(rows, sourceName = '') {
+  function buildOld(rows, sourceName = '') {
     if (!Array.isArray(rows) || rows.length < 3) {
       throw new Error('Worksheet has fewer than 3 rows; expected a two-row header followed by data.');
     }
