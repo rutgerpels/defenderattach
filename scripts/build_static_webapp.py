@@ -1,0 +1,625 @@
+"""Build the no-install static web app from the canonical Docker template.
+
+This script re-uses the Flask-time string transformations from
+``defender_acr_dashboard.static_dashboard`` (so the static page tracks the
+Docker dashboard 1:1) and then layers on a small number of static-only
+patches:
+
+* swap CDN SheetJS for the vendored copy
+* add a vendored PptxGenJS + ``js/acr-model.js`` + ``js/pptx-acr.js`` +
+  ``js/app-nav.js`` (so the page is fully usable offline)
+* replace the template's home-grown ``parseAndScore`` call with
+  ``AcrModel.build`` (the existing JS port of ``dashboard_model.py``) so the
+  Sales Action Queue / heatmap / KPI cards get all the fields they expect
+* escape ``r.customer`` / ``r.notes`` in the injected heatmap (XSS hardening
+  on Excel-derived values)
+* prefix risky leading characters in ``csvCell`` (CSV formula injection)
+* clear the bundled DATA so the static distribution ships with no customer
+  rows; the dashboard shows an empty state until a file is picked
+* add an Export to PowerPoint button wired to ``PptxAcr.exportDeck``
+* insert the shared ``<div id="app-nav" ...>`` placeholder
+
+Usage:
+    python scripts/build_static_webapp.py            # write web-app/index.html
+    python scripts/build_static_webapp.py --check    # exit 1 if output drifted
+
+Every string replacement asserts an expected count, so accidental drift in
+the upstream template fails fast.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = REPO_ROOT / "src"
+sys.path.insert(0, str(SRC_DIR))
+
+from defender_acr_dashboard.static_dashboard import (  # noqa: E402
+    _inject_opportunity_map,
+    _monthly_acr_labels,
+    _opportunity_map_labels,
+)
+
+TEMPLATE_PATH = REPO_ROOT / "docs" / "defender_for_cloud_dashboard (2).html"
+OUTPUT_PATH = REPO_ROOT / "web-app" / "index.html"
+
+
+def _replace_once(haystack: str, needle: str, replacement: str, label: str) -> str:
+    return _replace_exact(haystack, needle, replacement, label, 1)
+
+
+def _replace_exact(haystack: str, needle: str, replacement: str, label: str, expected: int) -> str:
+    count = haystack.count(needle)
+    if count != expected:
+        raise SystemExit(
+            f"build_static_webapp: expected exactly {expected} occurrence(s) of "
+            f"{label!r}, found {count}. Upstream template likely changed."
+        )
+    return haystack.replace(needle, replacement)
+
+
+def _assert_contains(html: str, needle: str, label: str) -> None:
+    if needle not in html:
+        raise SystemExit(
+            f"build_static_webapp: post-build assertion failed — missing {label!r}."
+        )
+
+
+def _assert_absent(html: str, needle: str, label: str) -> None:
+    if needle in html:
+        raise SystemExit(
+            f"build_static_webapp: post-build assertion failed — {label!r} "
+            "should not be present in static output."
+        )
+
+
+def build_html() -> str:
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    html = _monthly_acr_labels(template)
+    html = _opportunity_map_labels(html)
+    html = _inject_opportunity_map(html)
+
+    html = html.replace(
+        "<title>Defender for Cloud — Opportunity Dashboard</title>",
+        "<title>Defender for Cloud — ACR Opportunity Dashboard</title>",
+        1,
+    )
+
+    html = _replace_once(
+        html,
+        '<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>',
+        '<script src="./vendor/xlsx.full.min.js"></script>',
+        "CDN SheetJS tag",
+    )
+
+    nav_block = (
+        "<body>\n"
+        '<div id="app-nav" data-active="acr"></div>\n'
+    )
+    html = _replace_once(html, "<body>\n", nav_block, "opening body tag")
+
+    export_button = (
+        '    <button class="import-btn" id="import-btn">📂 Import new Excel</button>\n'
+        '    <button class="import-btn" id="export-pptx-btn" style="margin-left:8px">📑 Export to PowerPoint</button>'
+    )
+    html = _replace_once(
+        html,
+        '    <button class="import-btn" id="import-btn">📂 Import new Excel</button>',
+        export_button,
+        "import button",
+    )
+
+    html = _replace_once(
+        html,
+        '    <div class="import-status" id="import-status">Showing data from initial export</div>',
+        '    <div class="import-status" id="import-status">Pick an Excel export to load the dashboard. Your data stays on this machine.</div>',
+        "import status message",
+    )
+
+    html = _strip_bundled_data(html)
+    html = _inject_app_nav_css(html)
+    html = _inject_splash(html)
+
+    html = _replace_once(
+        html,
+        "    const newData = parseAndScore(rows);",
+        "    const newData = AcrModel.build(rows, file.name);",
+        "parseAndScore call",
+    )
+
+    html = _harden_heatmap(html)
+    html = _harden_charts(html)
+    html = _harden_csvcell(html)
+
+    closing_body = "</body>"
+    extra_scripts = (
+        '<script src="./js/acr-model.js"></script>\n'
+        '<script src="./vendor/pptxgen.bundle.js"></script>\n'
+        '<script src="./js/pptx-acr.js"></script>\n'
+        '<script src="./js/app-nav.js"></script>\n'
+        f"{_export_handler_script()}\n"
+        f"{closing_body}"
+    )
+    html = _replace_once(html, closing_body, extra_scripts, "closing body tag")
+
+    _assert_absent(html, "cdn.sheetjs.com", "CDN SheetJS URL")
+    _assert_absent(html, "= parseAndScore(", "stale parseAndScore call")
+    _assert_contains(html, "AcrModel.build(rows, file.name)", "AcrModel.build wiring")
+    _assert_contains(html, 'id="export-pptx-btn"', "export PPT button")
+    _assert_contains(html, "PptxAcr.exportDeck", "export PPT handler")
+    _assert_contains(html, "function renderOpportunityHeatmap()", "heatmap function")
+    _assert_contains(html, "${escapeHtml(r.customer)}", "escaped customer in heatmap")
+    _assert_contains(html, "${escapeHtml(r.notes)}", "escaped notes in heatmap")
+    _assert_contains(html, "${escapeHtml(d.label", "escaped label in bar chart")
+    _assert_contains(html, "${escapeHtml(p.label)}", "escaped label in quadrant chart")
+    _assert_contains(html, "${escapeHtml(truncated)}", "escaped truncated label in quadrant chart")
+    _assert_contains(html, "${escapeHtml(r.getAttribute('data-customer'))}", "escaped bar chart tooltip customer")
+    _assert_contains(html, "${escapeHtml(c.getAttribute('data-customer'))}", "escaped quadrant tooltip customer")
+    _assert_absent(html, ".label.replace(/\"/g, '&quot;')", "stale quote-only label escape (should use escapeHtml)")
+    _assert_contains(html, "CSV_FORMULA_LEADERS", "CSV formula-injection guard")
+    _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
+    _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
+    _assert_contains(html, './js/acr-model.js', "acr-model.js script")
+    _assert_contains(html, './js/pptx-acr.js', "pptx-acr.js script")
+    _assert_contains(html, "#app-nav .app-menu", "app-nav inline CSS")
+    _assert_contains(html, 'id="app-nav"', "app-nav placeholder")
+    _assert_contains(html, 'id="splash"', "splash overlay")
+    _assert_contains(html, 'id="splash-dropzone"', "splash dropzone")
+    _assert_contains(html, "splash.hidden = true", "splash hide-on-load")
+    _assert_contains(html, "if (!DATA.customers || DATA.customers.length === 0) return;", "renderAll empty-state guard")
+
+    return html
+
+
+def _inject_splash(html: str) -> str:
+    """Add an empty-state splash overlay shown until the first import.
+
+    The static distribution ships with no data (see ``_strip_bundled_data``).
+    Without a splash the page renders empty KPI cards and blank charts, which
+    looks broken. This injects:
+
+    * CSS for ``#splash`` (full-viewport modal-style overlay)
+    * the splash markup right after ``<body>``
+    * a guard at the top of ``renderAll()`` that bails out when DATA is empty
+    * a hide call after a successful import, plus a wire-up so the splash's
+      "Choose Excel file" button re-uses the existing ``#file-input``.
+    """
+
+    splash_css = (
+        "\n/* empty-state splash (visible until first import) */\n"
+        "#splash {\n"
+        "  position: fixed; inset: 0; z-index: 9999;\n"
+        "  background: rgba(243, 242, 241, 0.96);\n"
+        "  display: flex; align-items: center; justify-content: center;\n"
+        "  font-family: 'Segoe UI', system-ui, sans-serif;\n"
+        "}\n"
+        "#splash[hidden] { display: none; }\n"
+        "#splash .splash-card {\n"
+        "  background: #ffffff; border: 1px solid #edebe9;\n"
+        "  border-radius: 8px; padding: 36px 44px; max-width: 520px;\n"
+        "  box-shadow: 0 8px 32px rgba(0,0,0,0.12); text-align: center;\n"
+        "}\n"
+        "#splash h2 { margin: 0 0 8px; color: #0078d4; font-size: 22px; }\n"
+        "#splash p { margin: 0 0 20px; color: #605e5c; font-size: 14px; line-height: 1.5; }\n"
+        "#splash-dropzone {\n"
+        "  border: 2px dashed #c8c6c4; border-radius: 6px;\n"
+        "  padding: 28px 20px; margin-bottom: 16px;\n"
+        "  background: #faf9f8; transition: all 0.15s ease;\n"
+        "  cursor: pointer;\n"
+        "}\n"
+        "#splash-dropzone:hover { border-color: #0078d4; background: #f3f9fd; }\n"
+        "#splash-dropzone.dragover {\n"
+        "  border-color: #0078d4; background: #deecf9;\n"
+        "  border-style: solid;\n"
+        "}\n"
+        "#splash-dropzone .dz-icon { font-size: 32px; line-height: 1; margin-bottom: 8px; }\n"
+        "#splash-dropzone .dz-main { color: #323130; font-weight: 600; font-size: 14px; margin-bottom: 4px; }\n"
+        "#splash-dropzone .dz-sub { color: #605e5c; font-size: 12px; }\n"
+        "#splash button {\n"
+        "  background: #0078d4; color: #ffffff; border: 0;\n"
+        "  padding: 12px 28px; border-radius: 4px; font-size: 15px;\n"
+        "  font-weight: 600; cursor: pointer;\n"
+        "}\n"
+        "#splash button:hover { background: #106ebe; }\n"
+        "#splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a8886; }\n"
+        "#splash .splash-error { margin-top: 12px; font-size: 13px; color: #a4262c; min-height: 18px; }\n"
+    )
+    html = _replace_once(html, "</style>\n</head>", splash_css + "</style>\n</head>", "closing style/head tags (splash)")
+
+    splash_markup = (
+        '<div id="splash">\n'
+        '  <div class="splash-card">\n'
+        '    <h2>Welcome — load your ACR export</h2>\n'
+        '    <p>Pick an "ACR Details by … Month" Excel export to populate the dashboard. '
+        'Your data stays on this machine — nothing is uploaded.</p>\n'
+        '    <div id="splash-dropzone" role="button" tabindex="0" aria-label="Drop an Excel file here or click to browse">\n'
+        '      <div class="dz-icon" aria-hidden="true">📥</div>\n'
+        '      <div class="dz-main">Drop your Excel file here</div>\n'
+        '      <div class="dz-sub">or click to browse</div>\n'
+        '    </div>\n'
+        '    <button type="button" id="splash-import-btn">📂 Choose Excel file</button>\n'
+        '    <div class="splash-error" id="splash-error" role="alert"></div>\n'
+        '    <div class="splash-hint">You can swap files later from the top menu.</div>\n'
+        '  </div>\n'
+        '</div>\n'
+    )
+    html = _replace_once(
+        html,
+        '<div id="app-nav" data-active="acr"></div>',
+        splash_markup + '<div id="app-nav" data-active="acr"></div>',
+        "splash markup before app-nav",
+    )
+
+    html = _replace_once(
+        html,
+        "function renderAll() {",
+        "function renderAll() {\n  if (!DATA.customers || DATA.customers.length === 0) return;",
+        "renderAll empty-state guard",
+    )
+
+    html = _replace_once(
+        html,
+        "    DATA = newData;\n    renderAll();",
+        (
+            "    DATA = newData;\n"
+            "    const splash = document.getElementById('splash');\n"
+            "    if (splash) splash.hidden = true;\n"
+            "    renderAll();"
+        ),
+        "splash hide-on-import hook",
+    )
+
+    splash_wire = (
+        "<script>\n"
+        "(function(){\n"
+        "  var btn = document.getElementById('splash-import-btn');\n"
+        "  var dz = document.getElementById('splash-dropzone');\n"
+        "  var err = document.getElementById('splash-error');\n"
+        "  var importBtn = document.getElementById('import-btn');\n"
+        "  var fileInput = document.getElementById('file-input');\n"
+        "  if (!importBtn || !fileInput) return;\n"
+        "\n"
+        "  function showError(msg){ if (err) err.textContent = msg || ''; }\n"
+        "  function clickBrowse(){ showError(''); importBtn.click(); }\n"
+        "\n"
+        "  if (btn) btn.addEventListener('click', clickBrowse);\n"
+        "\n"
+        "  if (dz) {\n"
+        "    dz.addEventListener('click', clickBrowse);\n"
+        "    dz.addEventListener('keydown', function(e){\n"
+        "      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); clickBrowse(); }\n"
+        "    });\n"
+        "\n"
+        "    ['dragenter','dragover'].forEach(function(evt){\n"
+        "      dz.addEventListener(evt, function(e){\n"
+        "        e.preventDefault(); e.stopPropagation();\n"
+        "        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';\n"
+        "        dz.classList.add('dragover');\n"
+        "      });\n"
+        "    });\n"
+        "    ['dragleave','dragend'].forEach(function(evt){\n"
+        "      dz.addEventListener(evt, function(e){\n"
+        "        e.preventDefault(); e.stopPropagation();\n"
+        "        dz.classList.remove('dragover');\n"
+        "      });\n"
+        "    });\n"
+        "    dz.addEventListener('drop', function(e){\n"
+        "      e.preventDefault(); e.stopPropagation();\n"
+        "      dz.classList.remove('dragover');\n"
+        "      showError('');\n"
+        "      var files = e.dataTransfer && e.dataTransfer.files;\n"
+        "      if (!files || !files.length) return;\n"
+        "      var file = files[0];\n"
+        "      if (!/\\.(xlsx|xls)$/i.test(file.name)) {\n"
+        "        showError('Please drop a .xlsx or .xls file.');\n"
+        "        return;\n"
+        "      }\n"
+        "      try {\n"
+        "        var dt = new DataTransfer();\n"
+        "        dt.items.add(file);\n"
+        "        fileInput.files = dt.files;\n"
+        "        fileInput.dispatchEvent(new Event('change', { bubbles: true }));\n"
+        "      } catch (ex) {\n"
+        "        showError('Could not read dropped file — use the Choose Excel file button instead.');\n"
+        "      }\n"
+        "    });\n"
+        "  }\n"
+        "\n"
+        "  // Block accidental drops outside the dropzone (default browser behavior\n"
+        "  // would navigate away from the dashboard).\n"
+        "  window.addEventListener('dragover', function(e){ e.preventDefault(); });\n"
+        "  window.addEventListener('drop', function(e){\n"
+        "    var splash = document.getElementById('splash');\n"
+        "    if (splash && !splash.hidden) e.preventDefault();\n"
+        "  });\n"
+        "})();\n"
+        "</script>\n"
+    )
+    html = _replace_once(html, "</body>", splash_wire + "</body>", "splash wire-up before body close")
+
+    return html
+
+
+def _inject_app_nav_css(html: str) -> str:
+    """Inject `.app-menu` styles into the template's <style> block.
+
+    The Docker template scopes its own CSS variables; ``web-app/css/app.css``
+    references different ones (``--cp-link``, ``--cp-dashboard-muted``…) that
+    are not defined in the template. We therefore inline the nav-only rules
+    with concrete colors so the menu renders identically to the milestones
+    page without dragging in the rest of ``app.css`` (which would clobber the
+    template's body / shell styles).
+    """
+
+    nav_css = (
+        "\n/* shared app nav (matches web-app/css/app.css .app-menu rules) */\n"
+        "#app-nav .app-menu {\n"
+        "  display: flex; gap: 12px; align-items: center;\n"
+        "  padding: 10px 18px 0;\n"
+        "  background: #f3f2f1;\n"
+        "  border-bottom: 1px solid #edebe9;\n"
+        "}\n"
+        "#app-nav .app-menu a {\n"
+        "  color: #605e5c; text-decoration: none; font-weight: 700;\n"
+        "  padding: 12px 14px 10px; border-bottom: 4px solid transparent;\n"
+        "  font-size: 14px;\n"
+        "}\n"
+        "#app-nav .app-menu a.active {\n"
+        "  color: #0078d4; border-bottom-color: #0078d4;\n"
+        "}\n"
+        "#app-nav .app-menu a:not(.active):hover {\n"
+        "  color: #0078d4; border-bottom-color: #0078d4;\n"
+        "}\n"
+        "#app-nav .app-menu .spacer { flex: 1; }\n"
+        "#app-nav .app-menu .source-pill {\n"
+        "  font-size: 11px; color: #605e5c;\n"
+        "  padding: 4px 10px; background: #ffffff;\n"
+        "  border: 1px solid #edebe9; border-radius: 12px;\n"
+        "  max-width: 320px; overflow: hidden; text-overflow: ellipsis;\n"
+        "  white-space: nowrap; font-weight: 400;\n"
+        "}\n"
+        "#app-nav .app-menu button.menu-action {\n"
+        "  font-size: 12px; padding: 6px 12px;\n"
+        "  background: #ffffff; border: 1px solid #edebe9;\n"
+        "  border-radius: 4px; color: #0078d4;\n"
+        "  cursor: pointer; font-weight: 600;\n"
+        "}\n"
+        "#app-nav .app-menu button.menu-action:hover { background: #faf9f8; }\n"
+    )
+    return _replace_once(html, "</style>\n</head>", nav_css + "</style>\n</head>", "closing style/head tags")
+
+
+def _strip_bundled_data(html: str) -> str:
+    """Replace the template's pre-baked DATA blob with an empty shell.
+
+    The static distribution must ship with no customer rows (privacy + the
+    colleague experience should start from "pick a file"). The template
+    embeds a `let DATA = {...big JSON...};` literal whose JSON span is hard
+    to delimit with a single string match, so we slice between known anchors.
+    """
+
+    start_marker = "let DATA = "
+    end_marker = "// ============ Helpers ============"
+    start = html.find(start_marker)
+    end = html.find(end_marker)
+    if start == -1 or end == -1 or end <= start:
+        raise SystemExit("build_static_webapp: could not locate DATA literal block.")
+
+    replacement = (
+        "let DATA = {\n"
+        '  months: [], month_labels: [], partial_month_idx: -1,\n'
+        '  last_full_month: "", prior_month: "",\n'
+        '  customers: [], products: [], opportunity: [],\n'
+        '  generated_at: "", source_name: ""\n'
+        "};\n\n"
+    )
+    return html[:start] + replacement + html[end:]
+
+
+def _harden_charts(html: str) -> str:
+    """Escape Excel-derived customer labels in the SVG chart helpers.
+
+    Three chart functions (``barChartHorizontal`` and the two ``quadrantChart``
+    definitions) interpolate the customer name into:
+
+    * an SVG ``<text>`` body that is written via ``element.innerHTML = svg``
+    * a ``data-customer="…"`` attribute (originally escaped only ``"``)
+    * a tooltip body read back with ``getAttribute('data-customer')`` and
+      handed to ``showTooltip(html)`` which does ``innerHTML = html``
+
+    A workbook with a label like ``<img src=x onerror=alert(1)>`` would
+    execute in all three sinks. We funnel every interpolation through the
+    shared ``escapeHtml`` helper.
+    """
+
+    # 1. Bar chart: SVG <text> body with the (optionally truncated) label.
+    html = _replace_exact(
+        html,
+        ">${d.label.length > 28 ? d.label.slice(0, 28) + '…' : d.label}</text>",
+        ">${escapeHtml(d.label.length > 28 ? d.label.slice(0, 28) + '…' : d.label)}</text>",
+        "bar chart label text",
+        1,
+    )
+
+    # 2. Bar chart: data-customer attribute (was escaping only ").
+    html = _replace_exact(
+        html,
+        'data-customer="${d.label.replace(/"/g, \'&quot;\')}"',
+        'data-customer="${escapeHtml(d.label)}"',
+        "bar chart data-customer attribute",
+        1,
+    )
+
+    # 3. Quadrant charts (both): data-customer attribute on the bubble circle.
+    html = _replace_exact(
+        html,
+        'data-customer="${p.label.replace(/"/g, \'&quot;\')}"',
+        'data-customer="${escapeHtml(p.label)}"',
+        "quadrant chart data-customer attribute",
+        2,
+    )
+
+    # 4. Quadrant charts (both): direct SVG <text> label for the top N bubbles.
+    html = _replace_exact(
+        html,
+        ">${truncated}</text>",
+        ">${escapeHtml(truncated)}</text>",
+        "quadrant chart direct label",
+        2,
+    )
+
+    # 5. Bar chart tooltip: <b>${r.getAttribute('data-customer')}</b>
+    html = _replace_exact(
+        html,
+        "<b>${r.getAttribute('data-customer')}</b>",
+        "<b>${escapeHtml(r.getAttribute('data-customer'))}</b>",
+        "bar chart tooltip customer",
+        1,
+    )
+
+    # 6. Quadrant chart tooltips (both): <b>${c.getAttribute('data-customer')}</b>
+    html = _replace_exact(
+        html,
+        "<b>${c.getAttribute('data-customer')}</b>",
+        "<b>${escapeHtml(c.getAttribute('data-customer'))}</b>",
+        "quadrant chart tooltip customer",
+        2,
+    )
+
+    return html
+
+
+def _harden_heatmap(html: str) -> str:
+    """Escape Excel-derived values rendered into table markup.
+
+    Covers the injected opportunity heatmap as well as the original
+    Opportunity Map and All Customers Table from the upstream template,
+    all of which originally interpolated raw workbook strings.
+    """
+
+    html = _replace_exact(
+        html,
+        '<tr class="clickable" data-customer="${r.customer.replace(/"/g, \'&quot;\')}">',
+        '<tr class="clickable" data-customer="${escapeHtml(r.customer)}">',
+        "row data-customer attribute",
+        3,
+    )
+    html = _replace_exact(
+        html,
+        "<td><strong>${r.customer}</strong></td>",
+        "<td><strong>${escapeHtml(r.customer)}</strong></td>",
+        "heatmap customer cell",
+        1,
+    )
+    html = _replace_exact(
+        html,
+        "<td>${r.customer}</td>",
+        "<td>${escapeHtml(r.customer)}</td>",
+        "original table customer cell",
+        2,
+    )
+    html = _replace_exact(
+        html,
+        "<td>${r.notes}</td>",
+        "<td>${escapeHtml(r.notes)}</td>",
+        "original table notes cell",
+        2,
+    )
+    html = _replace_exact(
+        html,
+        "}${r.notes}</td>",
+        "}${escapeHtml(r.notes)}</td>",
+        "heatmap notes cell",
+        1,
+    )
+    return html
+
+
+def _harden_csvcell(html: str) -> str:
+    """Add CSV formula-injection protection to the injected csvCell helper."""
+
+    original = (
+        "function csvCell(value) {\n"
+        "  return `\"${String(value ?? '').replace(/\"/g, '\"\"')}\"`;\n"
+        "}"
+    )
+    hardened = (
+        "const CSV_FORMULA_LEADERS = ['=', '+', '-', '@', '\\t', '\\r'];\n"
+        "function csvCell(value) {\n"
+        "  let s = String(value ?? '');\n"
+        "  if (s.length && CSV_FORMULA_LEADERS.includes(s.charAt(0))) {\n"
+        "    s = \"'\" + s;\n"
+        "  }\n"
+        "  return `\"${s.replace(/\"/g, '\"\"')}\"`;\n"
+        "}"
+    )
+    return _replace_once(html, original, hardened, "csvCell helper")
+
+
+def _export_handler_script() -> str:
+    return (
+        "<script>\n"
+        "(function () {\n"
+        "  const btn = document.getElementById('export-pptx-btn');\n"
+        "  if (!btn) return;\n"
+        "  btn.addEventListener('click', async () => {\n"
+        "    if (!window.PptxAcr || typeof window.PptxAcr.exportDeck !== 'function') {\n"
+        "      setStatus('PowerPoint export module is not loaded.', 'error');\n"
+        "      return;\n"
+        "    }\n"
+        "    if (!DATA || !Array.isArray(DATA.opportunity) || DATA.opportunity.length === 0) {\n"
+        "      setStatus('Load an Excel export before exporting to PowerPoint.', 'error');\n"
+        "      return;\n"
+        "    }\n"
+        "    btn.disabled = true;\n"
+        "    const originalLabel = btn.textContent;\n"
+        "    btn.textContent = 'Building deck…';\n"
+        "    try {\n"
+        "      const threshold = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 8;\n"
+        "      const sourceName = DATA.source_name || 'Imported workbook';\n"
+        "      await window.PptxAcr.exportDeck(DATA, sourceName, threshold);\n"
+        "      setStatus('PowerPoint deck downloaded.', 'success');\n"
+        "    } catch (err) {\n"
+        "      console.error('PPTX export failed', err);\n"
+        "      setStatus('PowerPoint export failed: ' + (err && err.message ? err.message : err), 'error');\n"
+        "    } finally {\n"
+        "      btn.disabled = false;\n"
+        "      btn.textContent = originalLabel;\n"
+        "    }\n"
+        "  });\n"
+        "})();\n"
+        "</script>"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Build web-app/index.html from the canonical template.")
+    parser.add_argument("--check", action="store_true",
+                        help="Do not write; exit 1 if the on-disk output differs from the freshly built HTML.")
+    args = parser.parse_args()
+
+    generated = build_html()
+
+    if args.check:
+        current = OUTPUT_PATH.read_text(encoding="utf-8") if OUTPUT_PATH.exists() else ""
+        if current != generated:
+            print(
+                f"build_static_webapp --check: {OUTPUT_PATH.relative_to(REPO_ROOT)} is "
+                "out of date. Run `python scripts/build_static_webapp.py`.",
+                file=sys.stderr,
+            )
+            return 1
+        print("build_static_webapp --check: up to date.")
+        return 0
+
+    OUTPUT_PATH.write_text(generated, encoding="utf-8")
+    print(f"Wrote {OUTPUT_PATH.relative_to(REPO_ROOT)} ({len(generated):,} chars).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

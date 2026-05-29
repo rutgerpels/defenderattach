@@ -1,0 +1,13 @@
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+INPUT_DIR = PROJECT_ROOT / "inputfolder"
+ATTACH_INPUT_DIR = PROJECT_ROOT / "inputfolder_opty"
+OUTPUT_DIR = PROJECT_ROOT / "output"
+EXPORT_SHEET = "Export"
+DEFENDER_SERVICE = "Defender for Cloud"
+TOTAL_SERVICE = "Total"
+DEFAULT_DEFENDER_SHARE_THRESHOLD = 0.05
+DEFAULT_NON_DEFENDER_GROWTH_THRESHOLD = 0.10
+DEFAULT_NEAR_TERM_DAYS = 90

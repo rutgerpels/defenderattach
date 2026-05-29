@@ -1,0 +1,1611 @@
+from __future__ import annotations
+
+from datetime import datetime
+import json
+import re
+from pathlib import Path
+
+from flask import Flask, Response, request, send_file
+
+from .config import DEFAULT_NEAR_TERM_DAYS, OUTPUT_DIR, PROJECT_ROOT
+from .dashboard_model import build_dashboard_model
+from .data import load_records
+from .exports import create_powerpoint
+from .milestone_analysis import gaps_to_dataframe, load_milestone_gap_model
+from .milestone_export import create_milestone_powerpoint
+
+
+TEMPLATE_PATH = PROJECT_ROOT / "docs" / "defender_for_cloud_dashboard (2).html"
+
+
+def create_app() -> Flask:
+    app = Flask(__name__, static_folder=str(PROJECT_ROOT / "assets"))
+
+    @app.get("/")
+    def index() -> Response:
+        return Response(render_shell_html("acr"), mimetype="text/html")
+
+    @app.get("/acr")
+    def acr() -> Response:
+        return Response(render_shell_html("acr"), mimetype="text/html")
+
+    @app.get("/milestones")
+    def milestones() -> Response:
+        return Response(render_shell_html("milestones"), mimetype="text/html")
+
+    @app.get("/embed/acr")
+    def acr_embed() -> Response:
+        return Response(render_dashboard_html(embed=True), mimetype="text/html")
+
+    @app.get("/embed/milestones")
+    def milestones_embed() -> Response:
+        near_term_days = _near_term_days()
+        try:
+            model = load_milestone_gap_model(near_term_days=near_term_days)
+        except (FileNotFoundError, ValueError) as exc:
+            return Response(render_milestone_error_html(str(exc), embed=True), mimetype="text/html")
+        return Response(render_milestone_html(model, embed=True), mimetype="text/html")
+
+    @app.get("/milestones/gaps.csv")
+    def milestone_gaps_csv() -> Response:
+        try:
+            model = load_milestone_gap_model(near_term_days=_near_term_days())
+        except (FileNotFoundError, ValueError) as exc:
+            return _milestone_load_error_response(exc)
+        table = gaps_to_dataframe(model)
+        csv_text = "\ufeff" + table.to_csv(index=False)
+        return Response(
+            csv_text,
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment; filename=defender-milestone-gaps.csv"},
+        )
+
+    @app.get("/milestones/export-ppt")
+    def milestone_export_ppt():
+        try:
+            model = load_milestone_gap_model(near_term_days=_near_term_days())
+        except (FileNotFoundError, ValueError) as exc:
+            return _milestone_load_error_response(exc)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename = f"defender-milestone-gaps-{stamp}.pptx"
+        output_path = OUTPUT_DIR / filename
+        create_milestone_powerpoint(model, output_path)
+        return send_file(output_path, as_attachment=True, download_name=filename)
+
+    @app.get("/export-ppt")
+    def export_ppt():
+        bundle = load_records(metric_name="$ ACR")
+        model = build_dashboard_model(bundle.records)
+        threshold = _export_threshold()
+        output_path = OUTPUT_DIR / "defender-acr-opportunities-dashboard.pptx"
+        create_powerpoint(bundle.records, model, bundle.source_path.name, output_path, threshold)
+        return send_file(output_path, as_attachment=True)
+
+    return app
+
+
+def _milestone_load_error_response(exc: Exception) -> Response:
+    return Response(str(exc), status=400, mimetype="text/plain")
+
+
+def _export_threshold() -> float:
+    raw_value = request.args.get("threshold", "8")
+    try:
+        threshold = float(raw_value)
+    except ValueError:
+        threshold = 8.0
+    return min(20.0, max(0.0, threshold))
+
+
+def _near_term_days() -> int:
+    raw_value = request.args.get("near_term_days", str(DEFAULT_NEAR_TERM_DAYS))
+    try:
+        days = int(raw_value)
+    except ValueError:
+        days = DEFAULT_NEAR_TERM_DAYS
+    return min(365, max(0, days))
+
+
+def render_shell_html(active: str) -> str:
+    frame_src = "/embed/milestones" if active == "milestones" else "/embed/acr"
+    if active == "milestones" and request.query_string:
+        frame_src = f"{frame_src}?{request.query_string.decode('utf-8', errors='ignore')}"
+    active_title = "Milestone gaps" if active == "milestones" else "ACR dashboard"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+{THEME_SCRIPT}
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{active_title}</title>
+<style>
+{CLAWPILOT_THEME_CSS}
+{APP_MENU_CSS}
+{SHELL_CSS}
+</style>
+</head>
+<body class="app-shell-page">
+{shell_menu_html(active)}
+<iframe id="dashboard-frame" name="dashboard-frame" src="{frame_src}" title="{active_title}"></iframe>
+<script>
+const dashboardFrame = document.getElementById('dashboard-frame');
+const shellLinks = [...document.querySelectorAll('.app-menu a[data-dashboard]')];
+
+function activateDashboard(link, pushHistory = true) {{
+  shellLinks.forEach(item => item.classList.toggle('active', item === link));
+  dashboardFrame.src = link.dataset.src;
+  document.title = link.textContent.trim();
+  if (pushHistory) history.pushState({{dashboard: link.dataset.dashboard}}, '', link.dataset.url);
+}}
+
+shellLinks.forEach(link => {{
+  link.addEventListener('click', event => {{
+    event.preventDefault();
+    activateDashboard(link);
+  }});
+}});
+
+window.addEventListener('popstate', () => {{
+  const isMilestone = window.location.pathname.startsWith('/milestones');
+  const target = shellLinks.find(link => link.dataset.dashboard === (isMilestone ? 'milestones' : 'acr'));
+  if (target) activateDashboard(target, false);
+}});
+</script>
+</body>
+</html>"""
+
+
+def render_dashboard_html(*, embed: bool = False) -> str:
+    bundle = load_records(metric_name="$ ACR")
+    model = build_dashboard_model(bundle.records)
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    template = template.replace(
+        '<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>',
+        "",
+    )
+    template = template.replace(
+        '<button class="import-btn" id="import-btn">📂 Import new Excel</button>',
+        '<button class="import-btn" id="import-btn" disabled>Loaded from inputfolder</button>'
+        '<a class="import-btn" href="/export-ppt" style="text-decoration:none;">Export PowerPoint</a>',
+    )
+    template = template.replace(
+        '<div class="import-status" id="import-status">Showing data from initial export</div>',
+        f'<div class="import-status success" id="import-status">Loaded {bundle.source_path.name}</div>',
+    )
+    template = template.replace(
+        'Upload a fresh "ACR Details by … Month" export to refresh the entire dashboard.',
+        "Replace the workbook in inputfolder and refresh this page to reload the dashboard.",
+    )
+    template = _monthly_acr_labels(template)
+    template = _opportunity_map_labels(template)
+    template = _inject_opportunity_map(template)
+    if not embed:
+        template = _inject_app_menu(template, active="acr")
+    data_json = json.dumps(model, ensure_ascii=False, allow_nan=False)
+    return re.sub(
+        r"let DATA = .*?;\s*\n\n// ============ Helpers ============",
+        f"let DATA = {data_json};\n\n// ============ Helpers ============",
+        template,
+        count=1,
+        flags=re.DOTALL,
+    )
+
+
+def render_milestone_error_html(message: str, *, embed: bool = False) -> str:
+    menu_html = "" if embed else app_menu_html("milestones")
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+{THEME_SCRIPT}
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Defender milestone gaps</title>
+<style>
+{CLAWPILOT_THEME_CSS}
+{MILESTONE_BASE_CSS}
+</style>
+</head>
+<body class="milestone-page">
+{menu_html}
+<main class="shell">
+  <section class="hero">
+    <p class="eyebrow">Milestone gap analysis</p>
+    <h1>Defender milestone attach gaps</h1>
+    <p class="hero-copy">The milestone view could not load because the source files are unavailable or invalid.</p>
+  </section>
+  <section class="card">
+    <h2>Load error</h2>
+    <p class="error-text">{_html_escape(message)}</p>
+  </section>
+</main>
+</body>
+</html>"""
+
+
+def render_milestone_html(model: dict, *, embed: bool = False) -> str:
+    data_json = _safe_json_script(model)
+    near_term_days = int(model.get("near_term_days", DEFAULT_NEAR_TERM_DAYS))
+    menu_html = "" if embed else app_menu_html("milestones")
+    milestone_page_path = "/embed/milestones" if embed else "/milestones"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+{THEME_SCRIPT}
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Defender milestone gaps</title>
+<style>
+{CLAWPILOT_THEME_CSS}
+{MILESTONE_BASE_CSS}
+</style>
+</head>
+<body class="milestone-page">
+{menu_html}
+<main class="shell">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Migration to Defender attach</p>
+      <h1>Defender milestone gap overview</h1>
+      <p class="hero-copy">Find accounts and opportunities where migration milestones exist but Defender for Cloud milestones are missing under the requested strict matching rules.</p>
+    </div>
+    <div class="source-card">
+      <span>Sources</span>
+      <strong id="source-summary"></strong>
+    </div>
+  </section>
+
+  <nav class="dashboard-tabs" aria-label="Milestone dashboard sections">
+    <a href="#overview-section" class="active">Overview</a>
+    <a href="#gap-analysis-section">Gap Analysis</a>
+    <a href="#detail-table-section">All Gaps Table</a>
+    <a href="#methodology-section">Methodology</a>
+  </nav>
+
+  <section class="toolbar card">
+    <label>Search
+      <input id="search-input" type="search" placeholder="Account, opportunity, workload, owner">
+    </label>
+    <label>Gap type
+      <select id="gap-filter">
+        <option value="all">All gaps</option>
+        <option value="Account-level gap">Account-level gaps</option>
+        <option value="Opportunity-level gap">Opportunity-level gaps</option>
+      </select>
+    </label>
+    <label>Priority
+      <select id="priority-filter">
+        <option value="all">All priorities</option>
+        <option value="HIGH">HIGH</option>
+        <option value="MEDIUM">MEDIUM</option>
+        <option value="LOW">LOW</option>
+      </select>
+    </label>
+    <label>Workload
+      <select id="workload-filter"><option value="all">All workloads</option></select>
+    </label>
+    <label>Near-term days
+      <input id="near-term-days" type="number" min="0" max="365" step="1" value="{near_term_days}">
+    </label>
+    <button id="apply-near-term" class="secondary-button" type="button">Apply</button>
+    <a id="csv-link" class="secondary-button" href="/milestones/gaps.csv?near_term_days={near_term_days}">Download CSV</a>
+    <a id="ppt-link" class="primary-button" href="/milestones/export-ppt?near_term_days={near_term_days}">Export PowerPoint</a>
+    <button id="print-button" class="secondary-button" type="button">Print / PDF</button>
+  </section>
+
+  <section class="how-to-read">
+    <strong>How to read this:</strong> Account-level gaps show customers with Migration milestones but no Defender milestones. Opportunity-level gaps show attached accounts where the same Migration Opportunity ID has no Defender milestone.
+  </section>
+
+  <section id="overview-section">
+    <section id="summary-grid" class="summary-grid"></section>
+  </section>
+
+  <section id="gap-analysis-section" class="grid-two">
+    <div class="card">
+      <div class="section-heading">
+        <h2>Priority distribution</h2>
+        <p>High priority is driven by committed milestones or near-term estimated dates.</p>
+      </div>
+      <div id="priority-bars" class="bar-list"></div>
+    </div>
+    <div class="card">
+      <div class="section-heading">
+        <h2>Gap type distribution</h2>
+        <p>Account-level gaps are accounts with no Defender milestones; opportunity-level gaps are strict same-Opportunity-ID misses.</p>
+      </div>
+      <div id="gap-bars" class="bar-list"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-heading">
+      <h2>Top 10 highest priority gaps</h2>
+      <p>Sorted by priority, committed status, estimated date, then migration pipeline size.</p>
+    </div>
+    <div id="top-gaps" class="responsive-table"></div>
+  </section>
+
+  <section class="card">
+    <div class="section-heading">
+      <h2>Workload concentration</h2>
+      <p>Largest workload categories among current gaps.</p>
+    </div>
+    <div id="workload-bars" class="bar-list compact"></div>
+  </section>
+
+  <section id="detail-table-section" class="card">
+    <div class="section-heading">
+      <h2>All milestone gaps</h2>
+      <p>Click a row to drill into priority rationale, owners, and milestone names.</p>
+    </div>
+    <div id="result-count" class="result-count"></div>
+    <div id="gap-table" class="responsive-table"></div>
+  </section>
+
+  <section id="details-panel" class="card details-panel" hidden></section>
+
+  <section id="methodology-section" class="methodology card">
+    <h2>Methodology</h2>
+    <p><strong>Account-level gap:</strong> account has Migration milestones but no Defender for Cloud milestones.</p>
+    <p><strong>Attached account:</strong> account appears in both workbooks.</p>
+    <p><strong>Opportunity-level gap:</strong> for attached accounts, a Migration Opportunity ID has no Defender milestone with the same account and Opportunity ID.</p>
+    <p><strong>Priority:</strong> HIGH = committed milestone or estimated date within the selected near-term window; MEDIUM = uncommitted with a recognized workload; LOW = unclear or edge-case workload.</p>
+  </section>
+</main>
+<script id="milestone-data" type="application/json">{data_json}</script>
+<script>
+const DATA = JSON.parse(document.getElementById('milestone-data').textContent);
+const priorityRank = {{HIGH: 0, MEDIUM: 1, LOW: 2}};
+let selectedRowIndex = null;
+
+const fmt = {{
+  int: value => Number(value || 0).toLocaleString('en-US'),
+  money: value => Number(value || 0).toLocaleString('en-US', {{style: 'currency', currency: 'USD', maximumFractionDigits: 0}}),
+  date: value => value || '-',
+}};
+
+function escapeHtml(value) {{
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}}
+
+function workloadParts(row) {{
+  return String(row.workload || '').split(';').map(part => part.trim()).filter(Boolean);
+}}
+
+function populateFilters() {{
+  const workloads = [...new Set(DATA.gaps.flatMap(workloadParts))].sort((a, b) => a.localeCompare(b));
+  const select = document.getElementById('workload-filter');
+  select.innerHTML = '<option value="all">All workloads</option>' + workloads.map(workload => `<option value="${{escapeHtml(workload)}}">${{escapeHtml(workload)}}</option>`).join('');
+}}
+
+function filteredRows() {{
+  const search = document.getElementById('search-input').value.trim().toLowerCase();
+  const gapType = document.getElementById('gap-filter').value;
+  const priority = document.getElementById('priority-filter').value;
+  const workload = document.getElementById('workload-filter').value;
+  return DATA.gaps.filter(row => {{
+    if (gapType !== 'all' && row.gap_type !== gapType) return false;
+    if (priority !== 'all' && row.priority !== priority) return false;
+    if (workload !== 'all' && !workloadParts(row).includes(workload)) return false;
+    if (!search) return true;
+    return [row.account, row.opportunity_id, row.workload, row.owner, row.owner_role, row.priority_reason]
+      .some(value => String(value || '').toLowerCase().includes(search));
+  }});
+}}
+
+function renderSummary() {{
+  const summary = DATA.summary;
+  const visible = filteredRows();
+  const visibleAccounts = new Set(visible.map(row => row.account_key)).size;
+  const visibleOpps = new Set(visible.map(row => `${{row.account_key}}|${{row.opportunity_id || ''}}`)).size;
+  const cards = [
+    ['Accounts with gaps', fmt.int(summary.total_accounts_with_gaps), `${{fmt.int(visibleAccounts)}} visible`],
+    ['Opportunities with gaps', fmt.int(summary.total_opportunities_with_gaps), `${{fmt.int(visibleOpps)}} visible`],
+    ['Account-level gaps', fmt.int(summary.account_level_gaps), `${{fmt.int(summary.account_level_gap_accounts)}} accounts`],
+    ['Opportunity-level gaps', fmt.int(summary.opportunity_level_gaps), 'strict Opportunity ID'],
+    ['Attached accounts', fmt.int(summary.attached_accounts), 'Migration + Defender'],
+    ['High priority', fmt.int(DATA.priority_counts.HIGH), 'committed or near-term'],
+  ];
+  document.getElementById('summary-grid').innerHTML = cards.map(([label, value, note]) => `
+    <article class="kpi-card card">
+      <span>${{escapeHtml(label)}}</span>
+      <strong>${{escapeHtml(value)}}</strong>
+      <small>${{escapeHtml(note)}}</small>
+    </article>
+  `).join('');
+}}
+
+function renderBars(targetId, rows) {{
+  const maxValue = Math.max(...rows.map(row => row.value), 1);
+  document.getElementById(targetId).innerHTML = rows.map(row => `
+    <div class="bar-row">
+      <div class="bar-label"><strong>${{escapeHtml(row.label)}}</strong><span>${{fmt.int(row.value)}}</span></div>
+      <div class="bar-track"><div class="bar-fill ${{row.className || ''}}" style="width:${{Math.max(2, row.value / maxValue * 100)}}%"></div></div>
+    </div>
+  `).join('');
+}}
+
+function renderCharts() {{
+  renderBars('priority-bars', [
+    {{label: 'HIGH', value: DATA.priority_counts.HIGH || 0, className: 'priority-high-bg'}},
+    {{label: 'MEDIUM', value: DATA.priority_counts.MEDIUM || 0, className: 'priority-medium-bg'}},
+    {{label: 'LOW', value: DATA.priority_counts.LOW || 0, className: 'priority-low-bg'}},
+  ]);
+  renderBars('gap-bars', [
+    {{label: 'Account-level gap', value: DATA.gap_type_counts['Account-level gap'] || 0, className: 'priority-high-bg'}},
+    {{label: 'Opportunity-level gap', value: DATA.gap_type_counts['Opportunity-level gap'] || 0, className: 'priority-medium-bg'}},
+  ]);
+  renderBars('workload-bars', DATA.workload_counts.map(row => ({{label: row.workload, value: row.count, className: 'accent-bg'}})));
+}}
+
+function priorityTag(priority) {{
+  return `<span class="tag priority-${{String(priority).toLowerCase()}}">${{escapeHtml(priority)}}</span>`;
+}}
+
+function tableHtml(rows, compact = false) {{
+  if (!rows.length) return '<div class="empty">No gaps match the current filters.</div>';
+  const displayed = compact ? rows.slice(0, 10) : rows;
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th>Opportunity ID</th>
+          <th>Gap type</th>
+          <th>Workload</th>
+          <th>Estimated date</th>
+          <th>Priority</th>
+          <th class="num">Migration pipeline</th>
+          <th>Owner</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${{displayed.map(row => `
+          <tr class="clickable" data-row-index="${{DATA.gaps.indexOf(row)}}">
+            <td><strong>${{escapeHtml(row.account)}}</strong></td>
+            <td><code>${{escapeHtml(row.opportunity_id || '-')}}</code></td>
+            <td>${{escapeHtml(row.gap_type)}}</td>
+            <td>${{escapeHtml(row.workload)}}</td>
+            <td>${{escapeHtml(fmt.date(row.estimated_date))}}</td>
+            <td>${{priorityTag(row.priority)}}</td>
+            <td class="num">${{escapeHtml(fmt.money(row.acr_pipeline))}}</td>
+            <td>${{escapeHtml(row.owner || row.owner_role || '-')}}</td>
+          </tr>
+        `).join('')}}
+      </tbody>
+    </table>`;
+}}
+
+function attachRowHandlers() {{
+  document.querySelectorAll('tr.clickable').forEach(row => {{
+    row.addEventListener('click', () => showDetails(Number(row.getAttribute('data-row-index'))));
+  }});
+}}
+
+function showDetails(index) {{
+  selectedRowIndex = index;
+  const row = DATA.gaps[index];
+  if (!row) return;
+  const panel = document.getElementById('details-panel');
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="section-heading">
+      <h2>${{escapeHtml(row.account)}}</h2>
+      <p>${{escapeHtml(row.gap_type)}} | Opportunity ${{escapeHtml(row.opportunity_id || '-')}}</p>
+    </div>
+    <div class="detail-grid">
+      <div><span>Priority</span><strong>${{escapeHtml(row.priority)}}</strong><small>${{escapeHtml(row.priority_reason)}}</small></div>
+      <div><span>Estimated date</span><strong>${{escapeHtml(fmt.date(row.estimated_date))}}</strong><small>${{escapeHtml(row.commitment || '-')}}</small></div>
+      <div><span>Pipeline</span><strong>${{escapeHtml(fmt.money(row.acr_pipeline))}}</strong><small>${{escapeHtml(row.status || '-')}}</small></div>
+      <div><span>Owner</span><strong>${{escapeHtml(row.owner || '-')}}</strong><small>${{escapeHtml(row.owner_role || '-')}}</small></div>
+    </div>
+    <h3>Migration milestones in this gap</h3>
+    <ul class="milestone-list">${{(row.milestones || []).map(name => `<li>${{escapeHtml(name)}}</li>`).join('') || '<li>No milestone names available.</li>'}}</ul>
+  `;
+  panel.scrollIntoView({{behavior: 'smooth', block: 'nearest'}});
+}}
+
+function renderTables() {{
+  const rows = filteredRows().sort((a, b) =>
+    priorityRank[a.priority] - priorityRank[b.priority] ||
+    Number(b.has_committed) - Number(a.has_committed) ||
+    String(a.estimated_date || '9999-12-31').localeCompare(String(b.estimated_date || '9999-12-31')) ||
+    (b.acr_pipeline || 0) - (a.acr_pipeline || 0)
+  );
+  document.getElementById('result-count').textContent = `${{fmt.int(rows.length)}} visible gap rows`;
+  document.getElementById('top-gaps').innerHTML = tableHtml(DATA.top_gaps, true);
+  document.getElementById('gap-table').innerHTML = tableHtml(rows);
+  attachRowHandlers();
+}}
+
+function render() {{
+  renderSummary();
+  renderTables();
+}}
+
+function updateLinks() {{
+  const days = document.getElementById('near-term-days').value || DATA.near_term_days;
+  document.getElementById('csv-link').href = `/milestones/gaps.csv?near_term_days=${{encodeURIComponent(days)}}`;
+  document.getElementById('ppt-link').href = `/milestones/export-ppt?near_term_days=${{encodeURIComponent(days)}}`;
+}}
+
+document.getElementById('source-summary').textContent = `${{DATA.sources.migration}} + ${{DATA.sources.defender}}`;
+populateFilters();
+renderCharts();
+render();
+['search-input', 'gap-filter', 'priority-filter', 'workload-filter'].forEach(id => {{
+  document.getElementById(id).addEventListener('input', render);
+  document.getElementById(id).addEventListener('change', render);
+}});
+document.getElementById('near-term-days').addEventListener('input', updateLinks);
+document.getElementById('apply-near-term').addEventListener('click', () => {{
+  const days = document.getElementById('near-term-days').value || DATA.near_term_days;
+  window.location.href = `{milestone_page_path}?near_term_days=${{encodeURIComponent(days)}}`;
+}});
+document.getElementById('print-button').addEventListener('click', () => window.print());
+</script>
+</body>
+</html>"""
+
+
+def _monthly_acr_labels(template: str) -> str:
+    replacements = {
+        "Avg Daily ACR basis": "Monthly ACR basis",
+        "High Opportunity</div><div class=\"val\" id=\"kpi-high\">–</div><div class=\"delta\">customers to prioritize": "High Opportunity</div><div class=\"val\" id=\"kpi-high\">–</div><div class=\"delta\">customers to prioritize",
+        "&lt; $50/day total ACR": "&lt; $1,500/month total ACR",
+        "Defender for Cloud — Daily ACR across all customers": "Defender for Cloud — Monthly ACR across all customers",
+        "Sum of avg daily ACR by month": "Sum of monthly ACR by month",
+        "Top 15 customers by Defender for Cloud daily ACR": "Top 15 customers by Defender for Cloud monthly ACR",
+        "Product mix — daily ACR trend by service": "Product mix — monthly ACR trend by service",
+        "Absolute daily ACR": "Absolute monthly ACR",
+        "Bubble size = total daily ACR.": "Bubble size = total monthly ACR.",
+        "DfC as % of total daily ACR for this customer": "DfC as % of total monthly ACR for this customer",
+        "All workloads ranked by current daily ACR.": "All workloads ranked by current monthly ACR.",
+        "top 10 by total daily ACR.": "top 10 by total monthly ACR.",
+        "Sorted by total daily ACR": "Sorted by total monthly ACR",
+        "Daily ACR — does DfC track with the rest of the footprint?": "Monthly ACR — does DfC track with the rest of the footprint?",
+        "Total Daily ACR": "Total Monthly ACR",
+        "DfC Daily ACR": "DfC Monthly ACR",
+        "Total $/day": "Monthly Total ACR",
+        "DfC $/day": "Monthly DfC ACR",
+        "<div class=\"num\">$/day</div>": "<div class=\"num\">Monthly ACR</div>",
+        "+ '/day'": "",
+        "})/day": "})",
+        "})}/day": "})}",
+        "Customer ACR under $50/day — sales priority low": "Customer ACR under $1,500/month - sales priority low",
+        "Total ACR under $50/day": "Total ACR under $1,500/month",
+        "DfC base under $1/day": "DfC base under $30/month",
+        "DfC base &lt; $1/day": "DfC base &lt; $30/month",
+        "$ Average Daily ACR": "$ ACR",
+        "Average Daily ACR": "Monthly ACR",
+    }
+    for old, new in replacements.items():
+        template = template.replace(old, new)
+    return template
+
+
+THEME_SCRIPT = """<script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("clawpilotTheme");
+    const theme =
+      param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>"""
+
+
+CLAWPILOT_THEME_CSS = """:root {
+  color-scheme: light;
+  --cp-bg: #f7f4ef;
+  --cp-bg-elevated: #fcfbf8;
+  --cp-surface: #ffffff;
+  --cp-surface-soft: #f5f5f5;
+  --cp-border: #dedede;
+  --cp-border-strong: #919191;
+  --cp-text: #242424;
+  --cp-text-muted: #5c5c5c;
+  --cp-text-soft: #6f6f6f;
+  --cp-accent: #b11f4b;
+  --cp-accent-hover: #9a1a41;
+  --cp-accent-soft: rgba(177, 31, 75, 0.08);
+  --cp-accent-fg: #ffffff;
+  --cp-success: #16a34a;
+  --cp-danger: #dc2626;
+  --cp-warning: #f59e0b;
+  --cp-link: #0078d4;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --cp-overlay: rgba(255, 255, 255, 0.8);
+  --cp-panel: rgba(255, 255, 255, 0.86);
+  --cp-panel-strong: rgba(255, 255, 255, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.55);
+  --cp-highlight: rgba(177, 31, 75, 0.12);
+  --cp-dashboard-bg: #f3f2f1;
+  --cp-dashboard-surface: #ffffff;
+  --cp-dashboard-surface-soft: #faf9f8;
+  --cp-dashboard-border: #edebe9;
+  --cp-dashboard-text: #201f1e;
+  --cp-dashboard-muted: #605e5c;
+  --cp-dashboard-hero: #0078d4;
+  --cp-dashboard-hero-strong: #006cbe;
+  --cp-dashboard-on-hero: #ffffff;
+  --cp-dashboard-on-hero-muted: #deecf9;
+  --cp-dashboard-hero-panel: rgba(255, 255, 255, 0.32);
+  --cp-dashboard-nav: #201f1e;
+  --cp-dashboard-nav-text: #a19f9d;
+  --cp-dashboard-callout: #fff8ed;
+  --cp-dashboard-card-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  --cp-priority-high-bg: #fde7e9;
+  --cp-priority-high-fg: #a4262c;
+  --cp-priority-medium-bg: #fff4ce;
+  --cp-priority-medium-fg: #8e562e;
+  --cp-priority-low-bg: #dff6dd;
+  --cp-priority-low-fg: #107c10;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --cp-bg: #3d3b3a;
+  --cp-bg-elevated: #343231;
+  --cp-surface: #292929;
+  --cp-surface-soft: #2e2e2e;
+  --cp-border: #474747;
+  --cp-border-strong: #5f5f5f;
+  --cp-text: #dedede;
+  --cp-text-muted: #919191;
+  --cp-text-soft: #b0b0b0;
+  --cp-accent: #fd8ea1;
+  --cp-accent-hover: #fb7b91;
+  --cp-accent-soft: rgba(253, 142, 161, 0.14);
+  --cp-accent-fg: #1a1a1a;
+  --cp-success: #4ade80;
+  --cp-danger: #f87171;
+  --cp-warning: #fbbf24;
+  --cp-link: #4da6ff;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  --cp-overlay: rgba(41, 41, 41, 0.88);
+  --cp-panel: rgba(41, 41, 41, 0.72);
+  --cp-panel-strong: rgba(41, 41, 41, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.04);
+  --cp-highlight: rgba(253, 142, 161, 0.12);
+  --cp-dashboard-bg: #f3f2f1;
+  --cp-dashboard-surface: #ffffff;
+  --cp-dashboard-surface-soft: #faf9f8;
+  --cp-dashboard-border: #edebe9;
+  --cp-dashboard-text: #201f1e;
+  --cp-dashboard-muted: #605e5c;
+  --cp-dashboard-hero: #0078d4;
+  --cp-dashboard-hero-strong: #006cbe;
+  --cp-dashboard-on-hero: #ffffff;
+  --cp-dashboard-on-hero-muted: #deecf9;
+  --cp-dashboard-hero-panel: rgba(255, 255, 255, 0.32);
+  --cp-dashboard-nav: #201f1e;
+  --cp-dashboard-nav-text: #a19f9d;
+  --cp-dashboard-callout: #fff8ed;
+  --cp-dashboard-card-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  --cp-priority-high-bg: #fde7e9;
+  --cp-priority-high-fg: #a4262c;
+  --cp-priority-medium-bg: #fff4ce;
+  --cp-priority-medium-fg: #8e562e;
+  --cp-priority-low-bg: #dff6dd;
+  --cp-priority-low-fg: #107c10;
+}"""
+
+
+APP_MENU_CSS = """
+.app-menu {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 0 10px 8px;
+  padding: 10px 0 0;
+  background: var(--cp-dashboard-bg);
+  border-bottom: 1px solid var(--cp-dashboard-border);
+}
+.app-menu a {
+  color: var(--cp-dashboard-muted);
+  text-decoration: none;
+  font-weight: 700;
+  padding: 12px 14px 10px;
+  border-bottom: 4px solid transparent;
+}
+.app-menu a.active {
+  color: var(--cp-link);
+  border-bottom-color: var(--cp-link);
+}
+.app-menu a:not(.active):hover {
+  color: var(--cp-link);
+  border-bottom-color: var(--cp-link);
+}
+"""
+
+
+SHELL_CSS = """
+.app-shell-page {
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--cp-dashboard-bg);
+}
+.app-shell-page .app-menu {
+  margin-bottom: 8px;
+}
+#dashboard-frame {
+  display: block;
+  width: 100%;
+  height: calc(100dvh - 64px);
+  margin: 0;
+  border: 0;
+  background: var(--cp-dashboard-bg);
+}
+@media (max-width: 720px) {
+  .app-shell-page {
+    overflow: auto;
+  }
+  .app-shell-page .app-menu {
+    flex-wrap: wrap;
+  }
+  #dashboard-frame {
+    height: calc(100dvh - 118px);
+  }
+}
+"""
+
+
+MILESTONE_BASE_CSS = """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--cp-dashboard-bg);
+  color: var(--cp-dashboard-text);
+  padding: 20px;
+  line-height: 1.4;
+}
+h1 { font-size: 22px; color: var(--cp-dashboard-text); }
+h2 { font-size: 16px; margin: 24px 0 12px 0; color: var(--cp-dashboard-text); }
+h3 { font-size: 14px; margin: 16px 0 8px 0; color: var(--cp-dashboard-muted); font-weight: 600; }
+p { margin: 0; }
+.shell { max-width: none; margin: 0; padding: 0; }
+.hero {
+  background: linear-gradient(135deg, var(--cp-dashboard-hero), var(--cp-dashboard-hero-strong));
+  color: var(--cp-dashboard-on-hero);
+  padding: 20px 28px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: var(--cp-dashboard-card-shadow);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.hero > div:first-child { flex: 1; min-width: 280px; }
+.hero h1 { color: var(--cp-dashboard-on-hero); margin: 0; }
+.eyebrow {
+  color: var(--cp-dashboard-on-hero-muted);
+  font-size: 12px;
+  margin: 0 0 6px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.hero-copy {
+  color: var(--cp-dashboard-on-hero-muted);
+  font-size: 12px;
+  margin-top: 6px;
+  max-width: 760px;
+}
+.source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+  text-align: right;
+}
+.source-card span {
+  font-size: 11px;
+  color: var(--cp-dashboard-on-hero-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.source-card strong {
+  font-size: 10px;
+  color: var(--cp-dashboard-on-hero-muted);
+  max-width: 280px;
+  line-height: 1.3;
+}
+.dashboard-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--cp-dashboard-border);
+}
+.dashboard-tabs a {
+  padding: 10px 18px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cp-dashboard-muted);
+  border-bottom: 2px solid transparent;
+}
+.dashboard-tabs a.active {
+  color: var(--cp-link);
+  border-bottom-color: var(--cp-link);
+}
+.dashboard-tabs a:hover:not(.active) {
+  color: var(--cp-dashboard-text);
+  background: var(--cp-dashboard-surface-soft);
+}
+.card {
+  background: var(--cp-dashboard-surface);
+  padding: 16px 18px;
+  border-radius: 6px;
+  box-shadow: var(--cp-dashboard-card-shadow);
+  margin-bottom: 16px;
+}
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--cp-dashboard-muted);
+}
+input, select {
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid var(--cp-border-strong);
+  border-radius: 4px;
+  font-family: inherit;
+  background: var(--cp-dashboard-surface);
+  color: var(--cp-dashboard-text);
+  min-width: 150px;
+}
+input:focus, select:focus {
+  outline: 2px solid var(--cp-link);
+  border-color: var(--cp-link);
+}
+button, a.primary-button, a.secondary-button {
+  border: none;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.primary-button {
+  background: var(--cp-accent);
+  color: var(--cp-accent-fg);
+}
+.primary-button:hover { background: var(--cp-accent-hover); }
+.secondary-button {
+  background: var(--cp-dashboard-surface);
+  color: var(--cp-link);
+  box-shadow: var(--cp-dashboard-card-shadow);
+}
+.secondary-button:hover { background: var(--cp-dashboard-surface-soft); }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.kpi-card {
+  position: relative;
+  border-left: 4px solid var(--cp-link);
+  margin-bottom: 0;
+  padding: 16px 18px;
+}
+.kpi-card:nth-child(1),
+.kpi-card:nth-child(4),
+.kpi-card:nth-child(6) { border-left-color: var(--cp-danger); }
+.kpi-card:nth-child(2) { border-left-color: var(--cp-warning); }
+.kpi-card:nth-child(3),
+.kpi-card:nth-child(5) { border-left-color: var(--cp-success); }
+.kpi-card span {
+  color: var(--cp-dashboard-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.kpi-card strong {
+  font-size: 26px;
+  font-weight: 600;
+  margin-top: 4px;
+  display: block;
+  color: var(--cp-dashboard-text);
+}
+.kpi-card small {
+  font-size: 12px;
+  margin-top: 2px;
+  color: var(--cp-dashboard-muted);
+  display: block;
+}
+.how-to-read {
+  background: var(--cp-dashboard-callout);
+  border-left: 3px solid var(--cp-warning);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--cp-dashboard-text);
+  margin: 12px 0;
+}
+.grid-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.section-heading { margin-bottom: 12px; }
+.section-heading h2 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cp-dashboard-text);
+}
+.section-heading p {
+  font-size: 11px;
+  color: var(--cp-dashboard-muted);
+  margin: 0;
+}
+.bar-list { display: grid; gap: 12px; }
+.bar-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.bar-label span { color: var(--cp-dashboard-muted); }
+.bar-track {
+  height: 10px;
+  overflow: hidden;
+  background: var(--cp-dashboard-surface-soft);
+  border-radius: 4px;
+  border: 1px solid var(--cp-dashboard-border);
+}
+.bar-fill { height: 100%; background: var(--cp-accent); }
+.priority-high-bg { background: var(--cp-danger); }
+.priority-medium-bg { background: var(--cp-warning); }
+.priority-low-bg { background: var(--cp-success); }
+.accent-bg { background: var(--cp-link); }
+.responsive-table {
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid var(--cp-dashboard-border);
+  border-radius: 4px;
+}
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th {
+  background: var(--cp-dashboard-surface-soft);
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--cp-dashboard-text);
+  border-bottom: 1px solid var(--cp-dashboard-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--cp-dashboard-border);
+  vertical-align: top;
+}
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: var(--cp-dashboard-bg); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+code { font-family: Consolas, "Courier New", Courier, monospace; }
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.priority-high { color: var(--cp-priority-high-fg); background: var(--cp-priority-high-bg); }
+.priority-medium { color: var(--cp-priority-medium-fg); background: var(--cp-priority-medium-bg); }
+.priority-low { color: var(--cp-priority-low-fg); background: var(--cp-priority-low-bg); }
+.result-count { color: var(--cp-dashboard-muted); font-size: 12px; margin-bottom: 8px; }
+.details-panel { border: 1px solid var(--cp-dashboard-border); }
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.detail-grid > div {
+  background: var(--cp-dashboard-surface-soft);
+  border: 1px solid var(--cp-dashboard-border);
+  border-radius: 4px;
+  padding: 10px;
+}
+.detail-grid span { color: var(--cp-dashboard-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.detail-grid strong { display: block; margin-top: 4px; font-size: 16px; font-weight: 600; }
+.detail-grid small { display: block; color: var(--cp-dashboard-muted); margin-top: 2px; font-size: 11px; }
+.milestone-list { margin-left: 18px; }
+.milestone-list li { margin-bottom: 4px; font-size: 12px; }
+.methodology p { color: var(--cp-dashboard-muted); margin-bottom: 8px; font-size: 12px; }
+.error-text { color: var(--cp-danger); font-size: 12px; }
+.empty { padding: 12px; color: var(--cp-dashboard-muted); font-size: 12px; }
+@media (max-width: 1100px) {
+  .grid-two { grid-template-columns: 1fr; }
+  .hero { flex-direction: column; align-items: flex-start; }
+  .source-card { align-items: flex-start; text-align: left; }
+}
+@media print {
+  .toolbar, .app-menu { display: none; }
+  body { background: var(--cp-dashboard-surface); padding: 0; }
+  .card, .hero { break-inside: avoid; box-shadow: none; }
+}
+"""
+
+
+def app_menu_html(active: str) -> str:
+    acr_class = "active" if active == "acr" else ""
+    milestone_class = "active" if active == "milestones" else ""
+    return (
+        '<nav class="app-menu" aria-label="Dashboard menu">'
+        f'<a class="{acr_class}" href="/">ACR dashboard</a>'
+        f'<a class="{milestone_class}" href="/milestones">Milestone gaps</a>'
+        "</nav>"
+    )
+
+
+def shell_menu_html(active: str) -> str:
+    acr_class = "active" if active == "acr" else ""
+    milestone_class = "active" if active == "milestones" else ""
+    return (
+        '<nav class="app-menu" aria-label="Dashboard menu">'
+        f'<a class="{acr_class}" href="/" data-dashboard="acr" data-src="/embed/acr" data-url="/">ACR dashboard</a>'
+        f'<a class="{milestone_class}" href="/milestones" data-dashboard="milestones" data-src="/embed/milestones" data-url="/milestones">Milestone gaps</a>'
+        "</nav>"
+    )
+
+
+def _inject_app_menu(template: str, *, active: str) -> str:
+    if "clawpilotTheme" not in template:
+        template = template.replace("<head>", f"<head>\n{THEME_SCRIPT}", 1)
+    if "--cp-bg:" not in template:
+        template = template.replace("<style>", f"<style>\n{CLAWPILOT_THEME_CSS}\n{APP_MENU_CSS}", 1)
+    elif ".app-menu" not in template:
+        template = template.replace("</style>", f"{APP_MENU_CSS}\n</style>", 1)
+    menu = app_menu_html(active)
+    next_template, count = re.subn(r"(<body[^>]*>)", rf"\1\n{menu}", template, count=1)
+    if count != 1:
+        raise ValueError("Could not inject dashboard menu into HTML template.")
+    return next_template
+
+
+def _safe_json_script(model: dict) -> str:
+    return json.dumps(model, ensure_ascii=False, allow_nan=False).replace("</", "<\\/")
+
+
+def _html_escape(value: object) -> str:
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def _opportunity_map_labels(template: str) -> str:
+    replacements = {
+        "Opportunity Quadrant — DfC growth vs. other Azure growth": "Opportunity map - growth gap vs. Defender penetration",
+        "3-month trend leading up to the latest full month. Bottom-right = top opportunity (Other Azure growing, DfC flat or shrinking). Bubble size = total monthly ACR. Bubble color = priority (red/orange/green) — a green bubble in the red zone means the customer is in the high-opp geometry but already has heavy DfC penetration, so priority is lower. Click any bubble to drill down.": "X-axis shows the 3-month monthly ACR growth gap: Other Azure growth minus Defender for Cloud growth. Y-axis shows current Defender share of total ACR. Bottom-right is the clearest whitespace: Azure footprint growing while Defender penetration is low. Bubble size = total monthly ACR. Click any bubble to drill down.",
+        "3-month trend leading up to the latest full month. Bottom-right = top opportunity (Other Azure growing, DfC flat or shrinking).": "3-month monthly ACR growth gap vs current Defender penetration.",
+        "Other Azure 3-month change": "Growth gap",
+        "DfC 3-month change": "DfC penetration",
+    }
+    for old, new in replacements.items():
+        template = template.replace(old, new)
+    return template
+
+
+def _inject_opportunity_map(template: str) -> str:
+    script = r'''
+const DEFAULT_DFC_SHARE_THRESHOLD = 8;
+let dfcShareThreshold = DEFAULT_DFC_SHARE_THRESHOLD;
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function fmtThreshold(value) {
+  return Number.isInteger(value) ? `${value}%` : `${value.toFixed(1)}%`;
+}
+
+function ensureDfcThresholdControl() {
+  if (document.getElementById('dfc-threshold')) return;
+  const filter = document.getElementById('quadrant-filter');
+  if (!filter || !filter.parentElement) return;
+  const wrap = document.createElement('label');
+  wrap.setAttribute('for', 'dfc-threshold');
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.gap = '8px';
+  wrap.style.minWidth = '360px';
+  wrap.innerHTML = `
+    Defender share threshold
+    <input id="dfc-threshold" type="range" min="0" max="20" step="0.5" value="${DEFAULT_DFC_SHARE_THRESHOLD}" aria-label="Defender for Cloud share threshold" style="width:180px;">
+    <strong id="dfc-threshold-value">${fmtThreshold(DEFAULT_DFC_SHARE_THRESHOLD)}</strong>
+    <span id="dfc-threshold-count" style="color:#605e5c;"></span>`;
+  filter.parentElement.appendChild(wrap);
+  updateExportLink();
+  document.getElementById('dfc-threshold').addEventListener('input', e => {
+    const next = parseFloat(e.target.value);
+    dfcShareThreshold = Number.isFinite(next) ? next : DEFAULT_DFC_SHARE_THRESHOLD;
+    updateExportLink();
+    renderOpportunityHeatmap();
+  });
+}
+
+function updateExportLink() {
+  const exportLink = document.querySelector('a[href^="/export-ppt"]');
+  if (exportLink) exportLink.href = `/export-ppt?threshold=${encodeURIComponent(dfcShareThreshold)}`;
+}
+
+function ensureActionQueueShell() {
+  if (document.getElementById('action-queue-section')) return;
+  const chart = document.getElementById('chart-quadrant');
+  const chartBox = chart?.closest('.chart-box');
+  if (!chartBox || !chartBox.parentElement) return;
+  const section = document.createElement('div');
+  section.id = 'action-queue-section';
+  section.innerHTML = `
+    <div class="cards">
+      <div class="card high"><div class="label">Annualized DfC ACR Opportunity</div><div class="val" id="action-annual-opportunity">-</div><div class="delta" id="action-annual-opportunity-note">run-rate gap to threshold</div></div>
+      <div class="card medium"><div class="label">Monthly DfC ACR Gap</div><div class="val" id="action-monthly-gap">-</div><div class="delta">latest month basis</div></div>
+      <div class="card"><div class="label">Accounts Below Threshold</div><div class="val" id="action-below-threshold">-</div><div class="delta" id="action-below-threshold-note">visible opportunity rows</div></div>
+    </div>
+    <div class="chart-box" id="action-queue-card">
+      <div class="title">Sales action queue</div>
+      <div class="sub">Prioritized follow-up list based on the selected Defender share threshold. Estimated gap is directional sizing only.</div>
+      <div class="controls">
+        <label>Rows
+          <select id="action-queue-limit">
+            <option value="10">Top 10</option>
+            <option value="25">Top 25</option>
+            <option value="all">All visible</option>
+          </select>
+        </label>
+        <button class="import-btn" id="copy-action-queue" type="button">Copy action list</button>
+        <button class="import-btn" id="download-action-queue" type="button">Download CSV</button>
+        <span id="action-queue-status" style="font-size:12px;color:#605e5c;"></span>
+      </div>
+      <div id="action-queue"></div>
+    </div>`;
+  chartBox.parentElement.insertBefore(section, chartBox);
+  document.getElementById('action-queue-limit').addEventListener('change', renderActionQueue);
+  document.getElementById('copy-action-queue').addEventListener('click', copyActionQueue);
+  document.getElementById('download-action-queue').addEventListener('click', downloadActionQueueCsv);
+}
+
+function filteredOpportunityRows() {
+  const filter = document.getElementById('quadrant-filter').value;
+  let rows = DATA.opportunity.filter(r => r.opportunity !== 'Too small');
+  if (filter === 'High') rows = rows.filter(r => r.opportunity === 'High');
+  else if (filter === 'Medium') rows = rows.filter(r => r.opportunity === 'Medium');
+  else if (filter === 'HighMed') rows = rows.filter(r => r.opportunity === 'High' || r.opportunity === 'Medium');
+  return rows;
+}
+
+function actionDetails(row) {
+  const belowThreshold = (row.dfc_ratio || 0) < dfcShareThreshold;
+  const estimatedGap = Math.max(0, (row.total_monthly_current || row.total_current || 0) * (dfcShareThreshold / 100) - (row.dfc_monthly_current || row.dfc_current || 0));
+  const estimatedAnnualOpportunity = estimatedGap * 12;
+  const products = DATA.customer_data?.[row.customer]?.products || [];
+  const workload = (products.find(p => p.product !== 'Defender for Cloud' && (p.current || 0) > 0) || {}).product || 'core Azure workloads';
+  let recommendedAction = 'Monitor Defender attach';
+  let conversationAngle = `Confirm Defender for Cloud coverage keeps pace with ${workload}.`;
+  let actionReason = row.notes && row.notes !== '-' ? row.notes : 'No urgent attach gap under the selected threshold.';
+  if ((row.dfc_monthly_current || row.dfc_current || 0) < 30 && (row.total_monthly_current || row.total_current || 0) > 3000) {
+    recommendedAction = 'Start DfC attach discovery';
+    conversationAngle = `Open with current ${workload} usage and validate whether Defender for Cloud is enabled.`;
+    actionReason = 'Little or no Defender for Cloud ACR against a meaningful Azure footprint.';
+  } else if (belowThreshold && (row.growth_gap || 0) > 0) {
+    recommendedAction = 'Prioritize attach expansion';
+    conversationAngle = `Lead with ${workload} growth and the Defender share gap to the selected threshold.`;
+    actionReason = 'Azure footprint is growing faster than Defender for Cloud attach.';
+  } else if (belowThreshold) {
+    recommendedAction = 'Expand Defender coverage';
+    conversationAngle = `Review Defender for Cloud coverage across ${workload} and adjacent services.`;
+    actionReason = 'Defender for Cloud share is below the selected threshold.';
+  } else if ((row.dfc_3m_delta || 0) < 0) {
+    recommendedAction = 'Review DfC decline';
+    conversationAngle = 'Validate whether Defender usage declined because of optimization, churn, or reporting timing.';
+    actionReason = 'Defender for Cloud ACR is declining over the 3-month window.';
+  }
+  return {belowThreshold, estimatedGap, estimatedAnnualOpportunity, recommendedAction, conversationAngle, actionReason};
+}
+
+function actionQueueRows() {
+  const priorityOrder = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+  return filteredOpportunityRows()
+    .map(row => ({...row, ...actionDetails(row)}))
+    .sort((a, b) =>
+      Number(b.belowThreshold) - Number(a.belowThreshold) ||
+      priorityOrder[a.opportunity] - priorityOrder[b.opportunity] ||
+      (b.estimatedGap || 0) - (a.estimatedGap || 0) ||
+      (b.growth_gap || 0) - (a.growth_gap || 0) ||
+      (b.total_monthly_current || b.total_current || 0) - (a.total_monthly_current || a.total_current || 0));
+}
+
+function visibleActionQueueRows() {
+  const rows = actionQueueRows();
+  const limit = document.getElementById('action-queue-limit')?.value || '10';
+  return limit === 'all' ? rows : rows.slice(0, parseInt(limit, 10));
+}
+
+function updateActionQueueMetrics() {
+  const rows = actionQueueRows();
+  const monthlyGap = rows.reduce((sum, r) => sum + (r.estimatedGap || 0), 0);
+  const annualOpportunity = rows.reduce((sum, r) => sum + (r.estimatedAnnualOpportunity || 0), 0);
+  const belowThreshold = rows.filter(r => r.belowThreshold).length;
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  const annualEl = document.getElementById('action-annual-opportunity');
+  const annualNoteEl = document.getElementById('action-annual-opportunity-note');
+  const monthlyEl = document.getElementById('action-monthly-gap');
+  const belowEl = document.getElementById('action-below-threshold');
+  const belowNoteEl = document.getElementById('action-below-threshold-note');
+  if (annualEl) annualEl.textContent = fmt.money2(annualOpportunity);
+  if (annualNoteEl) annualNoteEl.textContent = `annualized run-rate gap to ${thresholdLabel}`;
+  if (monthlyEl) monthlyEl.textContent = fmt.money2(monthlyGap);
+  if (belowEl) belowEl.textContent = belowThreshold.toLocaleString('en-US');
+  if (belowNoteEl) belowNoteEl.textContent = `below selected ${thresholdLabel} threshold`;
+}
+
+function renderActionQueue() {
+  ensureActionQueueShell();
+  const target = document.getElementById('action-queue');
+  if (!target) return;
+  updateActionQueueMetrics();
+  const rows = visibleActionQueueRows();
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty">No matching customer actions for the current filter.</div>';
+    return;
+  }
+  target.innerHTML = `
+    <div class="scroll-table" style="max-height:420px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Priority</th>
+            <th class="num">FYTD Total ACR</th>
+            <th class="num">Monthly Total ACR</th>
+            <th class="num">FYTD DfC ACR</th>
+            <th class="num">Monthly DfC ACR</th>
+            <th class="num">DfC %</th>
+            <th class="num">Est. gap to ${thresholdLabel}</th>
+            <th class="num">Annualized opportunity</th>
+            <th>Recommended action</th>
+            <th>Conversation angle</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr class="clickable" data-customer="${escapeHtml(r.customer)}">
+              <td><strong>${escapeHtml(r.customer)}</strong></td>
+              <td>${tagFor(r.opportunity)}</td>
+              <td class="num">${fmt.money2(r.total_fytd || 0)}</td>
+              <td class="num">${fmt.money2(r.total_monthly_current || r.total_current)}</td>
+              <td class="num">${fmt.money2(r.dfc_fytd || 0)}</td>
+              <td class="num">${fmt.money2(r.dfc_monthly_current || r.dfc_current)}</td>
+              <td class="num">${fmt.pctRaw(r.dfc_ratio)}</td>
+              <td class="num"><strong>${fmt.money2(r.estimatedGap)}</strong></td>
+              <td class="num"><strong>${fmt.money2(r.estimatedAnnualOpportunity)}</strong></td>
+              <td>${escapeHtml(r.recommendedAction)}<br><span style="font-size:12px;color:#605e5c;">${escapeHtml(r.actionReason)}</span></td>
+              <td>${escapeHtml(r.conversationAngle)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  document.querySelectorAll('#action-queue tr.clickable').forEach(tr =>
+    tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
+}
+
+function actionQueueText() {
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  return visibleActionQueueRows().map((r, index) =>
+    `${index + 1}. ${r.customer} | ${r.opportunity} | FYTD Total ACR ${fmt.money2(r.total_fytd || 0)} | Monthly Total ACR ${fmt.money2(r.total_monthly_current || r.total_current)} | FYTD DfC ACR ${fmt.money2(r.dfc_fytd || 0)} | Monthly DfC ACR ${fmt.money2(r.dfc_monthly_current || r.dfc_current)} | DfC ${fmt.pctRaw(r.dfc_ratio)} | Monthly gap to ${thresholdLabel}: ${fmt.money2(r.estimatedGap)} | Annualized opportunity: ${fmt.money2(r.estimatedAnnualOpportunity)} | ${r.recommendedAction} - ${r.conversationAngle}`
+  ).join('\n');
+}
+
+function setActionQueueStatus(message) {
+  const status = document.getElementById('action-queue-status');
+  if (status) status.textContent = message;
+}
+
+function copyActionQueue() {
+  const text = actionQueueText();
+  if (!text) {
+    setActionQueueStatus('Nothing to copy');
+    return;
+  }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => setActionQueueStatus('Copied'),
+      () => setActionQueueStatus('Copy failed')
+    );
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  setActionQueueStatus(copied ? 'Copied' : 'Copy failed');
+}
+
+function csvCell(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function downloadActionQueueCsv() {
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  const rows = visibleActionQueueRows();
+  if (!rows.length) {
+    setActionQueueStatus('Nothing to download');
+    return;
+  }
+  const headers = ['Customer', 'Priority', 'FYTD Total ACR', 'Monthly Total ACR', 'FYTD Defender ACR', 'Monthly Defender ACR', 'Defender %', `Monthly gap to ${thresholdLabel}`, 'Annualized opportunity', 'Growth gap', 'Recommended action', 'Conversation angle', 'Reason'];
+  const lines = [
+    headers.map(csvCell).join(','),
+    ...rows.map(r => [
+      r.customer,
+      r.opportunity,
+      r.total_fytd || 0,
+      r.total_monthly_current || r.total_current,
+      r.dfc_fytd || 0,
+      r.dfc_monthly_current || r.dfc_current,
+      r.dfc_ratio,
+      r.estimatedGap,
+      r.estimatedAnnualOpportunity,
+      r.growth_gap,
+      r.recommendedAction,
+      r.conversationAngle,
+      r.actionReason
+    ].map(csvCell).join(','))
+  ];
+  const blob = new Blob([lines.join('\r\n')], {type: 'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `defender-action-queue-${thresholdLabel.replace('%', 'pct')}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setActionQueueStatus('CSV downloaded');
+}
+
+function quadrantChart(containerId, allPoints) {
+  const W = 900, H = 460;
+  const M = {top: 30, right: 30, bottom: 54, left: 78};
+  const innerW = W - M.left - M.right, innerH = H - M.top - M.bottom;
+  const points = allPoints.filter(p => p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y));
+  const positiveGaps = points.map(p => Math.max(0, p.x || 0));
+  const xMaxRaw = Math.max(...positiveGaps, 1);
+  const xMax = Math.max(1000, Math.ceil(xMaxRaw / 1000) * 1000);
+  const yMax = 20;
+  const xMin = 0, yMin = 0;
+  const xScale = v => M.left + ((Math.max(xMin, Math.min(xMax, v)) - xMin) / (xMax - xMin)) * innerW;
+  const yScale = v => M.top + innerH - ((Math.max(yMin, Math.min(yMax, v)) - yMin) / (yMax - yMin)) * innerH;
+  const sizes = points.map(p => p.size || 1);
+  const sMax = Math.max(...sizes, 1);
+  const sScale = s => 5 + Math.sqrt(s / sMax) * 24;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  const lowShareY = yScale(2);
+  const medShareY = yScale(5);
+  svg += `<rect x="${M.left}" y="${medShareY}" width="${innerW}" height="${H - M.bottom - medShareY}" fill="#fde7e9" opacity="0.45"/>`;
+  svg += `<rect x="${M.left}" y="${lowShareY}" width="${innerW}" height="${medShareY - lowShareY}" fill="#fff4ce" opacity="0.48"/>`;
+  svg += `<rect x="${M.left}" y="${M.top}" width="${innerW}" height="${lowShareY - M.top}" fill="#dff6dd" opacity="0.42"/>`;
+  const xTicks = [0, xMax * 0.25, xMax * 0.5, xMax * 0.75, xMax];
+  const yTicks = [0, 2, 5, 10, 15, 20];
+  xTicks.forEach(xv => {
+    svg += `<line x1="${xScale(xv)}" y1="${M.top}" x2="${xScale(xv)}" y2="${H - M.bottom}" stroke="#edebe9"/>`;
+    svg += `<text x="${xScale(xv)}" y="${H - M.bottom + 16}" text-anchor="middle" font-size="10" fill="#605e5c">$${Math.round(xv).toLocaleString('en-US')}</text>`;
+  });
+  yTicks.forEach(yv => {
+    svg += `<line x1="${M.left}" y1="${yScale(yv)}" x2="${W - M.right}" y2="${yScale(yv)}" stroke="#edebe9"/>`;
+    svg += `<text x="${M.left - 8}" y="${yScale(yv) + 3}" text-anchor="end" font-size="10" fill="#605e5c">${yv}%</text>`;
+  });
+  svg += `<line x1="${M.left}" y1="${yScale(2)}" x2="${W - M.right}" y2="${yScale(2)}" stroke="#a19f9d" stroke-dasharray="4 3"/>`;
+  svg += `<line x1="${M.left}" y1="${yScale(5)}" x2="${W - M.right}" y2="${yScale(5)}" stroke="#a19f9d" stroke-dasharray="4 3"/>`;
+  svg += `<text x="${M.left + innerW/2}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#323130" font-weight="600">3-month monthly ACR growth gap: Other Azure minus DfC</text>`;
+  svg += `<text x="18" y="${M.top + innerH/2}" text-anchor="middle" font-size="11" fill="#323130" font-weight="600" transform="rotate(-90 18 ${M.top + innerH/2})">DfC share of total ACR</text>`;
+  svg += `<text x="${W - M.right - 8}" y="${H - M.bottom - 8}" text-anchor="end" font-size="11" fill="#a4262c" font-weight="700">HIGH OPPORTUNITY: low DfC share + large growth gap</text>`;
+  svg += `<text x="${W - M.right - 8}" y="${M.top + 14}" text-anchor="end" font-size="11" fill="#107c10" font-weight="700">Healthier DfC penetration</text>`;
+  const colorMap = {High: '#d13438', Medium: '#ff8c00', Low: '#107c10', 'Too small': '#a19f9d'};
+  const opacityMap = {High: 0.82, Medium: 0.72, Low: 0.28, 'Too small': 0.20};
+  const oppRank = {High: 3, Medium: 2, Low: 1, 'Too small': 0};
+  const orderedPoints = points.slice().sort((a, b) => (oppRank[a.opportunity] || 0) - (oppRank[b.opportunity] || 0));
+  const labelCandidates = orderedPoints
+    .filter(p => (p.opportunity === 'High' || p.opportunity === 'Medium') && p.x > 0)
+    .sort((a, b) => (b.label_score || 0) - (a.label_score || 0))
+    .slice(0, 8);
+  const labeledSet = new Set(labelCandidates.map(p => p.label));
+  const drawnLabels = [];
+  orderedPoints.forEach(p => {
+    const isClippedX = p.x > xMax;
+    const isClippedY = p.y > yMax;
+    const cx = xScale(p.x), cy = yScale(p.y);
+    const r = sScale(p.size || 1);
+    const fill = colorMap[p.opportunity] || '#0078d4';
+    const op = opacityMap[p.opportunity] != null ? opacityMap[p.opportunity] : 0.65;
+    const stroke = (isClippedX || isClippedY) ? '#201f1e' : 'white';
+    const strokeWidth = (isClippedX || isClippedY) ? 2 : 1.5;
+    svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" opacity="${op}" stroke="${stroke}" stroke-width="${strokeWidth}" data-customer="${p.label.replace(/"/g, '&quot;')}" data-x="${p.x}" data-y="${p.y}" data-size="${p.size}" data-opp="${p.opportunity}" data-other-delta="${p.other_delta}" data-dfc-delta="${p.dfc_delta}" style="cursor:pointer"/>`;
+    if (labeledSet.has(p.label)) {
+      const truncated = p.label.length > 22 ? p.label.slice(0, 22) + '...' : p.label;
+      const anchors = [
+        {x: cx + r + 4, y: cy - r - 2, align: 'start'},
+        {x: cx + r + 4, y: cy + r + 10, align: 'start'},
+        {x: cx - r - 4, y: cy - r - 2, align: 'end'},
+      ];
+      const labelW = truncated.length * 5.5, labelH = 12;
+      let chosen = null;
+      for (const a of anchors) {
+        const lx = a.align === 'end' ? a.x - labelW : a.x;
+        const ly = a.y - labelH;
+        const collides = drawnLabels.some(d => lx < d.x + d.w && lx + labelW > d.x && ly < d.y + d.h && ly + labelH > d.y);
+        if (!collides && lx >= M.left && lx + labelW <= W - M.right && ly >= M.top && ly + labelH <= H - M.bottom) {
+          chosen = a; drawnLabels.push({x: lx, y: ly, w: labelW, h: labelH}); break;
+        }
+      }
+      if (chosen) svg += `<text x="${chosen.x}" y="${chosen.y}" text-anchor="${chosen.align}" font-size="10" fill="#201f1e" font-weight="600" style="paint-order:stroke; stroke:#ffffff; stroke-width:3px; stroke-linejoin:round;">${truncated}</text>`;
+    }
+  });
+  svg += `</svg>`;
+  document.getElementById(containerId).innerHTML = svg;
+  const footEl = document.getElementById(containerId + '-foot');
+  if (footEl) footEl.innerHTML = 'This view uses absolute monthly ACR change, not percentage growth, to avoid misleading spikes from tiny Defender baselines. X = Other Azure 3M $ change minus DfC 3M $ change. Y is capped at 20% for readability.';
+  document.querySelectorAll(`#${containerId} circle`).forEach(c => {
+    c.addEventListener('mousemove', e => {
+      const html = `<b>${c.getAttribute('data-customer')}</b><br/>
+        Priority: ${c.getAttribute('data-opp')}<br/>
+        DfC share: ${parseFloat(c.getAttribute('data-y')).toFixed(1)}%<br/>
+        Growth gap: $${parseFloat(c.getAttribute('data-x')).toLocaleString('en-US',{maximumFractionDigits:0})}<br/>
+        Other Azure 3M delta: $${parseFloat(c.getAttribute('data-other-delta')).toLocaleString('en-US',{maximumFractionDigits:0})}<br/>
+        DfC 3M delta: $${parseFloat(c.getAttribute('data-dfc-delta')).toLocaleString('en-US',{maximumFractionDigits:0})}<br/>
+        Monthly Total ACR: $${parseFloat(c.getAttribute('data-size')).toLocaleString('en-US',{maximumFractionDigits:0})}`;
+      showTooltip(html, e.pageX, e.pageY);
+    });
+    c.addEventListener('mouseleave', hideTooltip);
+    c.addEventListener('click', () => selectCustomer(c.getAttribute('data-customer')));
+  });
+}
+
+function renderQuadrant() {
+  const filter = document.getElementById('quadrant-filter').value;
+  let pts = DATA.opportunity
+    .filter(r => r.opportunity !== 'Too small')
+    .filter(r => r.total_current > 0)
+    .map(r => {
+      const gap = Math.max(0, r.growth_gap || 0);
+      const share = r.dfc_ratio || 0;
+      const labelScore = gap * (1 + Math.max(0, 5 - Math.min(share, 5))) * Math.sqrt(Math.max(r.total_current || 0, 1));
+      return {
+        label: r.customer,
+        x: gap,
+        y: share,
+        size: r.total_monthly_current || r.total_current,
+        opportunity: r.opportunity,
+        other_delta: r.other_3m_delta || 0,
+        dfc_delta: r.dfc_3m_delta || 0,
+        label_score: labelScore
+      };
+    });
+  if (filter === 'High') pts = pts.filter(p => p.opportunity === 'High');
+  else if (filter === 'Medium') pts = pts.filter(p => p.opportunity === 'Medium');
+  else if (filter === 'HighMed') pts = pts.filter(p => p.opportunity === 'High' || p.opportunity === 'Medium');
+  quadrantChart('chart-quadrant', pts);
+}
+
+function renderOpportunityHeatmap() {
+  ensureDfcThresholdControl();
+  ensureActionQueueShell();
+  const filter = document.getElementById('quadrant-filter').value;
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  let rows = filteredOpportunityRows();
+  const belowThresholdCount = rows.filter(r => (r.dfc_ratio || 0) < dfcShareThreshold).length;
+  const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+  rows = rows
+    .slice()
+    .sort((a, b) =>
+      Number((b.dfc_ratio || 0) < dfcShareThreshold) - Number((a.dfc_ratio || 0) < dfcShareThreshold) ||
+      order[a.opportunity] - order[b.opportunity] ||
+      (b.growth_gap || 0) - (a.growth_gap || 0) ||
+      (b.total_monthly_current || b.total_current || 0) - (a.total_monthly_current || a.total_current || 0))
+    .slice(0, 35);
+  const maxGap = Math.max(...rows.map(r => Math.max(0, r.growth_gap || 0)), 1);
+  const maxTotal = Math.max(...rows.map(r => r.total_monthly_current || r.total_current || 0), 1);
+  const heat = (value, maxValue, color) => {
+    const intensity = Math.max(0.08, Math.min(0.85, (value || 0) / maxValue));
+    return `background: color-mix(in srgb, ${color} ${Math.round(intensity * 75)}%, white);`;
+  };
+  const shareStyle = value => {
+    if (value < Math.min(2, dfcShareThreshold)) return 'background:#fde7e9;color:#a4262c;font-weight:700;';
+    if (value < dfcShareThreshold) return 'background:#fff4ce;color:#8e562e;font-weight:700;';
+    return 'background:#dff6dd;color:#107c10;font-weight:700;';
+  };
+  const thresholdValueEl = document.getElementById('dfc-threshold-value');
+  if (thresholdValueEl) thresholdValueEl.textContent = thresholdLabel;
+  const thresholdCountEl = document.getElementById('dfc-threshold-count');
+  if (thresholdCountEl) thresholdCountEl.textContent = `${belowThresholdCount} below threshold`;
+  document.getElementById('chart-quadrant').innerHTML = `
+    <div class="scroll-table" style="max-height:620px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Priority</th>
+            <th class="num">FYTD Total ACR</th>
+            <th class="num">Monthly Total ACR</th>
+            <th class="num">FYTD DfC ACR</th>
+            <th class="num">Monthly DfC ACR</th>
+            <th class="num">DfC %</th>
+            <th class="num">Other 3M $</th>
+            <th class="num">DfC 3M $</th>
+            <th class="num">Gap</th>
+            <th>Signal</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr class="clickable" data-customer="${r.customer.replace(/"/g, '&quot;')}">
+              <td><strong>${r.customer}</strong></td>
+              <td>${tagFor(r.opportunity)}</td>
+              <td class="num">${fmt.money2(r.total_fytd || 0)}</td>
+              <td class="num" style="${heat(r.total_monthly_current || r.total_current, maxTotal, '#0078d4')}">${fmt.money2(r.total_monthly_current || r.total_current)}</td>
+              <td class="num">${fmt.money2(r.dfc_fytd || 0)}</td>
+              <td class="num">${fmt.money2(r.dfc_monthly_current || r.dfc_current)}</td>
+              <td class="num" style="${shareStyle(r.dfc_ratio || 0)}">${fmt.pctRaw(r.dfc_ratio)}</td>
+              <td class="num ${fmt.pctClass(r.other_3m_delta)}">${fmt.money2(r.other_3m_delta || 0)}</td>
+              <td class="num ${fmt.pctClass(r.dfc_3m_delta)}">${fmt.money2(r.dfc_3m_delta || 0)}</td>
+              <td class="num" style="${heat(Math.max(0, r.growth_gap || 0), maxGap, '#d13438')}"><strong>${fmt.money2(r.growth_gap || 0)}</strong></td>
+              <td>${(r.dfc_ratio || 0) < dfcShareThreshold ? `Below selected ${thresholdLabel} threshold. ` : ''}${r.notes}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  document.querySelectorAll('#chart-quadrant tr.clickable').forEach(tr =>
+    tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
+  const footEl = document.getElementById('chart-quadrant-foot');
+  if (footEl) footEl.innerHTML = `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 8% is aligned to the internal FY26 DfC attach reference.`;
+  renderActionQueue();
+}
+
+function renderQuadrant() {
+  renderOpportunityHeatmap();
+}
+
+'''
+    return template.replace("function renderAll() {", script + "\nfunction renderAll() {", 1)

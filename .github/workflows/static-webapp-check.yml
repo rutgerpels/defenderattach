@@ -1,0 +1,59 @@
+name: Static web app drift check
+
+# Verifies two things on every PR / push to main:
+#  1. web-app/index.html is up to date with its inputs (template + JS model +
+#     the static_dashboard.py helpers it reuses). If a contributor edits any
+#     input but forgets to regenerate, this job fails with the exact command
+#     to run.
+#  2. The Node-based regression suite still passes (XSS escaping, CSV formula
+#     injection guards, timezone boundaries, AcrModel.build contract).
+#
+# Runtime is ~30 seconds. No secrets, no network calls beyond action setup.
+
+on:
+  pull_request:
+    paths:
+      - 'web-app/**'
+      - 'scripts/build_static_webapp.py'
+      - 'src/defender_acr_dashboard/static_dashboard.py'
+      - 'docs/defender_for_cloud_dashboard (2).html'
+      - '.github/workflows/static-webapp-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'web-app/**'
+      - 'scripts/build_static_webapp.py'
+      - 'src/defender_acr_dashboard/static_dashboard.py'
+      - 'docs/defender_for_cloud_dashboard (2).html'
+      - '.github/workflows/static-webapp-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    name: Verify generated index.html and run regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node 20
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Verify web-app/index.html is up to date
+        run: python scripts/build_static_webapp.py --check
+
+      - name: Run web-app regression tests
+        run: node web-app/tests/regression.cjs

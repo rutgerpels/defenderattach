@@ -1,0 +1,196 @@
+:root {
+  color-scheme: light;
+  --cp-bg: #f7f4ef;
+  --cp-bg-elevated: #fcfbf8;
+  --cp-surface: #ffffff;
+  --cp-surface-soft: #f5f5f5;
+  --cp-border: #dedede;
+  --cp-border-strong: #919191;
+  --cp-text: #242424;
+  --cp-text-muted: #5c5c5c;
+  --cp-text-soft: #6f6f6f;
+  --cp-accent: #b11f4b;
+  --cp-accent-hover: #9a1a41;
+  --cp-accent-soft: rgba(177, 31, 75, 0.08);
+  --cp-accent-fg: #ffffff;
+  --cp-success: #16a34a;
+  --cp-danger: #dc2626;
+  --cp-warning: #f59e0b;
+  --cp-link: #0078d4;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --cp-overlay: rgba(255, 255, 255, 0.8);
+  --cp-panel: rgba(255, 255, 255, 0.86);
+  --cp-panel-strong: rgba(255, 255, 255, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.55);
+  --cp-highlight: rgba(177, 31, 75, 0.12);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --cp-bg: #3d3b3a;
+  --cp-bg-elevated: #343231;
+  --cp-surface: #292929;
+  --cp-surface-soft: #2e2e2e;
+  --cp-border: #474747;
+  --cp-border-strong: #5f5f5f;
+  --cp-text: #dedede;
+  --cp-text-muted: #919191;
+  --cp-text-soft: #b0b0b0;
+  --cp-accent: #fd8ea1;
+  --cp-accent-hover: #fb7b91;
+  --cp-accent-soft: rgba(253, 142, 161, 0.14);
+  --cp-accent-fg: #1a1a1a;
+  --cp-success: #4ade80;
+  --cp-danger: #f87171;
+  --cp-warning: #fbbf24;
+  --cp-link: #4da6ff;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  --cp-overlay: rgba(41, 41, 41, 0.88);
+  --cp-panel: rgba(41, 41, 41, 0.72);
+  --cp-panel-strong: rgba(41, 41, 41, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.04);
+  --cp-highlight: rgba(253, 142, 161, 0.12);
+}
+
+body {
+  margin: 0;
+  background: var(--cp-bg);
+  color: var(--cp-text);
+  font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.app-shell {
+  display: grid;
+  gap: 24px;
+  padding: 24px;
+}
+
+.hero {
+  align-items: end;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 4rem);
+  letter-spacing: -0.04em;
+}
+
+.eyebrow {
+  color: var(--cp-accent);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.hero-copy {
+  color: var(--cp-text-muted);
+  font-size: 1.1rem;
+  max-width: 760px;
+}
+
+.source-pill {
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: 16px;
+  box-shadow: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
+  display: grid;
+  gap: 4px;
+  min-width: 280px;
+  padding: 16px;
+}
+
+.source-pill span,
+.kpi-card span,
+.section-heading p,
+.controls label {
+  color: var(--cp-text-muted);
+}
+
+.card {
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: 16px;
+  box-shadow: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
+}
+
+.controls {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  padding: 16px;
+}
+
+.controls label {
+  font-weight: 700;
+  grid-row: 1;
+}
+
+.primary-button {
+  align-self: end;
+  background: var(--cp-accent);
+  border: 0;
+  border-radius: 0.625rem;
+  color: var(--cp-accent-fg);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 12px 18px;
+}
+
+.primary-button:hover {
+  background: var(--cp-accent-hover);
+}
+
+.summary-grid,
+.charts-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.kpi-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.kpi-card strong {
+  font-size: 1.8rem;
+}
+
+.section-heading {
+  padding: 20px 20px 0;
+}
+
+.section-heading h2,
+.section-heading p {
+  margin: 0 0 8px;
+}
+
+.charts-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.charts-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.dash-table-container {
+  padding: 12px 20px 20px;
+}
+
+@media (max-width: 1100px) {
+  .hero,
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .summary-grid,
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
