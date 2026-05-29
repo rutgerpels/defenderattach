@@ -446,36 +446,57 @@ console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
   });
 }
 
-console.log('\nweb-app/index.html (weekly granularity views)');
+console.log('\nweb-app/index.html (weekly-only trend views)');
 {
   const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
-  test('exposes monthly/weekly granularity controls, hidden by default', () => {
-    assert(/id="product-trend-grain"/.test(src), 'overview grain select present');
-    assert(/id="cust-trend-grain"/.test(src), 'customer grain select present');
-    assert(/id="grain-ctl" hidden/.test(src), 'overview grain control hidden by default');
-    assert(/id="cust-grain-ctl" hidden/.test(src), 'customer grain control hidden by default');
+  test('monthly/weekly granularity toggle is removed', () => {
+    assert(!/id="product-trend-grain"/.test(src), 'no overview grain select');
+    assert(!/id="cust-trend-grain"/.test(src), 'no customer grain select');
+    assert(!/function initGrainControls\(\)/.test(src), 'no initGrainControls');
+    assert(!/id="grain-ctl"/.test(src), 'no overview grain control wrapper');
+    assert(!/id="cust-grain-ctl"/.test(src), 'no customer grain control wrapper');
   });
-  test('grain controls are only shown when weekly data is available', () => {
-    assert(/function initGrainControls\(\)/.test(src), 'initGrainControls defined');
-    assert(/const show = !!DATA\.weekly_enabled;/.test(src), 'visibility gated on weekly_enabled');
-    assert(/initGrainControls\(\);/.test(src), 'initGrainControls invoked in renderAll');
+  test('trend mode labels no longer mention "month"', () => {
+    assert(/Indexed to first point \(=100\)/.test(src), 'indexed option relabelled');
+    assert(/Absolute ACR</.test(src), 'absolute option relabelled');
+    assert(!/Indexed to first month/.test(src), 'no stale indexed label');
+    assert(!/Absolute monthly ACR/.test(src), 'no stale absolute label');
   });
-  test('overview trends switch between monthly and weekly series', () => {
-    assert(/function renderDfcTrend\(\)/.test(src), 'grain-aware DfC trend defined');
-    assert(/weekly \? DATA\.dfc_total_weekly : DATA\.dfc_total_monthly/.test(src), 'DfC weekly source wired');
-    assert(/const src = weekly \? DATA\.product_weekly : DATA\.product_monthly;/.test(src), 'product weekly source wired');
+  test('overview trends auto-select weekly when available', () => {
+    assert(/function renderDfcTrend\(\)/.test(src), 'weekly-preferring DfC trend defined');
+    assert(/const weekly = !!\(DATA\.weekly_enabled && DATA\.dfc_total_weekly\);/.test(src), 'DfC weekly auto-selected');
+    assert(/const weekly = !!\(DATA\.weekly_enabled && DATA\.product_weekly\);/.test(src), 'product weekly auto-selected');
     assert(/labels = weekly \? DATA\.week_labels : DATA\.month_labels/.test(src), 'weekly x-axis labels wired');
     assert(!/lineChart\('chart-dfc-trend', \[\{label: 'Defender for Cloud', values: DATA\.dfc_total_monthly, color: '#0078d4'\}\]\);/.test(src), 'no stale month-only DfC trend call');
   });
-  test('customer drill-down charts switch granularity', () => {
-    assert(/const cWeekly = !!\(cg && cg\.value === 'weekly' && DATA\.weekly_enabled && Array\.isArray\(cd\.dfc_weekly\) && Array\.isArray\(cd\.other_weekly\) && Array\.isArray\(cd\.total_weekly\)\);/.test(src), 'customer weekly guard present');
+  test('customer drill-down charts auto-select weekly when available', () => {
+    assert(/const cWeekly = !!\(DATA\.weekly_enabled && Array\.isArray\(cd\.dfc_weekly\) && Array\.isArray\(cd\.other_weekly\) && Array\.isArray\(cd\.total_weekly\)\);/.test(src), 'customer weekly guard present');
     assert(/const dfcSeries = cWeekly \? cd\.dfc_weekly : cd\.dfc_series;/.test(src), 'customer DfC series switched');
-    assert(/lineChart\('chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels\}\);/.test(src), 'customer DfC chart relabelled');
-    assert(/lineChart\('chart-cust-pct', .*\{labels: cLabels\}\);/.test(src), 'customer % chart relabelled');
+    assert(/lineChart\('chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer DfC chart relabelled');
+    assert(/lineChart\('chart-cust-pct', .*\{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer % chart relabelled');
   });
-  test('granularity selects are wired to re-render their panels', () => {
-    assert(/g\.addEventListener\('change', \(\) => \{ renderProductTrend\(\); renderDfcTrend\(\); \}\);/.test(src), 'overview grain listener present');
-    assert(/cg\.addEventListener\('change', \(\) => \{ const cs = document\.getElementById\('customer-select'\); if \(cs && cs\.value\) renderCustomerDetail\(cs\.value\); \}\);/.test(src), 'customer grain listener present');
+  test('legacy monthly data still falls back without blank charts', () => {
+    assert(/weekly \? DATA\.product_weekly : DATA\.product_monthly/.test(src), 'product monthly fallback retained');
+    assert(/weekly \? DATA\.dfc_total_weekly : DATA\.dfc_total_monthly/.test(src), 'DfC monthly fallback retained');
+    assert(/cWeekly \? cd\.dfc_weekly : cd\.dfc_series/.test(src), 'customer monthly fallback retained');
+  });
+  test('partial-month marker is suppressed on weekly charts', () => {
+    assert(/const partialIdx = \(opts\.partialIdx != null\) \? opts\.partialIdx : DATA\.partial_month_idx;/.test(src), 'lineChart honours opts.partialIdx');
+    assert(/const isPartial = i === partialIdx;/.test(src), 'marker uses resolved partialIdx');
+    assert(!/const isPartial = i === DATA\.partial_month_idx;/.test(src), 'no hard-coded monthly partial index');
+    const passed = (src.match(/partialIdx: weekly \? -1 : DATA\.partial_month_idx/g) || []).length;
+    assert(passed === 2, 'overview charts pass weekly partialIdx (got ' + passed + ')');
+    const cPassed = (src.match(/partialIdx: cWeekly \? -1 : DATA\.partial_month_idx/g) || []).length;
+    assert(cPassed === 2, 'customer charts pass weekly partialIdx (got ' + cPassed + ')');
+  });
+  test('trend chart titles/subtitles no longer hard-code "monthly"', () => {
+    assert(/Defender for Cloud — ACR across all customers/.test(src), 'DfC trend title neutral');
+    assert(/ACR trend \(weekly where available\)/.test(src), 'DfC trend sub clarifies weekly');
+    assert(/Product mix — ACR trend by service/.test(src), 'product trend title neutral');
+    assert(/ACR trend — does DfC track with the rest of the footprint\?/.test(src), 'customer DfC sub neutral');
+    assert(/DfC as % of total ACR for this customer/.test(src), 'customer pct sub neutral');
+    assert(!/Monthly ACR across all customers/.test(src), 'no stale DfC trend title');
+    assert(!/monthly ACR trend by service/.test(src), 'no stale product trend title');
   });
 }
 
