@@ -917,7 +917,7 @@ def _product_mix_donut(html: str) -> str:
             "function donutChart(containerId, items, opts = {}) {\n"
             "  const el = document.getElementById(containerId);\n"
             "  if (!el) return;\n"
-            "  const W = opts.width || 420, H = opts.height || 300;\n"
+            "  const W = opts.width || 600, H = opts.height || 260;\n"
             "  const cx = W / 2, cy = H / 2;\n"
             "  const rOuter = Math.min(W, H) / 2 - 14, rInner = rOuter * 0.6;\n"
             "  const total = items.reduce((a, d) => a + (Number(d.value) || 0), 0);\n"

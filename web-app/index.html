@@ -668,7 +668,7 @@ function parseAndScore(rows) {
 function donutChart(containerId, items, opts = {}) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  const W = opts.width || 420, H = opts.height || 300;
+  const W = opts.width || 600, H = opts.height || 260;
   const cx = W / 2, cy = H / 2;
   const rOuter = Math.min(W, H) / 2 - 14, rInner = rOuter * 0.6;
   const total = items.reduce((a, d) => a + (Number(d.value) || 0), 0);
