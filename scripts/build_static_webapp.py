@@ -207,7 +207,7 @@ def build_html() -> str:
     _assert_contains(html, 'id="splash-dropzone"', "splash dropzone")
     _assert_contains(html, "splash.hidden = true", "splash hide-on-load")
     _assert_contains(html, "if (!DATA.customers || DATA.customers.length === 0) return;", "renderAll empty-state guard")
-    _assert_contains(html, "ACR_CACHE_KEY", "session-storage persistence")
+    _assert_contains(html, "ACR_CACHE_KEY = 'defenderattach:acr:v3'", "session-storage persistence (v3 cache key)")
     _assert_contains(html, "sessionStorage.setItem(ACR_CACHE_KEY", "persistence write on import")
     _assert_contains(html, "const colorFor = (label, rank) =>", "validated donut colour helper")
     _assert_contains(html, "${escapeHtml(d.label)}</span>", "escaped product mix donut legend label")
@@ -298,7 +298,9 @@ def _inject_persistence(html: str) -> str:
     # Add the cache key constant + restore-on-load block, replacing the bare
     # ``renderAll();`` bootstrapper near the bottom of the inline script.
     boot_block = (
-        "const ACR_CACHE_KEY = 'defenderattach:acr:v2';\n"
+        # v3: bump invalidates pre-product_skus cached models so the donut
+        # category drill-down (added in a93a603) gets fresh, complete DATA.
+        "const ACR_CACHE_KEY = 'defenderattach:acr:v3';\n"
         "renderAll();\n"
         "document.addEventListener('DOMContentLoaded', function() {\n"
         "  // Restore from a previous tab-internal navigation if available.\n"

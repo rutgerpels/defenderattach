@@ -136,8 +136,8 @@ console.log('\nweb-app/index.html (generated)');
       'dropped file extension must be validated');
   });
   test('ACR data is persisted to sessionStorage across navigation', () => {
-    assert(/ACR_CACHE_KEY = 'defenderattach:acr:v2'/.test(src),
-      'versioned sessionStorage key must be defined');
+    assert(/ACR_CACHE_KEY = 'defenderattach:acr:v3'/.test(src),
+      'versioned sessionStorage key must be defined (v3 invalidates pre-product_skus caches)');
     assert(/sessionStorage\.setItem\(ACR_CACHE_KEY, json\)/.test(src),
       'must cache DATA after successful import');
     assert(/sessionStorage\.getItem\(ACR_CACHE_KEY\)/.test(src),
