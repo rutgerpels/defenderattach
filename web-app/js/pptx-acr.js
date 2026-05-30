@@ -1,7 +1,7 @@
 // pptx-acr.js — Builds the ACR opportunity PowerPoint deck client-side via PptxGenJS.
 // Mirrors src/defender_acr_dashboard/exports.py.
 (() => {
-  const DEFAULT_THRESHOLD = 8.0;
+  const DEFAULT_THRESHOLD = 6.0;
   const C = {
     BLUE: '0078D4', NAVY: '0F3A5F', DARK: '201F1E', TEXT: '323130',
     MUTED: '605E5C', LIGHT_BG: 'F5F7FB', BORDER: 'D9E2EC',

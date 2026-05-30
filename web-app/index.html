@@ -255,29 +255,22 @@ tr.clickable:hover { background: #f3f2f1; }
 
   <div class="grid-2">
     <div class="chart-box">
-      <div class="title">Defender for Cloud — Monthly ACR across all customers</div>
-      <div class="sub">Sum of monthly ACR by month</div>
+      <div class="title">Defender for Cloud — ACR across all customers</div>
+      <div class="sub">ACR trend (weekly where available)</div>
       <div class="svg-container" id="chart-dfc-trend"></div>
     </div>
     <div class="chart-box">
-      <div class="title">Top 15 customers by Defender for Cloud monthly ACR</div>
-      <div class="sub">Click a bar to drill down</div>
-      <div class="svg-container" id="chart-top-dfc"></div>
+      <div class="title">Product mix — share of ACR by service</div>
+      <div class="sub">ACR split across tracked workloads (weekly where available)</div>
+      <div class="svg-container" id="chart-product-mix"></div>
+      <div class="legend" id="legend-product-mix"></div>
     </div>
   </div>
 
   <div class="chart-box">
-    <div class="title">Product mix — monthly ACR trend by service</div>
-    <div class="sub">Compare DfC against Azure Virtual Desktop, General Purpose Compute, and other workloads</div>
-    <div class="controls">
-      <label>Show: </label>
-      <select id="product-trend-mode">
-        <option value="indexed">Indexed to first month (=100)</option>
-        <option value="absolute" selected>Absolute monthly ACR</option>
-      </select>
-    </div>
-    <div class="svg-container" id="chart-product-trend"></div>
-    <div class="legend" id="legend-product-trend"></div>
+    <div class="title">Top 15 customers by Defender for Cloud monthly ACR</div>
+    <div class="sub">Click a bar to drill down</div>
+    <div class="svg-container" id="chart-top-dfc"></div>
   </div>
 </div>
 
@@ -344,7 +337,7 @@ tr.clickable:hover { background: #f3f2f1; }
   <div class="grid-2">
     <div class="chart-box">
       <div class="title">Defender for Cloud vs. other Azure workloads</div>
-      <div class="sub">Monthly ACR — does DfC track with the rest of the footprint?</div>
+      <div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>
       <div class="svg-container" id="chart-cust-dfc"></div>
       <div class="legend">
         <span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>
@@ -353,7 +346,7 @@ tr.clickable:hover { background: #f3f2f1; }
     </div>
     <div class="chart-box">
       <div class="title">DfC penetration over time</div>
-      <div class="sub">DfC as % of total monthly ACR for this customer</div>
+      <div class="sub">DfC as % of total ACR for this customer</div>
       <div class="svg-container" id="chart-cust-pct"></div>
     </div>
   </div>
@@ -672,6 +665,60 @@ function parseAndScore(rows) {
 }
 
 // ============ Chart utilities ============
+function donutChart(containerId, items, opts = {}) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const W = opts.width || 600, H = opts.height || 260;
+  const cx = W / 2, cy = H / 2;
+  const rOuter = Math.min(W, H) / 2 - 14, rInner = rOuter * 0.6;
+  const total = items.reduce((a, d) => a + (Number(d.value) || 0), 0);
+  if (!(total > 0)) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#a19f9d;font-size:12px;">No service ACR to display</div>';
+    return;
+  }
+  const totalLbl = total >= 1e6 ? '$' + (total / 1e6).toFixed(2) + 'M' : total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  if (items.length === 1) {
+    const d = items[0];
+    svg += `<circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="${d.color}" data-label="${escapeHtml(d.label)}" data-val="${(Number(d.value) || 0).toFixed(2)}" data-pct="100.0" style="cursor:pointer"/>`;
+    svg += `<circle cx="${cx}" cy="${cy}" r="${rInner}" fill="#ffffff"/>`;
+  } else {
+    let a0 = -Math.PI / 2;
+    items.forEach(d => {
+      const frac = (Number(d.value) || 0) / total;
+      const a1 = a0 + frac * Math.PI * 2;
+      const large = (a1 - a0) > Math.PI ? 1 : 0;
+      const xo0 = cx + rOuter * Math.cos(a0), yo0 = cy + rOuter * Math.sin(a0);
+      const xo1 = cx + rOuter * Math.cos(a1), yo1 = cy + rOuter * Math.sin(a1);
+      const xi1 = cx + rInner * Math.cos(a1), yi1 = cy + rInner * Math.sin(a1);
+      const xi0 = cx + rInner * Math.cos(a0), yi0 = cy + rInner * Math.sin(a0);
+      const dPath = `M${xo0.toFixed(2)},${yo0.toFixed(2)} A${rOuter},${rOuter} 0 ${large} 1 ${xo1.toFixed(2)},${yo1.toFixed(2)} L${xi1.toFixed(2)},${yi1.toFixed(2)} A${rInner},${rInner} 0 ${large} 0 ${xi0.toFixed(2)},${yi0.toFixed(2)} Z`;
+      svg += `<path d="${dPath}" fill="${d.color}" stroke="#ffffff" stroke-width="1.5" data-label="${escapeHtml(d.label)}" data-val="${(Number(d.value) || 0).toFixed(2)}" data-pct="${(frac * 100).toFixed(1)}" style="cursor:pointer"/>`;
+      a0 = a1;
+    });
+  }
+  svg += `<text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="15" font-weight="700" fill="#323130">${totalLbl}</text>`;
+  svg += `<text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10" fill="#605e5c">avg monthly ACR</text>`;
+  svg += `</svg>`;
+  el.innerHTML = svg;
+  el.querySelectorAll('[data-label]').forEach(seg => {
+    seg.addEventListener('mousemove', e => {
+      const label = seg.getAttribute('data-label');
+      const val = parseFloat(seg.getAttribute('data-val'));
+      const pct = seg.getAttribute('data-pct');
+      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} avg/mo · ${pct}%`, e.pageX, e.pageY);
+    });
+    seg.addEventListener('mouseleave', hideTooltip);
+    // Drill-down: each slice opens its underlying services. Keyboard-accessible.
+    const lbl = seg.getAttribute('data-label');
+    seg.setAttribute('tabindex', '0');
+    seg.setAttribute('role', 'button');
+    seg.setAttribute('aria-label', 'Show services in ' + lbl);
+    seg.addEventListener('click', () => { if (typeof openCategoryBreakdown === 'function') openCategoryBreakdown(seg.getAttribute('data-label')); });
+    seg.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); if (typeof openCategoryBreakdown === 'function') openCategoryBreakdown(seg.getAttribute('data-label')); } });
+  });
+}
+
 function lineChart(containerId, series, opts = {}) {
   const W = opts.width || 600, H = opts.height || 260;
   const M = {top: 20, right: 16, bottom: 36, left: 56};
@@ -705,11 +752,12 @@ function lineChart(containerId, series, opts = {}) {
     const yv = yMin + (yMax - yMin) * t / yTicks;
     const yp = y(yv);
     svg += `<line x1="${M.left}" y1="${yp}" x2="${W - M.right}" y2="${yp}" stroke="#edebe9" stroke-width="1"/>`;
-    const lbl = indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0));
+    const lbl = opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%' : (indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0)));
     svg += `<text x="${M.left - 6}" y="${yp + 3}" text-anchor="end" font-size="10" fill="#605e5c">${lbl}</text>`;
   }
+  const partialIdx = (opts.partialIdx != null) ? opts.partialIdx : DATA.partial_month_idx;
   labels.forEach((l, i) => {
-    const isPartial = i === DATA.partial_month_idx;
+    const isPartial = i === partialIdx;
     svg += `<text x="${x(i)}" y="${H - M.bottom + 14}" text-anchor="middle" font-size="10" fill="${isPartial ? '#a4262c' : '#605e5c'}">${l}${isPartial ? '*' : ''}</text>`;
   });
 
@@ -723,7 +771,7 @@ function lineChart(containerId, series, opts = {}) {
     if (pathD) svg += `<path d="${pathD}" fill="none" stroke="${color}" stroke-width="2" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''}/>`;
     s.vals.forEach((v, i) => {
       const yp = y(v); if (yp == null) return;
-      svg += `<circle cx="${x(i)}" cy="${yp}" r="3" fill="${color}" data-month="${labels[i]}" data-label="${s.label}" data-val="${v != null ? v.toFixed(2) : '–'}"/>`;
+      svg += `<circle cx="${x(i)}" cy="${yp}" r="3" fill="${color}" data-month="${labels[i]}" data-label="${escapeHtml(s.label)}" data-val="${v != null ? v.toFixed(2) : '–'}"/>`;
     });
   });
   svg += `</svg>`;
@@ -734,8 +782,8 @@ function lineChart(containerId, series, opts = {}) {
       const month = c.getAttribute('data-month');
       const label = c.getAttribute('data-label');
       const val = c.getAttribute('data-val');
-      const display = indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2});
-      showTooltip(`<b>${label}</b><br/>${month}: ${display}`, e.pageX, e.pageY);
+      const display = opts.format === 'percent' ? parseFloat(val).toFixed(2) + '%' : (indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2}));
+      showTooltip(`<b>${escapeHtml(label)}</b><br/>${month}: ${display}`, e.pageX, e.pageY);
     });
     c.addEventListener('mouseleave', hideTooltip);
   });
@@ -962,7 +1010,8 @@ function renderKpis() {
   document.getElementById('kpi-low').textContent = DATA.counts.low;
   document.getElementById('kpi-small').textContent = DATA.counts.too_small;
 
-  const lastIdx = DATA.months.length - 1;
+  const lastIdx = (DATA.partial_month_idx >= 0 && DATA.partial_month_idx === DATA.months.length - 1)
+    ? Math.max(0, DATA.months.length - 2) : DATA.months.length - 1;
   const priorIdx = Math.max(0, lastIdx - 1);
   const dfcCurrent = DATA.dfc_total_monthly[lastIdx];
   const dfcPrior = DATA.dfc_total_monthly[priorIdx];
@@ -977,14 +1026,65 @@ function renderKpis() {
   document.getElementById('kpi-dfc-pct').textContent = dfcPct.toFixed(1) + '%';
 }
 
-function renderProductTrend() {
-  const mode = document.getElementById('product-trend-mode').value;
-  const series = TRACK_PRODUCTS
-    .filter(p => DATA.product_monthly[p])
-    .map(p => ({label: p, values: DATA.product_monthly[p], color: PRODUCT_COLORS[p]}));
-  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300});
-  document.getElementById('legend-product-trend').innerHTML = TRACK_PRODUCTS.filter(p => DATA.product_monthly[p]).map(p =>
-    `<span class="legend-item"><span class="legend-swatch" style="background:${PRODUCT_COLORS[p]}"></span>${p}</span>`).join('');
+function renderDfcTrend() {
+  const weekly = !!(DATA.weekly_enabled && DATA.dfc_total_weekly);
+  const values = weekly ? DATA.dfc_total_weekly : DATA.dfc_total_monthly;
+  const labels = weekly ? DATA.week_labels : DATA.month_labels;
+  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#0078d4'}], {labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});
+}
+
+// Pure selection + reconciliation math for the product-mix donut. Kept separate from
+// the DOM rendering so it can be unit-tested in isolation. Takes the monthly category
+// series (DATA.product_monthly) + the partial/accumulating month index; returns the
+// drillable slices (`items`), the categories folded into 'Other' (`otherCats`), and the
+// reconciliation totals. Donut shows AVERAGE MONTHLY ACR share across COMPLETE months
+// only (the partial last month is excluded), so the centre equals a representative
+// monthly ACR, not a cumulative period total. Slices = top categories by avg monthly
+// ACR (Defender for Cloud is always pinned in) up to a cap; everything below the cap
+// rolls into an 'Other services' slice so the slices sum to the true total. Decoupled
+// from DATA.track_products (the 8-cap used by the taxonomy trend / SKU drill-down) so
+// large real categories (Storage, Networking, ...) surface here instead of hiding.
+function computeDonutSlices(src, partial) {
+  src = src || {};
+  const DFC = 'Defender for Cloud';
+  const MAX_SLICES = 12;
+  const p = (typeof partial === 'number') ? partial : -1;
+  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== p); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };
+  const isHex = c => /^#[0-9a-fA-F]{6}$/.test(c);
+  // Deterministic palette by rank; DfC (#0078d4) and Sentinel (#005a9e) keep their
+  // brand colours and are intentionally excluded from the rotation to avoid collisions.
+  const PALETTE = ['#107c10','#5c2d91','#d83b01','#008272','#a4262c','#c19c00','#004e8c','#874800','#5d5a58','#018574','#8764b8','#e3008c'];
+  const colorFor = (label, rank) => { if (label === DFC) return '#0078d4'; if (label === 'Sentinel') return '#005a9e'; const c = PALETTE[rank % PALETTE.length]; return isHex(c) ? c : '#605e5c'; };
+  const all = Object.keys(src).filter(k => k !== 'Total')
+    .map(k => ({label: k, value: avgOf(src[k])}))
+    .filter(d => d.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const named = all.slice(0, MAX_SLICES);
+  // Pin Defender for Cloud: if it ranks below the cap, swap it in for the lowest named.
+  const dfc = all.find(d => d.label === DFC);
+  if (dfc && named.indexOf(dfc) === -1 && named.length) { named[named.length - 1] = dfc; named.sort((a, b) => b.value - a.value); }
+  const namedLabels = new Set(named.map(d => d.label));
+  const items = named.map((d, i) => ({label: d.label, value: d.value, color: colorFor(d.label, i)}));
+  const totalAvg = avgOf(src['Total']);
+  const namedSum = items.reduce((s, d) => s + d.value, 0);
+  const otherVal = Math.max(0, totalAvg - namedSum);
+  // Stash the categories that fold into 'Other' (plus any total-vs-leaf residual) so the
+  // Other slice's drill-down reconciles to the slice value.
+  const tail = all.filter(d => !namedLabels.has(d.label));
+  const tailSum = tail.reduce((s, d) => s + d.value, 0);
+  const otherCats = tail.map(d => ({label: d.label, value: d.value}));
+  if (otherVal - tailSum > 1) otherCats.push({label: 'Unmapped / residual', value: otherVal - tailSum});
+  if (otherVal > 1) items.push({label: 'Other services', value: otherVal, color: '#c8c6c4'});
+  return {items: items, otherCats: otherCats, totalAvg: totalAvg, otherVal: otherVal};
+}
+function renderProductMix() {
+  // Each slice is drillable into its underlying services (see donutChart + the
+  // category modal). All selection/reconciliation math lives in computeDonutSlices.
+  const r = computeDonutSlices(DATA.product_monthly, DATA.partial_month_idx);
+  window._donutOtherCats = r.otherCats;
+  donutChart('chart-product-mix', r.items);
+  document.getElementById('legend-product-mix').innerHTML = r.items.map(d =>
+    `<span class="legend-item"><span class="legend-swatch" style="background:${d.color}"></span>${escapeHtml(d.label)}</span>`).join('');
 }
 
 function renderQuadrant() {
@@ -1081,50 +1181,78 @@ function selectCustomer(name) {
   window.scrollTo({top: 0, behavior: 'smooth'});
 }
 
-function renderCustomerDetail(name) {
+function renderCustomerDetail(name, idp) {
+  idp = idp || '';
   const opp = DATA.opportunity.find(r => r.customer === name);
   const cd = DATA.customer_data[name];
   if (!opp || !cd) return;
-  document.getElementById('cust-priority').innerHTML = tagFor(opp.opportunity);
-  document.getElementById('cust-cards').innerHTML = `
+  document.getElementById(idp + 'cust-priority').innerHTML = tagFor(opp.opportunity);
+  document.getElementById(idp + 'cust-cards').innerHTML = `
     <div class="card"><div class="label">Total Monthly ACR</div><div class="val">${fmt.money2(opp.total_current)}</div><div class="delta ${fmt.pctClass(opp.total_mom)}">${fmt.pct(opp.total_mom)} MoM</div></div>
     <div class="card"><div class="label">Defender for Cloud</div><div class="val">${fmt.money2(opp.dfc_current)}</div><div class="delta ${fmt.pctClass(opp.dfc_mom)}">${fmt.pct(opp.dfc_mom)} MoM</div></div>
     <div class="card"><div class="label">DfC % of Portfolio</div><div class="val">${fmt.pctRaw(opp.dfc_ratio)}</div><div class="delta">share of total</div></div>
     <div class="card"><div class="label">DfC 3-Month Trend</div><div class="val ${fmt.pctClass(opp.dfc_3m)}">${fmt.pct(opp.dfc_3m)}</div><div class="delta">last 3 months</div></div>
     <div class="card"><div class="label">Other Azure 3-Month Trend</div><div class="val ${fmt.pctClass(opp.other_3m)}">${fmt.pct(opp.other_3m)}</div><div class="delta">last 3 months</div></div>
   `;
-  const note = document.getElementById('cust-signal');
-  note.innerHTML = `<strong>Signal:</strong> ${opp.notes}`;
+  const note = document.getElementById(idp + 'cust-signal');
+  note.innerHTML = `<strong>Signal:</strong> ${escapeHtml(opp.notes)}`;
   note.style.borderLeftColor = opp.opportunity === 'High' ? '#d13438' : opp.opportunity === 'Medium' ? '#ff8c00' : '#107c10';
   note.style.background = opp.opportunity === 'High' ? '#fdf3f4' : opp.opportunity === 'Medium' ? '#fffaf0' : '#f3f9ef';
   note.style.color = opp.opportunity === 'High' ? '#5d1014' : opp.opportunity === 'Medium' ? '#5d3a00' : '#0e3a0e';
 
-  lineChart('chart-cust-dfc', [
-    {label: 'Defender for Cloud', values: cd.dfc_series, color: '#0078d4'},
-    {label: 'Other Azure', values: cd.other_series, color: '#605e5c', dash: '4 3'},
-  ]);
-  const pctSeries = cd.dfc_series.map((v, i) => {
-    const t = cd.total_series[i];
+  const cWeekly = !!(DATA.weekly_enabled && Array.isArray(cd.dfc_weekly) && Array.isArray(cd.other_weekly) && Array.isArray(cd.total_weekly));
+  const dfcSeries = cWeekly ? cd.dfc_weekly : cd.dfc_series;
+  const otherSeries = cWeekly ? cd.other_weekly : cd.other_series;
+  const totalSeries = cWeekly ? cd.total_weekly : cd.total_series;
+  const cLabels = cWeekly ? DATA.week_labels : DATA.month_labels;
+  lineChart(idp + 'chart-cust-dfc', [
+    {label: 'Defender for Cloud', values: dfcSeries, color: '#0078d4'},
+    {label: 'Other Azure', values: otherSeries, color: '#605e5c', dash: '4 3'},
+  ], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});
+  const pctSeries = dfcSeries.map((v, i) => {
+    const t = totalSeries[i];
     return t > 0 ? (v / t) * 100 : 0;
   });
-  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}]);
+  lineChart(idp + 'chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx, format: 'percent'});
 
-  const ph = document.getElementById('cust-products');
+  const ph = document.getElementById(idp + 'cust-products');
   ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">Monthly ACR</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +
-    cd.products.map(p => {
+    cd.products.map((p, pi) => {
       const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';
-      return `<div class="product-row">
-        <div class="name">${p.product === 'Defender for Cloud' ? '<strong style="color:#0078d4">' + p.product + '</strong>' : p.product}</div>
+      const nameEsc = escapeHtml(p.product);
+      const nameHtml = p.product === 'Defender for Cloud' ? '<strong style="color:#0078d4">' + nameEsc + '</strong>' : nameEsc;
+      const skus = Array.isArray(p.skus) ? p.skus : [];
+      const sid = 'sku-' + pi;
+      const caret = skus.length ? `<span class="sku-caret" style="cursor:pointer;user-select:none;color:#605e5c;margin-right:6px;">\u25b8</span>` : '<span style="display:inline-block;width:14px;"></span>';
+      const head = `<div class="product-row"${skus.length ? ` data-sku-toggle="${sid}" style="cursor:pointer;"` : ''}>
+        <div class="name">${caret}${nameHtml}</div>
         <div class="num">${fmt.money2(p.current)}</div>
         <div class="num ${fmt.pctClass(p.mom)}">${fmt.pct(p.mom)}</div>
         <div class="num ${fmt.pctClass(p.three_m)}">${fmt.pct(p.three_m)}</div>
         <div>${sparkline(p.series, 140, 26, sparkColor)}</div>
       </div>`;
+      const subs = skus.map(s => `<div class="product-row sku-row ${sid}" hidden style="background:#faf9f8;">
+        <div class="name" style="padding-left:22px;color:#605e5c;">${escapeHtml(s.sku)}</div>
+        <div class="num">${fmt.money2(s.current)}</div>
+        <div class="num ${fmt.pctClass(s.mom)}">${fmt.pct(s.mom)}</div>
+        <div class="num ${fmt.pctClass(s.three_m)}">${fmt.pct(s.three_m)}</div>
+        <div>${sparkline(s.series, 140, 26, '#a19f9d')}</div>
+      </div>`).join('');
+      return head + subs;
     }).join('');
 }
 
 // Wire static event listeners
-document.getElementById('product-trend-mode').addEventListener('change', renderProductTrend);
+document.getElementById('cust-products').addEventListener('click', (e) => {
+  const head = e.target.closest('[data-sku-toggle]');
+  if (!head) return;
+  const sid = head.getAttribute('data-sku-toggle');
+  const rows = document.querySelectorAll('#cust-products .' + sid);
+  let target = null;
+  rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
+  const caret = head.querySelector('.sku-caret');
+  if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+});
 document.getElementById('quadrant-filter').addEventListener('change', renderQuadrant);
 document.getElementById('search-input').addEventListener('input', renderAllTable);
 document.getElementById('filter-priority').addEventListener('change', renderAllTable);
@@ -1147,7 +1275,7 @@ document.querySelectorAll('#all-table th[data-sort]').forEach(th => {
 document.getElementById('customer-select').addEventListener('change', e => renderCustomerDetail(e.target.value));
 
 
-const DEFAULT_DFC_SHARE_THRESHOLD = 8;
+const DEFAULT_DFC_SHARE_THRESHOLD = 6;
 let dfcShareThreshold = DEFAULT_DFC_SHARE_THRESHOLD;
 
 function escapeHtml(value) {
@@ -1161,6 +1289,58 @@ function escapeHtml(value) {
 
 function fmtThreshold(value) {
   return Number.isInteger(value) ? `${value}%` : `${value.toFixed(1)}%`;
+}
+
+// Re-run the opportunity classifier against the selected attach baseline so the
+// slider actually drives priority (not just sorting). Mutates DATA.opportunity
+// rows in place and recomputes DATA.counts. Safe to call when DATA is empty.
+function reclassifyOpportunities(thresholdPct) {
+  if (!DATA || !Array.isArray(DATA.opportunity) || !window.AcrModel ||
+      typeof AcrModel.classifyOpportunity !== 'function') {
+    return;
+  }
+  const threshold = (Number.isFinite(thresholdPct) ? thresholdPct : DEFAULT_DFC_SHARE_THRESHOLD) / 100;
+  for (const row of DATA.opportunity) {
+    const [priority, notes] = AcrModel.classifyOpportunity({
+      dfc_current: row.dfc_current,
+      total_current: row.total_current,
+      dfc_ratio: (Number(row.dfc_ratio) || 0) / 100,
+      dfc_3m: row.dfc_3m,
+      other_3m: row.other_3m,
+      growth_cat_3m: (row.growth_cat_3m == null ? null : row.growth_cat_3m),
+      growth_cat_names: row.growth_cat_names || null,
+      threshold: threshold,
+    });
+    row.opportunity = priority;
+    row.notes = notes;
+  }
+  DATA.counts = {
+    high:      DATA.opportunity.filter(r => r.opportunity === 'High').length,
+    medium:    DATA.opportunity.filter(r => r.opportunity === 'Medium').length,
+    low:       DATA.opportunity.filter(r => r.opportunity === 'Low').length,
+    too_small: DATA.opportunity.filter(r => r.opportunity === 'Too small').length,
+    total:     (DATA.customers && DATA.customers.length) || DATA.opportunity.length,
+  };
+}
+
+let _thresholdRenderTimer = null;
+// Heavy re-render (tables + heatmap + the currently-selected customer detail,
+// which redraws charts) is debounced so dragging the slider stays smooth.
+function applyThresholdRender() {
+  if (typeof renderKpis === 'function') renderKpis();
+  if (_thresholdRenderTimer) clearTimeout(_thresholdRenderTimer);
+  _thresholdRenderTimer = setTimeout(() => {
+    _thresholdRenderTimer = null;
+    if (typeof renderOppTable === 'function') renderOppTable();
+    if (typeof renderAllTable === 'function') renderAllTable();
+    renderOpportunityHeatmap();
+    const sel = document.getElementById('customer-select');
+    const drill = document.getElementById('panel-drilldown');
+    if (sel && sel.value && drill && drill.classList.contains('active') &&
+        typeof renderCustomerDetail === 'function') {
+      renderCustomerDetail(sel.value);
+    }
+  }, 120);
 }
 
 function ensureDfcThresholdControl() {
@@ -1183,8 +1363,11 @@ function ensureDfcThresholdControl() {
   document.getElementById('dfc-threshold').addEventListener('input', e => {
     const next = parseFloat(e.target.value);
     dfcShareThreshold = Number.isFinite(next) ? next : DEFAULT_DFC_SHARE_THRESHOLD;
+    const valEl = document.getElementById('dfc-threshold-value');
+    if (valEl) valEl.textContent = fmtThreshold(dfcShareThreshold);
     updateExportLink();
-    renderOpportunityHeatmap();
+    reclassifyOpportunities(dfcShareThreshold);
+    applyThresholdRender();
   });
 }
 
@@ -1632,7 +1815,7 @@ function renderOpportunityHeatmap() {
   document.querySelectorAll('#chart-quadrant tr.clickable').forEach(tr =>
     tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
   const footEl = document.getElementById('chart-quadrant-foot');
-  if (footEl) footEl.innerHTML = `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 8% is aligned to the internal FY26 DfC attach reference.`;
+  if (footEl) footEl.innerHTML = `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 6% is the corporate Defender attach baseline (every customer should run at least 6% of total ACR on Defender workloads).`;
   renderActionQueue();
 }
 
@@ -1641,15 +1824,511 @@ function renderQuadrant() {
 }
 
 
+
+// ---- Priority grading explainer -------------------------------------------
+const PRIORITY_META = {
+  High:        { color: '#d13438', bg: '#fdf3f4', label: 'High priority' },
+  Medium:      { color: '#ff8c00', bg: '#fffaf0', label: 'Medium priority' },
+  Low:         { color: '#107c10', bg: '#f3f9ef', label: 'Low priority' },
+  'Too small': { color: '#605e5c', bg: '#f3f2f1', label: 'Too small to prioritize' },
+};
+
+// Threshold-aware rubric mirroring AcrModel.classifyOpportunity. The highest
+// tier whose conditions are met wins.
+function priorityGradingRules() {
+  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
+  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
+  return [
+    { tier: 'Too small', text: 'Total Azure ACR under $1,500 / month — sales priority is low regardless of Defender share.' },
+    { tier: 'High',   text: 'No Defender for Cloud spend at all (under $15 / month) while the customer spends over $3,000 / month on Azure — 0% against the ' + tl + ' attach baseline.' },
+    { tier: 'High',   text: 'Other Azure workloads grew over the last 3 months while Defender for Cloud is shrinking (declining more than 5%).' },
+    { tier: 'High',   text: 'Other Azure is growing, Defender is flat (under 2% growth) AND Defender is under 2% of total ACR.' },
+    { tier: 'High',   text: 'Break of trend: core workloads (Compute, Databases, Developer Tools, Integration, AI + Machine Learning, Containers) grew over 5% over 3 months, Defender did not keep pace (more than 5 points behind), and the customer is below the ' + tl + ' baseline.' },
+    { tier: 'Medium', text: 'Defender penetration under 1.5% of total ACR while other Azure is growing — undersold.' },
+    { tier: 'Medium', text: 'Defender for Cloud is growing more than 5 points slower than the rest of Azure.' },
+    { tier: 'Medium', text: 'Very low Defender penetration (under 0.5%) on a sizeable account (total ACR over $6,000 / month).' },
+    { tier: 'Medium', text: 'Break of trend on core workloads while already at or above the ' + tl + ' baseline.' },
+    { tier: 'Medium', text: 'Defender attach baseline: Defender share is below the ' + tl + ' corporate baseline — every customer should run at least ' + tl + ' of total ACR on Defender workloads.' },
+    { tier: 'Low',    text: 'None of the above triggers fire — Defender attach looks healthy for this customer at the current ' + tl + ' baseline.' },
+  ];
+}
+
+// Clickable, accessible replacement for the template's tagFor. Late-bound, so
+// every render path (tables, heatmap, action queue, drill-down) picks it up.
+tagFor = function (opp) {
+  const cls = opp === 'High' ? 'high' : opp === 'Medium' ? 'medium' : opp === 'Low' ? 'low' : 'small-tag';
+  const safe = escapeHtml(opp);
+  return '<span class="tag ' + cls + ' prio-badge" role="button" tabindex="0" ' +
+    'title="Why is the priority ' + safe + '? Click for the grading.">' +
+    safe + ' <span class="prio-badge-i" aria-hidden="true">&#9432;</span></span>';
+};
+
+let _prioOverlay = null;
+let _prioLastFocus = null;
+function _ensurePrioOverlay() {
+  if (_prioOverlay) return _prioOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.prio-badge{cursor:pointer;user-select:none}' +
+    '.prio-badge:hover{filter:brightness(.96);box-shadow:0 0 0 1px rgba(0,0,0,.15)}' +
+    '.prio-badge:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.prio-badge-i{font-size:11px;opacity:.7}' +
+    '.prio-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:4000;padding:40px 16px;overflow:auto}' +
+    '.prio-overlay[hidden]{display:none}' +
+    '.prio-dialog{position:relative;background:#fff;border-radius:10px;max-width:720px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.prio-close{position:absolute;top:8px;right:12px;border:none;background:transparent;font-size:26px;' +
+    'line-height:1;cursor:pointer;color:#605e5c}' +
+    '.prio-close:hover{color:#201f1e}' +
+    '#prio-body{padding:22px 26px 28px}' +
+    '.prio-head{padding:14px 16px;border-radius:6px;margin:6px 0 18px}' +
+    '.prio-head-tier{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}' +
+    '.prio-head h2{margin:4px 0 0;font-size:19px;color:#201f1e}' +
+    '.prio-section{margin-bottom:18px}' +
+    '.prio-section h3{font-size:14px;margin:0 0 8px;color:#201f1e}' +
+    '.prio-signals{margin:0;padding-left:18px}' +
+    '.prio-signals li{margin-bottom:6px;color:#323130}' +
+    '.prio-none{color:#107c10;margin:0}' +
+    '.prio-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}' +
+    '.prio-metric{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eef1f5;padding:5px 0;font-size:13px}' +
+    '.prio-metric .k{color:#605e5c}.prio-metric .v{font-weight:600;color:#201f1e;text-align:right}' +
+    '.prio-rubric-intro{font-size:12px;color:#605e5c;margin:0 0 8px}' +
+    '.prio-rubric{list-style:none;margin:0;padding:0}' +
+    '.prio-rule{display:flex;gap:10px;align-items:flex-start;padding:7px 8px;border-radius:6px;font-size:13px}' +
+    '.prio-rule.current{background:#f5f7fb}' +
+    '.prio-pill{flex:0 0 auto;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid}' +
+    '.prio-rule-text{color:#323130}' +
+    '@media(max-width:560px){.prio-metrics{grid-template-columns:1fr}}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'prio-explainer';
+  overlay.className = 'prio-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="prio-dialog" role="dialog" aria-modal="true" aria-labelledby="prio-title">' +
+    '<button class="prio-close" type="button" aria-label="Close">&times;</button>' +
+    '<div id="prio-body"></div></div>';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePriorityExplainer(); });
+  overlay.querySelector('.prio-close').addEventListener('click', closePriorityExplainer);
+  document.body.appendChild(overlay);
+  _prioOverlay = overlay;
+  return overlay;
+}
+
+function openPriorityExplainer(customer) {
+  if (!DATA || !Array.isArray(DATA.opportunity)) return;
+  const row = DATA.opportunity.find(r => r.customer === customer);
+  if (!row) return;
+  const overlay = _ensurePrioOverlay();
+  const meta = PRIORITY_META[row.opportunity] || PRIORITY_META.Low;
+  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
+  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
+
+  const signals = (row.notes && row.notes !== '-')
+    ? row.notes.split('; ').map(s => s.trim()).filter(Boolean) : [];
+  const signalsHtml = signals.length
+    ? '<ul class="prio-signals">' + signals.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ul>'
+    : '<p class="prio-none">No attach gaps detected at the current ' + escapeHtml(tl) +
+      ' baseline — Defender coverage looks healthy for this customer.</p>';
+
+  const catNames = (Array.isArray(row.growth_cat_names) && row.growth_cat_names.length)
+    ? row.growth_cat_names.join(', ') : '—';
+  const metrics = [
+    ['Total monthly ACR', fmt.money2(row.total_current)],
+    ['Defender for Cloud monthly ACR', fmt.money2(row.dfc_current)],
+    ['Defender share of total', fmt.pctRaw(row.dfc_ratio)],
+    ['Attach baseline', escapeHtml(tl)],
+    ['Defender 3-month trend', fmt.pct(row.dfc_3m)],
+    ['Other Azure 3-month trend', fmt.pct(row.other_3m)],
+    ['Core workloads 3-month trend', row.growth_cat_3m == null ? '—' : fmt.pct(row.growth_cat_3m)],
+    ['Growing core workloads', escapeHtml(catNames)],
+  ];
+  const metricsHtml = metrics.map(m =>
+    '<div class="prio-metric"><span class="k">' + m[0] + '</span><span class="v">' + m[1] + '</span></div>'
+  ).join('');
+
+  const rubricHtml = priorityGradingRules().map(rule => {
+    const rm = PRIORITY_META[rule.tier] || PRIORITY_META.Low;
+    const current = rule.tier === row.opportunity ? ' current' : '';
+    return '<li class="prio-rule' + current + '">' +
+      '<span class="prio-pill" style="background:' + rm.bg + ';color:' + rm.color + ';border-color:' + rm.color + ';">' +
+      escapeHtml(rule.tier) + '</span>' +
+      '<span class="prio-rule-text">' + escapeHtml(rule.text) + '</span></li>';
+  }).join('');
+
+  document.getElementById('prio-body').innerHTML =
+    '<div class="prio-head" style="border-left:6px solid ' + meta.color + ';background:' + meta.bg + ';">' +
+      '<div class="prio-head-tier" style="color:' + meta.color + ';">' + escapeHtml(meta.label) + '</div>' +
+      '<h2 id="prio-title">Why is ' + escapeHtml(customer) + ' rated &ldquo;' + escapeHtml(row.opportunity) + '&rdquo;?</h2>' +
+    '</div>' +
+    '<section class="prio-section"><h3>Signals for this customer</h3>' + signalsHtml + '</section>' +
+    '<section class="prio-section"><h3>Key numbers</h3><div class="prio-metrics">' + metricsHtml + '</div></section>' +
+    '<section class="prio-section"><h3>How priorities are graded</h3>' +
+      '<p class="prio-rubric-intro">The highest tier whose conditions are met wins. The tier this customer landed in is highlighted.</p>' +
+      '<ul class="prio-rubric">' + rubricHtml + '</ul></section>';
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.prio-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closePriorityExplainer() {
+  if (_prioOverlay) _prioOverlay.setAttribute('hidden', '');
+  // Restore focus to the badge that opened the modal so keyboard users are not stranded.
+  if (_prioLastFocus && typeof _prioLastFocus.focus === 'function') {
+    try { _prioLastFocus.focus(); } catch (_) {}
+  }
+  _prioLastFocus = null;
+}
+
+function _prioBadgeCustomer(el) {
+  const rowEl = el.closest('[data-customer]');
+  if (rowEl) return rowEl.getAttribute('data-customer');
+  const sel = document.getElementById('customer-select');
+  return (sel && sel.value) ? sel.value : null;
+}
+
+// Capture phase: intercept before the row's bubbling selectCustomer handler so
+// a badge click opens the explainer instead of navigating to the drill-down.
+document.addEventListener('click', function (e) {
+  const badge = e.target.closest ? e.target.closest('.prio-badge') : null;
+  if (!badge) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _prioLastFocus = badge;
+  const customer = _prioBadgeCustomer(badge);
+  if (customer) openPriorityExplainer(customer);
+}, true);
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { closePriorityExplainer(); return; }
+  const isBadge = e.target.classList && e.target.classList.contains('prio-badge');
+  if (isBadge && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    e.stopPropagation();
+    _prioLastFocus = e.target;
+    const customer = _prioBadgeCustomer(e.target);
+    if (customer) openPriorityExplainer(customer);
+  }
+}, true);
+
+
+
+// ---- Customer breakdown modal (Opportunity Matrix) ------------------------
+let _custOverlay = null;
+let _custLastFocus = null;
+let _custPrioWasOpenOnEscape = false;
+
+function _ensureCustOverlay() {
+  if (_custOverlay) return _custOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.cust-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:3900;padding:40px 16px;overflow:auto}' +
+    '.cust-overlay[hidden]{display:none}' +
+    '.cust-dialog{position:relative;background:#faf9f8;border-radius:10px;max-width:1040px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.cust-close{position:absolute;top:8px;right:14px;border:none;background:transparent;font-size:28px;' +
+    'line-height:1;cursor:pointer;color:#605e5c;z-index:1}' +
+    '.cust-close:hover{color:#201f1e}' +
+    '.cust-close:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.cust-body{padding:22px 26px 28px}' +
+    '.cust-body h2{margin:0 0 16px;font-size:20px;color:#201f1e;padding-right:32px}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cust-modal';
+  overlay.className = 'cust-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="cust-dialog" role="dialog" aria-modal="true" aria-labelledby="m-cust-title" data-customer="">' +
+    '<button class="cust-close" type="button" aria-label="Close">&times;</button>' +
+    '<div class="cust-body">' +
+      '<h2 id="m-cust-title"></h2>' +
+      '<div class="controls" style="margin-bottom:14px;"><span id="m-cust-priority"></span></div>' +
+      '<div class="cards" id="m-cust-cards"></div>' +
+      '<div class="note" id="m-cust-signal"></div>' +
+      '<div class="grid-2">' +
+        '<div class="chart-box">' +
+          '<div class="title">Defender for Cloud vs. other Azure workloads</div>' +
+          '<div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>' +
+          '<div class="svg-container" id="m-chart-cust-dfc"></div>' +
+          '<div class="legend">' +
+            '<span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>' +
+            '<span class="legend-item"><span class="legend-swatch" style="background:#605e5c"></span>Other Azure (Total - DfC)</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="chart-box">' +
+          '<div class="title">DfC penetration over time</div>' +
+          '<div class="sub">DfC as % of total ACR for this customer</div>' +
+          '<div class="svg-container" id="m-chart-cust-pct"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="chart-box">' +
+        '<div class="title">Product breakdown</div>' +
+        '<div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>' +
+        '<div id="m-cust-products"></div>' +
+      '</div>' +
+    '</div></div>';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCustomerModal(); });
+  overlay.querySelector('.cust-close').addEventListener('click', closeCustomerModal);
+
+  // SKU drill-down toggle scoped to the modal's product table (mirrors the
+  // drill-down panel listener but rooted at #m-cust-products).
+  const mprod = overlay.querySelector('#m-cust-products');
+  mprod.addEventListener('click', (e) => {
+    const head = e.target.closest('[data-sku-toggle]');
+    if (!head || !mprod.contains(head)) return;
+    const sid = head.getAttribute('data-sku-toggle');
+    const rows = mprod.querySelectorAll('.' + sid);
+    let target = null;
+    rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
+    const caret = head.querySelector('.sku-caret');
+    if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+  });
+
+  // Lightweight focus trap so keyboard users stay within the dialog.
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const nodes = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const focusable = Array.prototype.filter.call(nodes, el => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
+  document.body.appendChild(overlay);
+  _custOverlay = overlay;
+  return overlay;
+}
+
+function openCustomerModal(name) {
+  if (!DATA || !Array.isArray(DATA.opportunity) || !DATA.customer_data) return;
+  const opp = DATA.opportunity.find(r => r.customer === name);
+  const cd = DATA.customer_data[name];
+  if (!opp || !cd) return;
+  const overlay = _ensureCustOverlay();
+  // Stamp the customer on the dialog so the priority badge's data-customer
+  // lookup (el.closest('[data-customer]')) resolves inside the modal.
+  overlay.querySelector('.cust-dialog').setAttribute('data-customer', name);
+  const title = document.getElementById('m-cust-title');
+  if (title) title.textContent = name;
+  renderCustomerDetail(name, 'm-');
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.cust-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closeCustomerModal() {
+  if (_custOverlay) _custOverlay.setAttribute('hidden', '');
+  if (_custLastFocus && typeof _custLastFocus.focus === 'function') {
+    try { _custLastFocus.focus(); } catch (_) {}
+  }
+  _custLastFocus = null;
+}
+
+// Capture phase: intercept a customer click in the Opportunity Matrix (heatmap/
+// scatter + action queue) or the Overview top-customers chart before the
+// element's own selectCustomer handler so the breakdown opens in a modal instead of
+// navigating to the drill-down tab. Priority badges are skipped so the priority
+// explainer still wins.
+document.addEventListener('click', function (e) {
+  if (!e.target.closest) return;
+  if (e.target.closest('.prio-badge')) return;
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  if (!el) return;
+  const name = el.getAttribute('data-customer');
+  if (!name) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _custLastFocus = (typeof el.focus === 'function') ? el : null;
+  openCustomerModal(name);
+}, true);
+
+// Keyboard access for the same customer targets. SVG <rect>/<circle> bubbles and
+// table <tr> rows are not natively focusable, so a tabindex + button role +
+// aria-label is added after every render. MutationObservers scoped to the three
+// host containers re-apply this whenever their contents are re-rendered (tab
+// switch, data reload), and an initial pass covers anything already drawn.
+function _enhanceCustomerTargetsA11y() {
+  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (n.getAttribute('tabindex') === null) n.setAttribute('tabindex', '0');
+    // Bubbles/bars (SVG shapes) become buttons; table rows keep their row/cell
+    // semantics (a "button" role would hide the per-column data from AT) and are
+    // simply made focusable + labelled.
+    if (n.tagName !== 'TR' && !n.getAttribute('role')) n.setAttribute('role', 'button');
+    const nm = n.getAttribute('data-customer');
+    if (nm && !n.getAttribute('aria-label')) n.setAttribute('aria-label', 'Open breakdown for ' + nm);
+  }
+}
+['chart-quadrant', 'opp-tbody', 'chart-top-dfc', 'action-queue', 'all-tbody'].forEach(function (id) {
+  const host = document.getElementById(id);
+  if (!host || typeof MutationObserver !== 'function') return;
+  new MutationObserver(_enhanceCustomerTargetsA11y).observe(host, { childList: true, subtree: true });
+});
+_enhanceCustomerTargetsA11y();
+
+// Enter/Space on a focused customer target opens the modal (mirrors the click
+// interceptor). Priority badges keep their own keyboard handling, so they are
+// skipped here too.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+  if (!e.target.closest) return;
+  if (e.target.closest('.prio-badge')) return;
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  if (!el) return;
+  const name = el.getAttribute('data-customer');
+  if (!name) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _custLastFocus = (typeof el.focus === 'function') ? el : null;
+  openCustomerModal(name);
+}, true);
+
+// Escape closes the customer modal. A window-capture sentinel (fires before any
+// document-capture handler) records whether the priority explainer was the
+// modal being dismissed by this same key press, so a stacked Escape does not
+// also close the customer modal underneath it.
+window.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    _custPrioWasOpenOnEscape = (typeof _prioOverlay !== 'undefined') && !!(_prioOverlay && !_prioOverlay.hasAttribute('hidden'));
+  }
+}, true);
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  if (!_custOverlay || _custOverlay.hasAttribute('hidden')) return;
+  if (_custPrioWasOpenOnEscape) { _custPrioWasOpenOnEscape = false; return; }
+  closeCustomerModal();
+}, true);
+
+
+
+// ---- Category breakdown modal (Overview product-mix donut) ----------------
+let _catOverlay = null;
+let _catLastFocus = null;
+
+function _ensureCatOverlay() {
+  if (_catOverlay) return _catOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.cat-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:3950;padding:48px 16px;overflow:auto}' +
+    '.cat-overlay[hidden]{display:none}' +
+    '.cat-dialog{position:relative;background:#faf9f8;border-radius:10px;max-width:560px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.cat-close{position:absolute;top:8px;right:14px;border:none;background:transparent;font-size:28px;' +
+    'line-height:1;cursor:pointer;color:#605e5c;z-index:1}' +
+    '.cat-close:hover{color:#201f1e}' +
+    '.cat-close:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.cat-body{padding:22px 26px 26px}' +
+    '.cat-body h2{margin:0 0 4px;font-size:18px;color:#201f1e;padding-right:32px}' +
+    '.cat-body .cat-sub{margin:0 0 14px;font-size:12px;color:#605e5c}' +
+    '.cat-table{width:100%;border-collapse:collapse;font-size:13px}' +
+    '.cat-table th,.cat-table td{padding:6px 8px;text-align:left;border-bottom:1px solid #edebe9}' +
+    '.cat-table td.num,.cat-table th.num{text-align:right;font-variant-numeric:tabular-nums}' +
+    '.cat-empty{padding:18px 0;color:#a19f9d;font-size:13px}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cat-modal';
+  overlay.className = 'cat-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="cat-dialog" role="dialog" aria-modal="true" aria-labelledby="cat-title">' +
+    '<button class="cat-close" type="button" aria-label="Close">&times;</button>' +
+    '<div class="cat-body"><h2 id="cat-title"></h2>' +
+    '<p class="cat-sub" id="cat-sub"></p><div id="cat-content"></div></div></div>';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeCategoryModal(); });
+  overlay.querySelector('.cat-close').addEventListener('click', closeCategoryModal);
+  overlay.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const nodes = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const f = Array.prototype.filter.call(nodes, el => !el.disabled && el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  document.body.appendChild(overlay);
+  _catOverlay = overlay;
+  return overlay;
+}
+
+function openCategoryBreakdown(label) {
+  if (!label || typeof DATA === 'undefined' || !DATA) return;
+  const partial = (typeof DATA.partial_month_idx === 'number') ? DATA.partial_month_idx : -1;
+  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== partial); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };
+  const fmt = v => '$' + (Number(v) || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
+  let rows = [], sub = '';
+  if (label === 'Other services') {
+    rows = (Array.isArray(window._donutOtherCats) ? window._donutOtherCats : [])
+      .map(c => ({name: c.label, val: Number(c.value) || 0}))
+      .filter(r => r.val > 0).sort((a, b) => b.val - a.val);
+    sub = 'Categories grouped into the Other slice';
+  } else {
+    const skus = (DATA.product_skus && DATA.product_skus[label]) || null;
+    if (skus && skus.length) {
+      rows = skus.map(s => ({name: s.sku, val: avgOf(s.monthly)})).filter(r => r.val > 0).sort((a, b) => b.val - a.val);
+      sub = 'Services in this category';
+    } else {
+      sub = 'Service-level breakdown is not available for this data source';
+    }
+  }
+  const sum = rows.reduce((s, r) => s + r.val, 0);
+  const overlay = _ensureCatOverlay();
+  const titleEl = overlay.querySelector('#cat-title');
+  const subEl = overlay.querySelector('#cat-sub');
+  const contentEl = overlay.querySelector('#cat-content');
+  if (titleEl) titleEl.textContent = label;
+  if (subEl) subEl.textContent = sub + (sum > 0 ? ' \u00b7 ' + fmt(sum) + ' avg monthly ACR' : '');
+  if (contentEl) {
+    if (!rows.length) {
+      contentEl.innerHTML = '<div class="cat-empty">No service-level breakdown to display.</div>';
+    } else {
+      const body = rows.map(r => {
+        const pct = sum > 0 ? (r.val / sum * 100).toFixed(1) : '0.0';
+        return '<tr><td>' + escapeHtml(r.name) + '</td><td class="num">' + escapeHtml(fmt(r.val)) +
+          '</td><td class="num">' + pct + '%</td></tr>';
+      }).join('');
+      contentEl.innerHTML = '<table class="cat-table"><thead><tr><th>Service</th>' +
+        '<th class="num">Avg monthly ACR</th><th class="num">Share</th></tr></thead><tbody>' +
+        body + '</tbody></table>';
+    }
+  }
+  _catLastFocus = (document.activeElement && typeof document.activeElement.focus === 'function') ? document.activeElement : null;
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.cat-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closeCategoryModal() {
+  if (_catOverlay) _catOverlay.setAttribute('hidden', '');
+  if (_catLastFocus && typeof _catLastFocus.focus === 'function') { try { _catLastFocus.focus(); } catch (_) {} }
+  _catLastFocus = null;
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  if (!_catOverlay || _catOverlay.hasAttribute('hidden')) return;
+  closeCategoryModal();
+}, true);
+
+
 function renderAll() {
   if (!DATA.customers || DATA.customers.length === 0) return;
+  reclassifyOpportunities(dfcShareThreshold);
   renderKpis();
-  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values: DATA.dfc_total_monthly, color: '#0078d4'}]);
+  renderDfcTrend();
   const top15 = DATA.opportunity.filter(r => r.dfc_current > 0)
     .sort((a, b) => b.dfc_current - a.dfc_current).slice(0, 15)
     .map(r => ({label: r.customer, value: r.dfc_current, color: '#0078d4'}));
   barChartHorizontal('chart-top-dfc', top15);
-  renderProductTrend();
+  renderProductMix();
   renderQuadrant();
   renderOppTable();
   renderAllTable();
@@ -1661,7 +2340,7 @@ function renderAll() {
   }
 }
 
-const ACR_CACHE_KEY = 'defenderattach:acr:v1';
+const ACR_CACHE_KEY = 'defenderattach:acr:v3';
 renderAll();
 document.addEventListener('DOMContentLoaded', function() {
   // Restore from a previous tab-internal navigation if available.
@@ -1778,7 +2457,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const originalLabel = btn.textContent;
     btn.textContent = 'Building deck…';
     try {
-      const threshold = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 8;
+      const threshold = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
+      if (typeof reclassifyOpportunities === 'function') reclassifyOpportunities(threshold);
       const sourceName = DATA.source_name || 'Imported workbook';
       await window.PptxAcr.exportDeck(DATA, sourceName, threshold);
       setStatus('PowerPoint deck downloaded.', 'success');

@@ -1119,7 +1119,7 @@ def _opportunity_map_labels(template: str) -> str:
 
 def _inject_opportunity_map(template: str) -> str:
     script = r'''
-const DEFAULT_DFC_SHARE_THRESHOLD = 8;
+const DEFAULT_DFC_SHARE_THRESHOLD = 6;
 let dfcShareThreshold = DEFAULT_DFC_SHARE_THRESHOLD;
 
 function escapeHtml(value) {
@@ -1133,6 +1133,58 @@ function escapeHtml(value) {
 
 function fmtThreshold(value) {
   return Number.isInteger(value) ? `${value}%` : `${value.toFixed(1)}%`;
+}
+
+// Re-run the opportunity classifier against the selected attach baseline so the
+// slider actually drives priority (not just sorting). Mutates DATA.opportunity
+// rows in place and recomputes DATA.counts. Safe to call when DATA is empty.
+function reclassifyOpportunities(thresholdPct) {
+  if (!DATA || !Array.isArray(DATA.opportunity) || !window.AcrModel ||
+      typeof AcrModel.classifyOpportunity !== 'function') {
+    return;
+  }
+  const threshold = (Number.isFinite(thresholdPct) ? thresholdPct : DEFAULT_DFC_SHARE_THRESHOLD) / 100;
+  for (const row of DATA.opportunity) {
+    const [priority, notes] = AcrModel.classifyOpportunity({
+      dfc_current: row.dfc_current,
+      total_current: row.total_current,
+      dfc_ratio: (Number(row.dfc_ratio) || 0) / 100,
+      dfc_3m: row.dfc_3m,
+      other_3m: row.other_3m,
+      growth_cat_3m: (row.growth_cat_3m == null ? null : row.growth_cat_3m),
+      growth_cat_names: row.growth_cat_names || null,
+      threshold: threshold,
+    });
+    row.opportunity = priority;
+    row.notes = notes;
+  }
+  DATA.counts = {
+    high:      DATA.opportunity.filter(r => r.opportunity === 'High').length,
+    medium:    DATA.opportunity.filter(r => r.opportunity === 'Medium').length,
+    low:       DATA.opportunity.filter(r => r.opportunity === 'Low').length,
+    too_small: DATA.opportunity.filter(r => r.opportunity === 'Too small').length,
+    total:     (DATA.customers && DATA.customers.length) || DATA.opportunity.length,
+  };
+}
+
+let _thresholdRenderTimer = null;
+// Heavy re-render (tables + heatmap + the currently-selected customer detail,
+// which redraws charts) is debounced so dragging the slider stays smooth.
+function applyThresholdRender() {
+  if (typeof renderKpis === 'function') renderKpis();
+  if (_thresholdRenderTimer) clearTimeout(_thresholdRenderTimer);
+  _thresholdRenderTimer = setTimeout(() => {
+    _thresholdRenderTimer = null;
+    if (typeof renderOppTable === 'function') renderOppTable();
+    if (typeof renderAllTable === 'function') renderAllTable();
+    renderOpportunityHeatmap();
+    const sel = document.getElementById('customer-select');
+    const drill = document.getElementById('panel-drilldown');
+    if (sel && sel.value && drill && drill.classList.contains('active') &&
+        typeof renderCustomerDetail === 'function') {
+      renderCustomerDetail(sel.value);
+    }
+  }, 120);
 }
 
 function ensureDfcThresholdControl() {
@@ -1155,8 +1207,11 @@ function ensureDfcThresholdControl() {
   document.getElementById('dfc-threshold').addEventListener('input', e => {
     const next = parseFloat(e.target.value);
     dfcShareThreshold = Number.isFinite(next) ? next : DEFAULT_DFC_SHARE_THRESHOLD;
+    const valEl = document.getElementById('dfc-threshold-value');
+    if (valEl) valEl.textContent = fmtThreshold(dfcShareThreshold);
     updateExportLink();
-    renderOpportunityHeatmap();
+    reclassifyOpportunities(dfcShareThreshold);
+    applyThresholdRender();
   });
 }
 
@@ -1599,7 +1654,7 @@ function renderOpportunityHeatmap() {
   document.querySelectorAll('#chart-quadrant tr.clickable').forEach(tr =>
     tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
   const footEl = document.getElementById('chart-quadrant-foot');
-  if (footEl) footEl.innerHTML = `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 8% is aligned to the internal FY26 DfC attach reference.`;
+  if (footEl) footEl.innerHTML = `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 6% is the corporate Defender attach baseline (every customer should run at least 6% of total ACR on Defender workloads).`;
   renderActionQueue();
 }
 
