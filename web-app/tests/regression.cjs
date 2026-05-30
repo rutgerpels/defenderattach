@@ -356,6 +356,27 @@ console.log('\nacr-model.js (new weekly format)');
     const hasSkus = m.customer_data['Acme'].products.some(p => Array.isArray(p.skus) && p.skus.length);
     assert(hasSkus, 'expected at least one product with skus[]');
   });
+  test('emits portfolio product_skus that reconcile to product_monthly per category', () => {
+    assert(m.product_skus && typeof m.product_skus === 'object', 'product_skus map emitted');
+    // Pick a real (non-Total) category that has SKU leaves and verify the leaf sum
+    // matches the category group total for every month.
+    const cats = Object.keys(m.product_skus);
+    assert(cats.length > 0, 'at least one category has SKU leaves');
+    let checked = 0;
+    for (const cat of cats) {
+      const leaves = m.product_skus[cat];
+      const groupSeries = m.product_monthly[cat];
+      assert(Array.isArray(leaves), `${cat} leaves is a list of {sku, monthly}`);
+      assert(Array.isArray(groupSeries), `product_monthly has the ${cat} group`);
+      for (let i = 0; i < m.months.length; i++) {
+        const leafSum = leaves.reduce((a, s) => a + (s.monthly[i] || 0), 0);
+        assert(Math.abs(leafSum - groupSeries[i]) < 0.5,
+          `${cat} month ${i}: leaves ${leafSum} vs group ${groupSeries[i]}`);
+      }
+      checked++;
+    }
+    assert(checked > 0, 'reconciled at least one category');
+  });
 
   // ---- edge cases surfaced in review ----
   const mkHeader = (months, weeks) => {
@@ -421,9 +442,9 @@ console.log('\nacr-model.js (new weekly format)');
 console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
 {
   const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
-  test('product trend prefers DATA.track_products with validated colours', () => {
-    assert(/DATA\.track_products && DATA\.track_products\.length/.test(src), 'taxonomy-aware track list');
-    assert(/const colorFor = p =>/.test(src), 'colorFor helper present');
+  test('product mix donut sources product_monthly with validated colours', () => {
+    assert(/Object\.keys\(src\)\.filter\(k => k !== 'Total'\)/.test(src), 'donut sources all product_monthly categories');
+    assert(/const colorFor = \(label, rank\) =>/.test(src), 'rank-based colorFor helper present');
     assert(/\/\^#\[0-9a-fA-F\]\{6\}\$\/\.test\(c\)/.test(src), 'hex allowlist validation');
   });
   test('escapes Excel-derived product and SKU names', () => {
@@ -513,7 +534,7 @@ console.log('\nweb-app/index.html (product-mix donut)');
     assert(/function renderProductMix\(\)/.test(src), 'renderProductMix defined');
     assert(/id="chart-product-mix"/.test(src), 'donut container present');
     assert(/id="legend-product-mix"/.test(src), 'donut legend present');
-    assert(/donutChart\('chart-product-mix', items\)/.test(src), 'donut render call wired');
+    assert(/donutChart\('chart-product-mix', r\.items\)/.test(src), 'donut render call wired');
     assert(/\n {2}renderProductMix\(\);/.test(src), 'renderAll calls renderProductMix');
     assert(!/\n {2}renderProductTrend\(\);/.test(src), 'renderAll no longer calls renderProductTrend');
   });
@@ -548,6 +569,80 @@ console.log('\nweb-app/index.html (product-mix donut)');
     assert(/\.filter\(d => d\.value > 0\)/.test(src), 'zero-value services filtered out');
     assert(/No service ACR to display/.test(src), 'empty-state guard present');
     assert(!/const sumOf = a => \(Array\.isArray\(a\) \? a : \[\]\)\.reduce/.test(src) || !/sumOf\(src\[p\]\)/.test(src), 'donut no longer sums cumulative across all periods');
+  });
+  test('donut shows top-12 real categories, pins DfC, and decouples from track_products', () => {
+    assert(/const MAX_SLICES = 12;/.test(src), 'top-12 slice cap present');
+    assert(/Object\.keys\(src\)\.filter\(k => k !== 'Total'\)/.test(src), 'sources every product_monthly category (not the 8-cap track list)');
+    assert(/const dfc = all\.find\(d => d\.label === DFC\);/.test(src), 'Defender for Cloud located for pinning');
+    assert(/named\[named\.length - 1\] = dfc; named\.sort/.test(src), 'DfC swapped into the named slices if below the cap');
+    // The donut must NOT reuse the taxonomy 8-cap track_products list for its slices.
+    assert(!/tracks = \(DATA\.track_products[^\n]*\n[^\n]*donutChart/.test(src), 'donut not fed by track_products');
+  });
+  test('donut Other slice reconciles to its drill-down rows', () => {
+    assert(/const otherVal = Math\.max\(0, totalAvg - namedSum\);/.test(src), 'Other value = total avg minus named slices');
+    assert(/window\._donutOtherCats = r\.otherCats;/.test(src), 'tail categories stashed for the Other drill-down');
+    assert(/otherCats\.push\(\{label: 'Unmapped \/ residual', value: otherVal - tailSum\}\)/.test(src), 'total-vs-leaf residual surfaced in the Other drill-down');
+    assert(/if \(otherVal > 1\) items\.push\(\{label: 'Other services'/.test(src), 'Other slice only rendered when material');
+  });
+  test('donut slices drill into their underlying services (accessible)', () => {
+    assert(/function openCategoryBreakdown\(/.test(src), 'category breakdown opener defined');
+    assert(/function _ensureCatOverlay\(/.test(src), 'category modal overlay builder defined');
+    assert(/seg\.setAttribute\('tabindex', '0'\);/.test(src), 'donut slices are focusable');
+    assert(/seg\.setAttribute\('role', 'button'\);/.test(src), 'donut slices expose a button role');
+    assert(/if \(e\.key === 'Enter' \|\| e\.key === ' ' \|\| e\.key === 'Spacebar'\)/.test(src), 'Enter/Space open the drill-down');
+    assert(/openCategoryBreakdown\(seg\.getAttribute\('data-label'\)\)/.test(src), 'click/keyboard pass the slice label');
+  });
+  test('category modal sources SKU leaves, folds Other, and is XSS-safe', () => {
+    assert(/const skus = \(DATA\.product_skus && DATA\.product_skus\[label\]\) \|\| null;/.test(src), 'real category rows come from product_skus');
+    assert(/if \(label === 'Other services'\)/.test(src), 'Other slice lists its folded categories');
+    assert(/Array\.isArray\(window\._donutOtherCats\)/.test(src), 'Other drill-down reads the stashed categories defensively');
+    assert(/Service-level breakdown is not available for this data source/.test(src), 'graceful fallback when SKU leaves are absent (legacy/old format)');
+    assert(/escapeHtml\(r\.name\)/.test(src), 'service names escaped in the modal table');
+    assert(/if \(titleEl\) titleEl\.textContent = label;/.test(src), 'category title set via textContent (no HTML injection)');
+  });
+  test('computeDonutSlices: top-12 cap, DfC pin, and Other reconciliation (behavioral)', () => {
+    // Extract the pure slice-builder from the generated page and execute it against a
+    // synthetic product_monthly with >12 categories and a deliberately low-ranked DfC.
+    const start = src.indexOf('function computeDonutSlices(src, partial)');
+    const end = src.indexOf('\nfunction renderProductMix()', start);
+    assert(start >= 0 && end > start, 'computeDonutSlices source extracted');
+    const fnSrc = src.slice(start, end);
+    const sb = { console };
+    vm.createContext(sb);
+    vm.runInContext(fnSrc + '\nthis.computeDonutSlices = computeDonutSlices;', sb);
+    // 14 real categories + Total. DfC is the smallest non-zero category (ranks last).
+    const months = 3;
+    const partial = 2; // exclude the 3rd (accumulating) month from the average
+    const cat = (a, b) => [a, b, 999]; // 3rd month value ignored by avgOf
+    const data = { Total: cat(0, 0) };
+    const big = [
+      ['Compute', 100], ['Storage', 90], ['Networking', 80], ['Databases', 70],
+      ['AI + Machine Learning', 60], ['Containers', 50], ['Integration', 40],
+      ['Developer Tools', 30], ['Analytics', 25], ['Web', 20], ['IoT', 15],
+      ['Management', 12], ['Identity', 8],
+    ];
+    let total = 0;
+    for (const [name, v] of big) { data[name] = cat(v, v); total += v; }
+    data['Defender for Cloud'] = cat(3, 3); total += 3; // 14th, below the 12 cap
+    data.Total = cat(total, total);
+
+    const r = sb.computeDonutSlices(data, partial);
+    const labels = r.items.map(d => d.label);
+    // DfC must be pinned in despite ranking 14th.
+    assert(labels.includes('Defender for Cloud'), 'DfC pinned into the named slices');
+    // Cap respected: <=12 named + at most one 'Other services' slice.
+    const named = r.items.filter(d => d.label !== 'Other services');
+    assert(named.length <= 12, 'no more than 12 named slices');
+    assert(labels.filter(l => l === 'Other services').length <= 1, 'at most one Other slice');
+    // Slices reconcile to the true average monthly total.
+    const sliceSum = r.items.reduce((s, d) => s + d.value, 0);
+    assert(Math.abs(sliceSum - r.totalAvg) < 0.5, `slices (${sliceSum}) sum to total avg (${r.totalAvg})`);
+    // The Other drill-down reconciles to the Other slice value.
+    const otherSum = r.otherCats.reduce((s, d) => s + d.value, 0);
+    assert(Math.abs(otherSum - r.otherVal) < 0.5, `Other drill-down (${otherSum}) reconciles to Other slice (${r.otherVal})`);
+    // The lowest-ranked categories (Identity, then Management) were displaced into Other.
+    assert(!labels.includes('Identity'), 'lowest category folded into Other');
+    assert(r.otherCats.some(d => d.label === 'Identity'), 'displaced category appears in the Other drill-down');
   });
 }
 

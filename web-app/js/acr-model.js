@@ -433,6 +433,30 @@
       if (isHexColor(c)) productColors[p] = c;
     }
 
+    // Aggregate per-customer SKU leaves into an overview-level category -> SKU map so the
+    // product-mix donut can drill into each slice. Keyed by the same group() taxonomy as
+    // product_monthly, so sum(product_skus[group]) reconciles with product_monthly[group].
+    const productSkus = {};
+    for (const c of customers) {
+      const sm = skuMonthly.get(c);
+      if (!sm) continue;
+      for (const [group, skuMap] of sm) {
+        if (!productSkus[group]) productSkus[group] = new Map();
+        const agg = productSkus[group];
+        for (const [sku, arr] of skuMap) {
+          if (!agg.has(sku)) agg.set(sku, zerosM());
+          addArr(agg.get(sku), arr);
+        }
+      }
+    }
+    const productSkusOut = {};
+    for (const group of Object.keys(productSkus)) {
+      const list = [];
+      for (const [sku, arr] of productSkus[group]) list.push({ sku, monthly: arr.map(roundMoney) });
+      list.sort((a, b) => b.monthly.reduce((s, v) => s + v, 0) - a.monthly.reduce((s, v) => s + v, 0));
+      productSkusOut[group] = list;
+    }
+
     const priorityRank = { High: 0, Medium: 1, Low: 2, 'Too small': 3 };
     opportunity.sort((a, b) => priorityRank[a.opportunity] - priorityRank[b.opportunity] || b.total_current - a.total_current);
 
@@ -454,6 +478,7 @@
       dfc_total_monthly: productMonthly[DEFENDER_SERVICE] || zerosM(),
       track_products: trackProducts,
       product_colors: productColors,
+      product_skus: productSkusOut,
       counts: {
         high: opportunity.filter(r => r.opportunity === 'High').length,
         medium: opportunity.filter(r => r.opportunity === 'Medium').length,

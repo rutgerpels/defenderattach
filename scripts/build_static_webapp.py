@@ -140,6 +140,7 @@ def build_html() -> str:
     html = _threshold_priority(html)
     html = _inject_priority_explainer(html)
     html = _inject_customer_modal(html)
+    html = _inject_category_modal(html)
     html = _harden_csvcell(html)
 
     closing_body = "</body>"
@@ -208,8 +209,7 @@ def build_html() -> str:
     _assert_contains(html, "if (!DATA.customers || DATA.customers.length === 0) return;", "renderAll empty-state guard")
     _assert_contains(html, "ACR_CACHE_KEY", "session-storage persistence")
     _assert_contains(html, "sessionStorage.setItem(ACR_CACHE_KEY", "persistence write on import")
-    _assert_contains(html, "DATA.track_products && DATA.track_products.length", "taxonomy-aware trend chart")
-    _assert_contains(html, "const colorFor = p =>", "validated trend colour helper")
+    _assert_contains(html, "const colorFor = (label, rank) =>", "validated donut colour helper")
     _assert_contains(html, "${escapeHtml(d.label)}</span>", "escaped product mix donut legend label")
     _assert_contains(html, "const nameEsc = escapeHtml(p.product);", "escaped customer product name")
     _assert_contains(html, "${escapeHtml(s.sku)}", "escaped SKU name in drill-down")
@@ -231,16 +231,26 @@ def build_html() -> str:
     # Product-mix donut (replaces the product-trend line chart on the overview).
     _assert_contains(html, "function donutChart(", "product-mix donut helper")
     _assert_contains(html, "function renderProductMix()", "product-mix donut renderer")
+    _assert_contains(html, "function computeDonutSlices(src, partial)", "donut pure slice-builder")
     _assert_contains(html, 'id="chart-product-mix"', "product-mix donut container")
     _assert_contains(html, 'id="legend-product-mix"', "product-mix donut legend")
     _assert_contains(html, "  renderProductMix();", "renderAll product-mix wiring")
-    _assert_contains(html, "donutChart('chart-product-mix', items)", "donut render call")
+    _assert_contains(html, "donutChart('chart-product-mix', r.items)", "donut render call")
     _assert_absent(html, "function renderProductTrend()", "removed product-trend line renderer")
     _assert_absent(html, "  renderProductTrend();", "removed product-trend renderAll call")
     _assert_absent(html, 'id="product-trend-mode"', "removed product-trend mode select")
     _assert_absent(html, 'id="chart-product-trend"', "removed product-trend line container")
     _assert_absent(html, 'id="legend-product-trend"', "removed product-trend legend")
     _assert_absent(html, "Product mix — ACR trend by service", "removed product-trend line title")
+
+    # Donut drill-down: top-12 categories from product_monthly + category breakdown modal.
+    _assert_contains(html, "const MAX_SLICES = 12;", "donut top-12 cap")
+    _assert_contains(html, "Object.keys(src).filter(k => k !== 'Total')", "donut sources all product_monthly categories")
+    _assert_contains(html, "window._donutOtherCats", "donut Other-slice category stash")
+    _assert_contains(html, "function openCategoryBreakdown(", "category breakdown drill-down")
+    _assert_contains(html, "function _ensureCatOverlay(", "category modal overlay builder")
+    _assert_contains(html, "DATA.product_skus", "category modal sources SKU leaves")
+    _assert_absent(html, ": TRACK_PRODUCTS)\n    .filter(p => src[p]);", "donut no longer reuses the 8-cap track_products taxonomy")
 
     return html
 
@@ -933,28 +943,57 @@ def _product_mix_donut(html: str) -> str:
             "}"
         ),
         (
-            "function renderProductMix() {\n"
-            "  // Donut shows AVERAGE MONTHLY ACR share across COMPLETE months only. We use the\n"
-            "  // monthly series (not weekly) and exclude the partial/accumulating last month so the\n"
-            "  // centre equals a representative monthly ACR (~avg of complete months), not a\n"
-            "  // cumulative period total. The tracked set is kept consistent with the rest of the\n"
-            "  // dashboard (taxonomy trend / SKU drill-down); all untracked services roll into an\n"
-            "  // 'Other services' slice so the slices sum to the true total monthly ACR.\n"
-            "  const src = DATA.product_monthly || {};\n"
-            "  const partial = (typeof DATA.partial_month_idx === 'number') ? DATA.partial_month_idx : -1;\n"
-            "  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== partial); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };\n"
-            "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
-            "    .filter(p => src[p]);\n"
-            "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
-            "  const items = tracks.map(p => ({label: p, value: avgOf(src[p]), color: colorFor(p)}))\n"
+            "// Pure selection + reconciliation math for the product-mix donut. Kept separate from\n"
+            "// the DOM rendering so it can be unit-tested in isolation. Takes the monthly category\n"
+            "// series (DATA.product_monthly) + the partial/accumulating month index; returns the\n"
+            "// drillable slices (`items`), the categories folded into 'Other' (`otherCats`), and the\n"
+            "// reconciliation totals. Donut shows AVERAGE MONTHLY ACR share across COMPLETE months\n"
+            "// only (the partial last month is excluded), so the centre equals a representative\n"
+            "// monthly ACR, not a cumulative period total. Slices = top categories by avg monthly\n"
+            "// ACR (Defender for Cloud is always pinned in) up to a cap; everything below the cap\n"
+            "// rolls into an 'Other services' slice so the slices sum to the true total. Decoupled\n"
+            "// from DATA.track_products (the 8-cap used by the taxonomy trend / SKU drill-down) so\n"
+            "// large real categories (Storage, Networking, ...) surface here instead of hiding.\n"
+            "function computeDonutSlices(src, partial) {\n"
+            "  src = src || {};\n"
+            "  const DFC = 'Defender for Cloud';\n"
+            "  const MAX_SLICES = 12;\n"
+            "  const p = (typeof partial === 'number') ? partial : -1;\n"
+            "  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== p); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };\n"
+            "  const isHex = c => /^#[0-9a-fA-F]{6}$/.test(c);\n"
+            "  // Deterministic palette by rank; DfC (#0078d4) and Sentinel (#005a9e) keep their\n"
+            "  // brand colours and are intentionally excluded from the rotation to avoid collisions.\n"
+            "  const PALETTE = ['#107c10','#5c2d91','#d83b01','#008272','#a4262c','#c19c00','#004e8c','#874800','#5d5a58','#018574','#8764b8','#e3008c'];\n"
+            "  const colorFor = (label, rank) => { if (label === DFC) return '#0078d4'; if (label === 'Sentinel') return '#005a9e'; const c = PALETTE[rank % PALETTE.length]; return isHex(c) ? c : '#605e5c'; };\n"
+            "  const all = Object.keys(src).filter(k => k !== 'Total')\n"
+            "    .map(k => ({label: k, value: avgOf(src[k])}))\n"
             "    .filter(d => d.value > 0)\n"
             "    .sort((a, b) => b.value - a.value);\n"
+            "  const named = all.slice(0, MAX_SLICES);\n"
+            "  // Pin Defender for Cloud: if it ranks below the cap, swap it in for the lowest named.\n"
+            "  const dfc = all.find(d => d.label === DFC);\n"
+            "  if (dfc && named.indexOf(dfc) === -1 && named.length) { named[named.length - 1] = dfc; named.sort((a, b) => b.value - a.value); }\n"
+            "  const namedLabels = new Set(named.map(d => d.label));\n"
+            "  const items = named.map((d, i) => ({label: d.label, value: d.value, color: colorFor(d.label, i)}));\n"
             "  const totalAvg = avgOf(src['Total']);\n"
-            "  const trackedSum = items.reduce((s, d) => s + d.value, 0);\n"
-            "  const other = Math.max(0, totalAvg - trackedSum);\n"
-            "  if (other > 1) items.push({label: 'Other services', value: other, color: '#c8c6c4'});\n"
-            "  donutChart('chart-product-mix', items);\n"
-            "  document.getElementById('legend-product-mix').innerHTML = items.map(d =>\n"
+            "  const namedSum = items.reduce((s, d) => s + d.value, 0);\n"
+            "  const otherVal = Math.max(0, totalAvg - namedSum);\n"
+            "  // Stash the categories that fold into 'Other' (plus any total-vs-leaf residual) so the\n"
+            "  // Other slice's drill-down reconciles to the slice value.\n"
+            "  const tail = all.filter(d => !namedLabels.has(d.label));\n"
+            "  const tailSum = tail.reduce((s, d) => s + d.value, 0);\n"
+            "  const otherCats = tail.map(d => ({label: d.label, value: d.value}));\n"
+            "  if (otherVal - tailSum > 1) otherCats.push({label: 'Unmapped / residual', value: otherVal - tailSum});\n"
+            "  if (otherVal > 1) items.push({label: 'Other services', value: otherVal, color: '#c8c6c4'});\n"
+            "  return {items: items, otherCats: otherCats, totalAvg: totalAvg, otherVal: otherVal};\n"
+            "}\n"
+            "function renderProductMix() {\n"
+            "  // Each slice is drillable into its underlying services (see donutChart + the\n"
+            "  // category modal). All selection/reconciliation math lives in computeDonutSlices.\n"
+            "  const r = computeDonutSlices(DATA.product_monthly, DATA.partial_month_idx);\n"
+            "  window._donutOtherCats = r.otherCats;\n"
+            "  donutChart('chart-product-mix', r.items);\n"
+            "  document.getElementById('legend-product-mix').innerHTML = r.items.map(d =>\n"
             "    `<span class=\"legend-item\"><span class=\"legend-swatch\" style=\"background:${d.color}\"></span>${escapeHtml(d.label)}</span>`).join('');\n"
             "}"
         ),
@@ -1010,6 +1049,13 @@ def _product_mix_donut(html: str) -> str:
             "      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} avg/mo · ${pct}%`, e.pageX, e.pageY);\n"
             "    });\n"
             "    seg.addEventListener('mouseleave', hideTooltip);\n"
+            "    // Drill-down: each slice opens its underlying services. Keyboard-accessible.\n"
+            "    const lbl = seg.getAttribute('data-label');\n"
+            "    seg.setAttribute('tabindex', '0');\n"
+            "    seg.setAttribute('role', 'button');\n"
+            "    seg.setAttribute('aria-label', 'Show services in ' + lbl);\n"
+            "    seg.addEventListener('click', () => { if (typeof openCategoryBreakdown === 'function') openCategoryBreakdown(seg.getAttribute('data-label')); });\n"
+            "    seg.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); if (typeof openCategoryBreakdown === 'function') openCategoryBreakdown(seg.getAttribute('data-label')); } });\n"
             "  });\n"
             "}\n\n"
             "function lineChart(containerId, series, opts = {}) {"
@@ -1701,6 +1747,137 @@ document.addEventListener('keydown', function (e) {
         "function renderAll() {",
         script + "\nfunction renderAll() {",
         "customer modal injection point",
+    )
+
+
+def _inject_category_modal(html: str) -> str:
+    """Drill-down splash for the overview product-mix donut.
+
+    Clicking (or Enter/Space on) a donut slice opens a modal listing the services
+    (SKU rows for a real category, or the folded categories for the 'Other services'
+    slice) that make up that slice, with each row's avg monthly ACR and share. Runs
+    AFTER ``_inject_customer_modal``; its own document-capture Escape handler only
+    acts when the category overlay is visible, and the two overlays are mutually
+    exclusive (the donut cannot be clicked while the customer modal covers it), so
+    no Escape-stacking disambiguation is needed here.
+    """
+    script = r'''
+// ---- Category breakdown modal (Overview product-mix donut) ----------------
+let _catOverlay = null;
+let _catLastFocus = null;
+
+function _ensureCatOverlay() {
+  if (_catOverlay) return _catOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.cat-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:3950;padding:48px 16px;overflow:auto}' +
+    '.cat-overlay[hidden]{display:none}' +
+    '.cat-dialog{position:relative;background:#faf9f8;border-radius:10px;max-width:560px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.cat-close{position:absolute;top:8px;right:14px;border:none;background:transparent;font-size:28px;' +
+    'line-height:1;cursor:pointer;color:#605e5c;z-index:1}' +
+    '.cat-close:hover{color:#201f1e}' +
+    '.cat-close:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.cat-body{padding:22px 26px 26px}' +
+    '.cat-body h2{margin:0 0 4px;font-size:18px;color:#201f1e;padding-right:32px}' +
+    '.cat-body .cat-sub{margin:0 0 14px;font-size:12px;color:#605e5c}' +
+    '.cat-table{width:100%;border-collapse:collapse;font-size:13px}' +
+    '.cat-table th,.cat-table td{padding:6px 8px;text-align:left;border-bottom:1px solid #edebe9}' +
+    '.cat-table td.num,.cat-table th.num{text-align:right;font-variant-numeric:tabular-nums}' +
+    '.cat-empty{padding:18px 0;color:#a19f9d;font-size:13px}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cat-modal';
+  overlay.className = 'cat-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="cat-dialog" role="dialog" aria-modal="true" aria-labelledby="cat-title">' +
+    '<button class="cat-close" type="button" aria-label="Close">&times;</button>' +
+    '<div class="cat-body"><h2 id="cat-title"></h2>' +
+    '<p class="cat-sub" id="cat-sub"></p><div id="cat-content"></div></div></div>';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeCategoryModal(); });
+  overlay.querySelector('.cat-close').addEventListener('click', closeCategoryModal);
+  overlay.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const nodes = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const f = Array.prototype.filter.call(nodes, el => !el.disabled && el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  document.body.appendChild(overlay);
+  _catOverlay = overlay;
+  return overlay;
+}
+
+function openCategoryBreakdown(label) {
+  if (!label || typeof DATA === 'undefined' || !DATA) return;
+  const partial = (typeof DATA.partial_month_idx === 'number') ? DATA.partial_month_idx : -1;
+  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== partial); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };
+  const fmt = v => '$' + (Number(v) || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
+  let rows = [], sub = '';
+  if (label === 'Other services') {
+    rows = (Array.isArray(window._donutOtherCats) ? window._donutOtherCats : [])
+      .map(c => ({name: c.label, val: Number(c.value) || 0}))
+      .filter(r => r.val > 0).sort((a, b) => b.val - a.val);
+    sub = 'Categories grouped into the Other slice';
+  } else {
+    const skus = (DATA.product_skus && DATA.product_skus[label]) || null;
+    if (skus && skus.length) {
+      rows = skus.map(s => ({name: s.sku, val: avgOf(s.monthly)})).filter(r => r.val > 0).sort((a, b) => b.val - a.val);
+      sub = 'Services in this category';
+    } else {
+      sub = 'Service-level breakdown is not available for this data source';
+    }
+  }
+  const sum = rows.reduce((s, r) => s + r.val, 0);
+  const overlay = _ensureCatOverlay();
+  const titleEl = overlay.querySelector('#cat-title');
+  const subEl = overlay.querySelector('#cat-sub');
+  const contentEl = overlay.querySelector('#cat-content');
+  if (titleEl) titleEl.textContent = label;
+  if (subEl) subEl.textContent = sub + (sum > 0 ? ' \u00b7 ' + fmt(sum) + ' avg monthly ACR' : '');
+  if (contentEl) {
+    if (!rows.length) {
+      contentEl.innerHTML = '<div class="cat-empty">No service-level breakdown to display.</div>';
+    } else {
+      const body = rows.map(r => {
+        const pct = sum > 0 ? (r.val / sum * 100).toFixed(1) : '0.0';
+        return '<tr><td>' + escapeHtml(r.name) + '</td><td class="num">' + escapeHtml(fmt(r.val)) +
+          '</td><td class="num">' + pct + '%</td></tr>';
+      }).join('');
+      contentEl.innerHTML = '<table class="cat-table"><thead><tr><th>Service</th>' +
+        '<th class="num">Avg monthly ACR</th><th class="num">Share</th></tr></thead><tbody>' +
+        body + '</tbody></table>';
+    }
+  }
+  _catLastFocus = (document.activeElement && typeof document.activeElement.focus === 'function') ? document.activeElement : null;
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.cat-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closeCategoryModal() {
+  if (_catOverlay) _catOverlay.setAttribute('hidden', '');
+  if (_catLastFocus && typeof _catLastFocus.focus === 'function') { try { _catLastFocus.focus(); } catch (_) {} }
+  _catLastFocus = null;
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  if (!_catOverlay || _catOverlay.hasAttribute('hidden')) return;
+  closeCategoryModal();
+}, true);
+
+'''
+    return _replace_once(
+        html,
+        "function renderAll() {",
+        script + "\nfunction renderAll() {",
+        "category modal injection point",
     )
 
 
