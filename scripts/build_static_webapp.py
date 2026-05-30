@@ -188,7 +188,7 @@ def build_html() -> str:
     _assert_contains(html, 'id="m-chart-cust-pct"', "customer modal pct chart container")
     _assert_contains(html, "opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%'", "lineChart percent Y-axis label")
     _assert_contains(html, "format: 'percent'});", "DfC penetration chart percent format")
-    _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]", "opportunity matrix click interceptor")
+    _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]", "opportunity matrix click interceptor")
     _assert_contains(html, "function _enhanceCustomerTargetsA11y()", "customer target a11y enhancer")
     _assert_contains(html, "n.setAttribute('tabindex', '0')", "customer targets made focusable")
     _assert_contains(html, "if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;", "customer target keydown activation")
@@ -1675,7 +1675,7 @@ function closeCustomerModal() {
 document.addEventListener('click', function (e) {
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;
@@ -1691,7 +1691,7 @@ document.addEventListener('click', function (e) {
 // host containers re-apply this whenever their contents are re-rendered (tab
 // switch, data reload), and an initial pass covers anything already drawn.
 function _enhanceCustomerTargetsA11y() {
-  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]');
+  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (n.getAttribute('tabindex') === null) n.setAttribute('tabindex', '0');
@@ -1703,7 +1703,7 @@ function _enhanceCustomerTargetsA11y() {
     if (nm && !n.getAttribute('aria-label')) n.setAttribute('aria-label', 'Open breakdown for ' + nm);
   }
 }
-['chart-quadrant', 'opp-tbody', 'chart-top-dfc'].forEach(function (id) {
+['chart-quadrant', 'opp-tbody', 'chart-top-dfc', 'action-queue', 'all-tbody'].forEach(function (id) {
   const host = document.getElementById(id);
   if (!host || typeof MutationObserver !== 'function') return;
   new MutationObserver(_enhanceCustomerTargetsA11y).observe(host, { childList: true, subtree: true });
@@ -1717,7 +1717,7 @@ document.addEventListener('keydown', function (e) {
   if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;
