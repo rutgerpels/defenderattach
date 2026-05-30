@@ -745,7 +745,7 @@ function lineChart(containerId, series, opts = {}) {
     const yv = yMin + (yMax - yMin) * t / yTicks;
     const yp = y(yv);
     svg += `<line x1="${M.left}" y1="${yp}" x2="${W - M.right}" y2="${yp}" stroke="#edebe9" stroke-width="1"/>`;
-    const lbl = indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0));
+    const lbl = opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%' : (indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0)));
     svg += `<text x="${M.left - 6}" y="${yp + 3}" text-anchor="end" font-size="10" fill="#605e5c">${lbl}</text>`;
   }
   const partialIdx = (opts.partialIdx != null) ? opts.partialIdx : DATA.partial_month_idx;
@@ -775,7 +775,7 @@ function lineChart(containerId, series, opts = {}) {
       const month = c.getAttribute('data-month');
       const label = c.getAttribute('data-label');
       const val = c.getAttribute('data-val');
-      const display = indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2});
+      const display = opts.format === 'percent' ? parseFloat(val).toFixed(2) + '%' : (indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2}));
       showTooltip(`<b>${escapeHtml(label)}</b><br/>${month}: ${display}`, e.pageX, e.pageY);
     });
     c.addEventListener('mouseleave', hideTooltip);
@@ -1167,7 +1167,7 @@ function renderCustomerDetail(name, idp) {
     const t = totalSeries[i];
     return t > 0 ? (v / t) * 100 : 0;
   });
-  lineChart(idp + 'chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});
+  lineChart(idp + 'chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx, format: 'percent'});
 
   const ph = document.getElementById(idp + 'cust-products');
   ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">Monthly ACR</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +

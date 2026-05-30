@@ -474,7 +474,13 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
     assert(/const cWeekly = !!\(DATA\.weekly_enabled && Array\.isArray\(cd\.dfc_weekly\) && Array\.isArray\(cd\.other_weekly\) && Array\.isArray\(cd\.total_weekly\)\);/.test(src), 'customer weekly guard present');
     assert(/const dfcSeries = cWeekly \? cd\.dfc_weekly : cd\.dfc_series;/.test(src), 'customer DfC series switched');
     assert(/lineChart\(idp \+ 'chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer DfC chart relabelled');
-    assert(/lineChart\(idp \+ 'chart-cust-pct', .*\{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer % chart relabelled');
+    assert(/lineChart\(idp \+ 'chart-cust-pct', .*\{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx, format: 'percent'\}\);/.test(src), 'customer % chart relabelled');
+  });
+  test('DfC penetration chart renders percent axis and tooltip', () => {
+    assert(/opts\.format === 'percent' \? yv\.toFixed\(yMax < 10 \? 1 : 0\) \+ '%'/.test(src), 'lineChart percent Y-axis branch present');
+    assert(/opts\.format === 'percent' \? parseFloat\(val\)\.toFixed\(2\) \+ '%'/.test(src), 'lineChart percent tooltip branch present');
+    // The dollar-based DfC trend chart must NOT inherit percent formatting.
+    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'DfC dollar chart keeps dollar (no percent) opts');
   });
   test('legacy monthly data still falls back without blank charts', () => {
     assert(/weekly \? DATA\.product_weekly : DATA\.product_monthly/.test(src), 'product monthly fallback retained');

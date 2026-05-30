@@ -185,6 +185,8 @@ def build_html() -> str:
     _assert_contains(html, 'id="m-cust-products"', "customer modal product table")
     _assert_contains(html, 'id="m-chart-cust-dfc"', "customer modal dfc chart container")
     _assert_contains(html, 'id="m-chart-cust-pct"', "customer modal pct chart container")
+    _assert_contains(html, "opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%'", "lineChart percent Y-axis label")
+    _assert_contains(html, "format: 'percent'});", "DfC penetration chart percent format")
     _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer]", "opportunity matrix click interceptor")
     _assert_contains(html, "function _enhanceCustomerTargetsA11y()", "customer target a11y enhancer")
     _assert_contains(html, "n.setAttribute('tabindex', '0')", "customer targets made focusable")
@@ -822,6 +824,28 @@ def _weekly_views(html: str) -> str:
         '      <div class="sub">DfC as % of total monthly ACR for this customer</div>',
         '      <div class="sub">DfC as % of total ACR for this customer</div>',
         "customer pct trend sub relabel",
+    )
+
+    # 8. DfC penetration chart is a percentage series, but lineChart formats the
+    #    Y axis and tooltip as dollars. Teach lineChart an opts.format ='percent'
+    #    mode and flag the penetration call so its axis/tooltip read in %.
+    html = _replace_once(
+        html,
+        "    const lbl = indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0));",
+        "    const lbl = opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%' : (indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0)));",
+        "lineChart percent Y-axis label",
+    )
+    html = _replace_once(
+        html,
+        "      const display = indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2});",
+        "      const display = opts.format === 'percent' ? parseFloat(val).toFixed(2) + '%' : (indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2}));",
+        "lineChart percent tooltip",
+    )
+    html = _replace_once(
+        html,
+        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});",
+        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx, format: 'percent'});",
+        "DfC penetration chart percent format",
     )
 
     return html
