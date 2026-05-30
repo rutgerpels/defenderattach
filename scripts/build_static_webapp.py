@@ -221,8 +221,7 @@ def build_html() -> str:
     _assert_absent(html, "color: PRODUCT_COLORS[p]}));", "stale hardcoded trend colours")
 
     _assert_contains(html, "function renderDfcTrend()", "weekly-preferring DfC overview trend")
-    _assert_contains(html, "const weekly = !!(DATA.weekly_enabled && DATA.product_weekly);", "weekly product series auto-selected")
-    _assert_contains(html, "DATA.product_weekly", "weekly product series wired into trend")
+    _assert_contains(html, "const weekly = !!(DATA.weekly_enabled && DATA.dfc_total_weekly);", "weekly DfC series auto-selected")
     _assert_contains(html, "cd.dfc_weekly", "weekly customer series wired into drill-down")
     _assert_absent(html, "lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values: DATA.dfc_total_monthly, color: '#0078d4'}]);", "stale month-only DfC overview trend call")
     _assert_absent(html, 'id="product-trend-grain"', "removed monthly/weekly granularity toggle")
@@ -935,15 +934,25 @@ def _product_mix_donut(html: str) -> str:
         ),
         (
             "function renderProductMix() {\n"
-            "  const weekly = !!(DATA.weekly_enabled && DATA.product_weekly);\n"
-            "  const src = weekly ? DATA.product_weekly : DATA.product_monthly;\n"
+            "  // Donut shows AVERAGE MONTHLY ACR share across COMPLETE months only. We use the\n"
+            "  // monthly series (not weekly) and exclude the partial/accumulating last month so the\n"
+            "  // centre equals a representative monthly ACR (~avg of complete months), not a\n"
+            "  // cumulative period total. The tracked set is kept consistent with the rest of the\n"
+            "  // dashboard (taxonomy trend / SKU drill-down); all untracked services roll into an\n"
+            "  // 'Other services' slice so the slices sum to the true total monthly ACR.\n"
+            "  const src = DATA.product_monthly || {};\n"
+            "  const partial = (typeof DATA.partial_month_idx === 'number') ? DATA.partial_month_idx : -1;\n"
+            "  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== partial); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };\n"
             "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
             "    .filter(p => src[p]);\n"
             "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
-            "  const sumOf = a => (Array.isArray(a) ? a : []).reduce((s, v) => s + (Number(v) || 0), 0);\n"
-            "  const items = tracks.map(p => ({label: p, value: sumOf(src[p]), color: colorFor(p)}))\n"
+            "  const items = tracks.map(p => ({label: p, value: avgOf(src[p]), color: colorFor(p)}))\n"
             "    .filter(d => d.value > 0)\n"
             "    .sort((a, b) => b.value - a.value);\n"
+            "  const totalAvg = avgOf(src['Total']);\n"
+            "  const trackedSum = items.reduce((s, d) => s + d.value, 0);\n"
+            "  const other = Math.max(0, totalAvg - trackedSum);\n"
+            "  if (other > 1) items.push({label: 'Other services', value: other, color: '#c8c6c4'});\n"
             "  donutChart('chart-product-mix', items);\n"
             "  document.getElementById('legend-product-mix').innerHTML = items.map(d =>\n"
             "    `<span class=\"legend-item\"><span class=\"legend-swatch\" style=\"background:${d.color}\"></span>${escapeHtml(d.label)}</span>`).join('');\n"
@@ -968,7 +977,7 @@ def _product_mix_donut(html: str) -> str:
             "    el.innerHTML = '<div style=\"padding:40px;text-align:center;color:#a19f9d;font-size:12px;\">No service ACR to display</div>';\n"
             "    return;\n"
             "  }\n"
-            "  const totalLbl = total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);\n"
+            "  const totalLbl = total >= 1e6 ? '$' + (total / 1e6).toFixed(2) + 'M' : total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);\n"
             "  let svg = `<svg viewBox=\"0 0 ${W} ${H}\" xmlns=\"http://www.w3.org/2000/svg\">`;\n"
             "  if (items.length === 1) {\n"
             "    const d = items[0];\n"
@@ -990,7 +999,7 @@ def _product_mix_donut(html: str) -> str:
             "    });\n"
             "  }\n"
             "  svg += `<text x=\"${cx}\" y=\"${cy - 2}\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"700\" fill=\"#323130\">${totalLbl}</text>`;\n"
-            "  svg += `<text x=\"${cx}\" y=\"${cy + 15}\" text-anchor=\"middle\" font-size=\"10\" fill=\"#605e5c\">total ACR</text>`;\n"
+            "  svg += `<text x=\"${cx}\" y=\"${cy + 15}\" text-anchor=\"middle\" font-size=\"10\" fill=\"#605e5c\">avg monthly ACR</text>`;\n"
             "  svg += `</svg>`;\n"
             "  el.innerHTML = svg;\n"
             "  el.querySelectorAll('[data-label]').forEach(seg => {\n"
@@ -998,7 +1007,7 @@ def _product_mix_donut(html: str) -> str:
             "      const label = seg.getAttribute('data-label');\n"
             "      const val = parseFloat(seg.getAttribute('data-val'));\n"
             "      const pct = seg.getAttribute('data-pct');\n"
-            "      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} · ${pct}%`, e.pageX, e.pageY);\n"
+            "      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} avg/mo · ${pct}%`, e.pageX, e.pageY);\n"
             "    });\n"
             "    seg.addEventListener('mouseleave', hideTooltip);\n"
             "  });\n"

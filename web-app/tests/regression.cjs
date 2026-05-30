@@ -466,7 +466,6 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
   test('overview trends auto-select weekly when available', () => {
     assert(/function renderDfcTrend\(\)/.test(src), 'weekly-preferring DfC trend defined');
     assert(/const weekly = !!\(DATA\.weekly_enabled && DATA\.dfc_total_weekly\);/.test(src), 'DfC weekly auto-selected');
-    assert(/const weekly = !!\(DATA\.weekly_enabled && DATA\.product_weekly\);/.test(src), 'product weekly auto-selected');
     assert(/labels = weekly \? DATA\.week_labels : DATA\.month_labels/.test(src), 'weekly x-axis labels wired');
     assert(!/lineChart\('chart-dfc-trend', \[\{label: 'Defender for Cloud', values: DATA\.dfc_total_monthly, color: '#0078d4'\}\]\);/.test(src), 'no stale month-only DfC trend call');
   });
@@ -483,7 +482,6 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
     assert(/lineChart\(idp \+ 'chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'DfC dollar chart keeps dollar (no percent) opts');
   });
   test('legacy monthly data still falls back without blank charts', () => {
-    assert(/weekly \? DATA\.product_weekly : DATA\.product_monthly/.test(src), 'product monthly fallback retained');
     assert(/weekly \? DATA\.dfc_total_weekly : DATA\.dfc_total_monthly/.test(src), 'DfC monthly fallback retained');
     assert(/cWeekly \? cd\.dfc_weekly : cd\.dfc_series/.test(src), 'customer monthly fallback retained');
   });
@@ -540,10 +538,16 @@ console.log('\nweb-app/index.html (product-mix donut)');
     assert(/data-label="\$\{escapeHtml\(d\.label\)\}"/.test(src), 'donut segment label escaped');
     assert(/showTooltip\(`<b>\$\{escapeHtml\(label\)\}<\/b>/.test(src), 'donut tooltip label escaped');
   });
-  test('donut aggregates ACR across all periods', () => {
-    assert(/const sumOf = a => \(Array\.isArray\(a\) \? a : \[\]\)\.reduce/.test(src), 'sumOf guards non-arrays');
+  test('donut shows average monthly ACR over complete months', () => {
+    assert(/const avgOf = a => \{ const arr = Array\.isArray\(a\) \? a : \[\];/.test(src), 'avgOf guards non-arrays');
+    assert(/vals = arr\.filter\(\(_, i\) => i !== partial\)/.test(src), 'partial/accumulating month excluded from average');
+    assert(/const totalAvg = avgOf\(src\['Total'\]\);/.test(src), 'centre total uses avg monthly Total ACR');
+    assert(/label: 'Other services'/.test(src), 'Other services slice rolls up untracked services');
+    assert(/avg monthly ACR<\/text>/.test(src), 'donut centre sublabel reads avg monthly ACR');
+    assert(/total >= 1e6 \? '\$' \+ \(total \/ 1e6\)\.toFixed\(2\) \+ 'M'/.test(src), 'centre value formats millions as $X.XXM');
     assert(/\.filter\(d => d\.value > 0\)/.test(src), 'zero-value services filtered out');
     assert(/No service ACR to display/.test(src), 'empty-state guard present');
+    assert(!/const sumOf = a => \(Array\.isArray\(a\) \? a : \[\]\)\.reduce/.test(src) || !/sumOf\(src\[p\]\)/.test(src), 'donut no longer sums cumulative across all periods');
   });
 }
 

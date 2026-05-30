@@ -676,7 +676,7 @@ function donutChart(containerId, items, opts = {}) {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:#a19f9d;font-size:12px;">No service ACR to display</div>';
     return;
   }
-  const totalLbl = total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);
+  const totalLbl = total >= 1e6 ? '$' + (total / 1e6).toFixed(2) + 'M' : total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);
   let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
   if (items.length === 1) {
     const d = items[0];
@@ -698,7 +698,7 @@ function donutChart(containerId, items, opts = {}) {
     });
   }
   svg += `<text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="15" font-weight="700" fill="#323130">${totalLbl}</text>`;
-  svg += `<text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10" fill="#605e5c">total ACR</text>`;
+  svg += `<text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10" fill="#605e5c">avg monthly ACR</text>`;
   svg += `</svg>`;
   el.innerHTML = svg;
   el.querySelectorAll('[data-label]').forEach(seg => {
@@ -706,7 +706,7 @@ function donutChart(containerId, items, opts = {}) {
       const label = seg.getAttribute('data-label');
       const val = parseFloat(seg.getAttribute('data-val'));
       const pct = seg.getAttribute('data-pct');
-      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} · ${pct}%`, e.pageX, e.pageY);
+      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} avg/mo · ${pct}%`, e.pageX, e.pageY);
     });
     seg.addEventListener('mouseleave', hideTooltip);
   });
@@ -1027,15 +1027,25 @@ function renderDfcTrend() {
 }
 
 function renderProductMix() {
-  const weekly = !!(DATA.weekly_enabled && DATA.product_weekly);
-  const src = weekly ? DATA.product_weekly : DATA.product_monthly;
+  // Donut shows AVERAGE MONTHLY ACR share across COMPLETE months only. We use the
+  // monthly series (not weekly) and exclude the partial/accumulating last month so the
+  // centre equals a representative monthly ACR (~avg of complete months), not a
+  // cumulative period total. The tracked set is kept consistent with the rest of the
+  // dashboard (taxonomy trend / SKU drill-down); all untracked services roll into an
+  // 'Other services' slice so the slices sum to the true total monthly ACR.
+  const src = DATA.product_monthly || {};
+  const partial = (typeof DATA.partial_month_idx === 'number') ? DATA.partial_month_idx : -1;
+  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== partial); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };
   const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)
     .filter(p => src[p]);
   const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };
-  const sumOf = a => (Array.isArray(a) ? a : []).reduce((s, v) => s + (Number(v) || 0), 0);
-  const items = tracks.map(p => ({label: p, value: sumOf(src[p]), color: colorFor(p)}))
+  const items = tracks.map(p => ({label: p, value: avgOf(src[p]), color: colorFor(p)}))
     .filter(d => d.value > 0)
     .sort((a, b) => b.value - a.value);
+  const totalAvg = avgOf(src['Total']);
+  const trackedSum = items.reduce((s, d) => s + d.value, 0);
+  const other = Math.max(0, totalAvg - trackedSum);
+  if (other > 1) items.push({label: 'Other services', value: other, color: '#c8c6c4'});
   donutChart('chart-product-mix', items);
   document.getElementById('legend-product-mix').innerHTML = items.map(d =>
     `<span class="legend-item"><span class="legend-swatch" style="background:${d.color}"></span>${escapeHtml(d.label)}</span>`).join('');
