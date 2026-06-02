@@ -140,6 +140,7 @@ def build_html() -> str:
     html = _threshold_priority(html)
     html = _inject_priority_explainer(html)
     html = _inject_customer_modal(html)
+    html = _inject_service_attach(html)
     html = _inject_category_modal(html)
     html = _harden_csvcell(html)
 
@@ -200,6 +201,15 @@ def build_html() -> str:
     _assert_absent(html, "<strong>Signal:</strong> ${opp.notes}", "unescaped drill-down signal note")
     _assert_absent(html, "lineChart('chart-cust-dfc', [", "stale unprefixed cust dfc chart call")
     _assert_absent(html, "lineChart('chart-cust-pct', [", "stale unprefixed cust pct chart call")
+
+    # Per-service Defender attach (AE talk-track) drill-down.
+    _assert_contains(html, "function renderServiceAttach(idp, name)", "service attach renderer")
+    _assert_contains(html, 'id="cust-attach"', "inline service attach anchor")
+    _assert_contains(html, 'id="m-cust-attach"', "modal service attach anchor")
+    _assert_contains(html, "renderServiceAttach(idp, name);", "service attach render call")
+    _assert_contains(html, "escapeHtml(o.opener)", "escaped attach opener (XSS)")
+    _assert_contains(html, "escapeHtml(o.planLabel)", "escaped attach plan label (XSS)")
+    _assert_contains(html, "escapeHtml(f.planLabel)", "escaped foundational plan label (XSS)")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
     _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
@@ -1778,6 +1788,172 @@ document.addEventListener('keydown', function (e) {
         script + "\nfunction renderAll() {",
         "customer modal injection point",
     )
+
+
+def _inject_service_attach(html: str) -> str:
+    """Per-service Defender attach (AE talk-track) drill-down.
+
+    Adds a `renderServiceAttach(idp, name)` renderer and mounts it inside the
+    per-customer detail view (inline and modal). For customers in an SL2/SL4
+    import it surfaces the "you buy service X but don't protect it with the
+    matching Defender plan" motion: a KPI strip (true attach ratio on the mapped
+    eligible-workload denominator, eligible workload ACR, DfC ACR, open gap),
+    ranked per-service opportunities with auto-generated AE openers, and a
+    foundational-coverage pill panel. Hides itself gracefully when the active
+    import has no `DATA.service_attach` (non-SL2/SL4 workbooks), and shows the
+    engine error when `DATA.service_attach_error` is present.
+
+    All customer-derived strings are escapeHtml-wrapped (XSS / A05). Must run
+    AFTER _inject_customer_modal so the idp-refactored renderCustomerDetail
+    signature and the m-cust-signal modal anchor already exist.
+    """
+    # 1) Inline mount point, directly under the existing signal note.
+    html = _replace_once(
+        html,
+        '<div class="note" id="cust-signal"></div>',
+        '<div class="note" id="cust-signal"></div>\n  <div id="cust-attach"></div>',
+        "inline service attach mount",
+    )
+
+    # 2) Modal mount point, directly under the modal signal note (built in JS).
+    html = _replace_once(
+        html,
+        "'<div class=\"note\" id=\"m-cust-signal\"></div>' +",
+        "'<div class=\"note\" id=\"m-cust-signal\"></div>' +\n      '<div id=\"m-cust-attach\"></div>' +",
+        "modal service attach mount",
+    )
+
+    # 3) Invoke the renderer at the end of the (idp-aware) detail render. The
+    #    note.style.color line is unique to renderCustomerDetail.
+    color_anchor = (
+        "note.style.color = opp.opportunity === 'High' ? '#5d1014' : "
+        "opp.opportunity === 'Medium' ? '#5d3a00' : '#0e3a0e';"
+    )
+    html = _replace_once(
+        html,
+        color_anchor,
+        color_anchor + "\n  renderServiceAttach(idp, name);",
+        "service attach render call",
+    )
+
+    # 4) Define renderServiceAttach just before renderCustomerDetail.
+    renderer = r'''// ---- Per-service Defender attach (AE talk-track) ------------------------
+function _saPct1(v) {
+  return (v == null || isNaN(v)) ? '\u2013' : (v * 100).toFixed(1) + '%';
+}
+
+function renderServiceAttach(idp, name) {
+  idp = idp || '';
+  const host = document.getElementById(idp + 'cust-attach');
+  if (!host) return;
+  const sa = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach : null;
+  const saErr = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach_error : null;
+
+  if (!sa || !Array.isArray(sa.dossiers)) {
+    if (saErr) {
+      host.style.display = '';
+      host.innerHTML =
+        '<div class="note" style="margin-top:18px;border-left-color:#ff8c00;background:#fffaf0;color:#5d3a00;">' +
+        '<strong>Service-level attach unavailable:</strong> ' + escapeHtml(String(saErr)) + '</div>';
+    } else {
+      host.innerHTML = '';
+      host.style.display = 'none';
+    }
+    return;
+  }
+
+  const d = sa.dossiers.find(function (x) { return x.customer === name; });
+  if (!d) { host.innerHTML = ''; host.style.display = 'none'; return; }
+  host.style.display = '';
+
+  const kpis =
+    '<div class="cards" style="margin-top:6px;">' +
+      '<div class="card"><div class="label">Defender Attach Rate</div><div class="val">' + _saPct1(d.attachRatio) + '</div><div class="delta">DfC \u00f7 eligible workload</div></div>' +
+      '<div class="card"><div class="label">Eligible Workload ACR</div><div class="val">' + fmt.money(d.eligibleWorkloadAcr) + '</div><div class="delta">mapped services / mo</div></div>' +
+      '<div class="card"><div class="label">Defender for Cloud ACR</div><div class="val">' + fmt.money(d.dfcAcr) + '</div><div class="delta">per month</div></div>' +
+      '<div class="card"><div class="label">Open Attach Gap</div><div class="val">' + fmt.money(d.totalGapDollars) + '</div><div class="delta">' + d.uncoveredEligibleCount + ' of ' + d.presentEligibleCount + ' services unprotected</div></div>' +
+    '</div>';
+
+  const opps = Array.isArray(d.opportunities)
+    ? d.opportunities.slice().sort(function (a, b) { return (b.blendedScore || 0) - (a.blendedScore || 0); })
+    : [];
+  let oppHtml;
+  if (!opps.length) {
+    oppHtml = '<div class="note" style="border-left-color:#107c10;background:#f3f9ef;color:#0e3a0e;">' +
+      'No open per-service attach gaps \u2014 this customer protects the Azure services they run.</div>';
+  } else {
+    oppHtml = opps.map(function (o) {
+      const isAttach = o.signal === 'attach';
+      const badge = isAttach
+        ? '<span class="tag high">Not protected</span>'
+        : '<span class="tag medium">Under-protected</span>';
+      const flag = o.defenderZeroWithWorkloadGrowth
+        ? ' <span class="tag high">workload growing, $0 Defender</span>'
+        : '';
+      const gapStr = o.hasDollarGap
+        ? fmt.money(o.gapDollars) + ' / mo gap'
+        : 'usage-priced \u00b7 coverage signal';
+      const cov = (o.hasDollarGap && o.coveragePct != null)
+        ? ' \u00b7 ' + (o.coveragePct * 100).toFixed(0) + '% of benchmark'
+        : '';
+      return '<div class="product-row" style="display:block;padding:12px 14px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+          '<div><strong>' + escapeHtml(o.planLabel) + '</strong> ' + badge + flag + '</div>' +
+          '<div style="font-weight:600;white-space:nowrap;">' + gapStr + '</div>' +
+        '</div>' +
+        '<div class="note" style="margin:8px 0 0;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">' +
+          escapeHtml(o.opener) + '</div>' +
+        '<div style="font-size:12px;color:#605e5c;margin-top:8px;">' +
+          'Workload ' + fmt.money(o.workloadAcr) + ' / mo (' + fmt.pct(o.workloadGrowth) + ' 3M) \u00b7 ' +
+          'Defender ' + fmt.money(o.defenderActual) + ' / mo (' + fmt.pct(o.defenderGrowth) + ' 3M)' + cov +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  const found = Array.isArray(d.foundational) ? d.foundational : [];
+  let foundHtml = '';
+  if (found.length) {
+    foundHtml =
+      '<div style="margin-top:14px;font-size:13px;color:#323130;font-weight:600;">Foundational coverage</div>' +
+      '<div style="font-size:11px;color:#605e5c;margin-bottom:6px;">Posture plans (CSPM, Resource Manager, DNS, EASM) \u2014 not workload-priced.</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
+      found.map(function (f) {
+        const on = !!f.present;
+        const c = on ? '#107c10' : '#a19f9d';
+        const bg = on ? '#f3f9ef' : '#f3f2f1';
+        const mark = on ? '\u2713' : '\u25cb';
+        return '<span style="border:1px solid ' + c + ';background:' + bg + ';color:' + c +
+          ';border-radius:12px;padding:2px 10px;font-size:12px;">' + mark + ' ' + escapeHtml(f.planLabel) + '</span>';
+      }).join('') +
+      '</div>';
+  }
+
+  let reconHtml = '';
+  if (d.reconciliationOk === false) {
+    reconHtml = '<div class="note" style="margin-top:10px;border-left-color:#ff8c00;background:#fffaf0;color:#5d3a00;font-size:12px;">' +
+      'Heads-up: provided totals did not fully reconcile against summed service rows for this customer \u2014 treat figures as directional.</div>';
+  }
+
+  host.innerHTML =
+    '<div class="chart-box" style="margin-top:18px;">' +
+      '<div class="title">Per-Service Defender Attach</div>' +
+      '<div class="sub">Where this customer buys an Azure service but is not protecting it with the matching Defender plan. Ranked by opportunity score.</div>' +
+      kpis +
+      reconHtml +
+      '<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">' + oppHtml + '</div>' +
+      foundHtml +
+    '</div>';
+}
+
+'''
+    html = _replace_once(
+        html,
+        "function renderCustomerDetail(name, idp) {",
+        renderer + "function renderCustomerDetail(name, idp) {",
+        "service attach renderer definition",
+    )
+    return html
 
 
 def _inject_category_modal(html: str) -> str:

@@ -915,6 +915,39 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
   });
 }
 
+// ---- generated index.html: per-service Defender attach (AE talk-track) ----
+console.log('\nweb-app/index.html (per-service Defender attach)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  test('per-service attach renderer is defined and mounted (inline + modal)', () => {
+    assert(/function renderServiceAttach\(idp, name\) \{/.test(src), 'renderServiceAttach defined');
+    assert(/<div id="cust-attach"><\/div>/.test(src), 'inline mount present');
+    assert(/<div id="m-cust-attach"><\/div>/.test(src), 'modal mount present');
+    assert(/renderServiceAttach\(idp, name\);/.test(src), 'renderer invoked from renderCustomerDetail');
+    assert(/const host = document\.getElementById\(idp \+ 'cust-attach'\);/.test(src), 'host target is id-prefix aware');
+  });
+  test('per-service attach hides gracefully without SL2/SL4 data', () => {
+    assert(/if \(!sa \|\| !Array\.isArray\(sa\.dossiers\)\) \{/.test(src), 'guards on missing service_attach');
+    assert(/host\.style\.display = 'none';/.test(src), 'hides host when no dossier');
+    assert(/DATA\.service_attach_error/.test(src), 'surfaces engine error when present');
+    assert(/sa\.dossiers\.find\(function \(x\) \{ return x\.customer === name; \}\)/.test(src), 'looks up dossier by customer');
+  });
+  test('per-service attach escapes all customer-derived strings (XSS)', () => {
+    assert(/escapeHtml\(o\.planLabel\)/.test(src), 'plan label escaped');
+    assert(/escapeHtml\(o\.opener\)/.test(src), 'AE opener escaped');
+    assert(/escapeHtml\(f\.planLabel\)/.test(src), 'foundational plan label escaped');
+    assert(/escapeHtml\(String\(saErr\)\)/.test(src), 'engine error escaped');
+    assert(!/\$\{o\.opener\}/.test(src), 'no raw opener interpolation');
+  });
+  test('per-service attach respects dollar-gap eligibility + ranks by score', () => {
+    assert(/o\.hasDollarGap[\s\S]*?\/ mo gap/.test(src), 'dollar gap shown only when hasDollarGap');
+    assert(/usage-priced/.test(src), 'usage-priced plans shown as coverage signal');
+    assert(/\.sort\(function \(a, b\) \{ return \(b\.blendedScore \|\| 0\) - \(a\.blendedScore \|\| 0\); \}\)/.test(src),
+      'opportunities ranked by blended score descending');
+    assert(/o\.defenderZeroWithWorkloadGrowth/.test(src), 'zero-defender-with-growth flag surfaced');
+  });
+}
+
 // ---- service-level (SL2/SL4) attach: pipeline parity + privacy guards ----
 console.log('\nweb-app service-level attach (SL2/SL4)');
 {
