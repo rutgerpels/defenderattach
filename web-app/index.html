@@ -2278,7 +2278,13 @@ function openPriorityExplainer(customer) {
   const row = DATA.opportunity.find(r => r.customer === customer);
   if (!row) return;
   const overlay = _ensurePrioOverlay();
-  const meta = PRIORITY_META[row.opportunity] || PRIORITY_META.Low;
+  // In SL2/SL4 mode the headline rating is the per-service Defender priority
+  // (the same value the opportunity-map row pill shows), NOT the legacy
+  // corp-level row.opportunity. This keeps the modal header consistent with
+  // the matrix; the corp rating is still explained below as a separate signal.
+  const sl = (typeof slAttach === 'function') ? slAttach(customer) : null;
+  const ratingTier = sl ? sl.priority : row.opportunity;
+  const meta = PRIORITY_META[ratingTier] || PRIORITY_META.Low;
   const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
   const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
 
@@ -2319,15 +2325,17 @@ function openPriorityExplainer(customer) {
   document.getElementById('prio-body').innerHTML =
     '<div class="prio-head" style="border-left:6px solid ' + meta.color + ';background:' + meta.bg + ';">' +
       '<div class="prio-head-tier" style="color:' + meta.color + ';">' + escapeHtml(meta.label) + '</div>' +
-      '<h2 id="prio-title">Why is ' + escapeHtml(customer) + ' rated &ldquo;' + escapeHtml(row.opportunity) + '&rdquo;?</h2>' +
+      '<h2 id="prio-title">Why is ' + escapeHtml(customer) + ' rated &ldquo;' + escapeHtml(ratingTier) + '&rdquo;?</h2>' +
     '</div>' +
     svcEvidenceHtml +
     '<section class="prio-section"><h3>Corporate context</h3>' +
       '<p class="prio-rubric-intro">Overall Defender attach signals behind the corporate rating.</p>' +
       signalsHtml +
       '<div class="prio-metrics" style="margin-top:10px;">' + metricsHtml + '</div></section>' +
-    '<section class="prio-section"><h3>How priorities are graded</h3>' +
-      '<p class="prio-rubric-intro">The highest tier whose conditions are met wins. The tier this customer landed in is highlighted.</p>' +
+    '<section class="prio-section"><h3>' + (sl ? 'How the corporate attach rating is graded' : 'How priorities are graded') + '</h3>' +
+      '<p class="prio-rubric-intro">' + (sl
+        ? 'The headline above reflects this customer\u2019s top per-service Defender gap. The corporate attach rating below (&ldquo;' + escapeHtml(row.opportunity) + '&rdquo;) is a separate, blended signal \u2014 the highest tier whose conditions are met wins.'
+        : 'The highest tier whose conditions are met wins. The tier this customer landed in is highlighted.') + '</p>' +
       '<ul class="prio-rubric">' + rubricHtml + '</ul></section>';
   overlay.removeAttribute('hidden');
   const closeBtn = overlay.querySelector('.prio-close');
