@@ -1412,7 +1412,8 @@ function renderCustomerDetail(name, idp) {
   const opp = DATA.opportunity.find(r => r.customer === name);
   const cd = DATA.customer_data[name];
   if (!opp || !cd) return;
-  document.getElementById(idp + 'cust-priority').innerHTML = tagFor(opp.opportunity);
+  var _slPrio = (typeof slAttach === 'function') ? slAttach(name) : null;
+  document.getElementById(idp + 'cust-priority').innerHTML = tagFor(_slPrio ? _slPrio.priority : opp.opportunity);
   document.getElementById(idp + 'cust-cards').innerHTML = `
     <div class="card"><div class="label">Total Monthly ACR</div><div class="val">${fmt.money2(opp.total_current)}</div><div class="delta ${fmt.pctClass(opp.total_mom)}">${fmt.pct(opp.total_mom)} MoM</div></div>
     <div class="card"><div class="label">Defender for Cloud</div><div class="val">${fmt.money2(opp.dfc_current)}</div><div class="delta ${fmt.pctClass(opp.dfc_mom)}">${fmt.pct(opp.dfc_mom)} MoM</div></div>

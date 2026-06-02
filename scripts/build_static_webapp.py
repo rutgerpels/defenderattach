@@ -1622,7 +1622,8 @@ def _inject_customer_modal(html: str) -> str:
     html = _replace_once(
         html,
         "document.getElementById('cust-priority').innerHTML = tagFor(opp.opportunity);",
-        "document.getElementById(idp + 'cust-priority').innerHTML = tagFor(opp.opportunity);",
+        "var _slPrio = (typeof slAttach === 'function') ? slAttach(name) : null;\n"
+        "  document.getElementById(idp + 'cust-priority').innerHTML = tagFor(_slPrio ? _slPrio.priority : opp.opportunity);",
         "cust-priority id prefix",
     )
     html = _replace_once(
