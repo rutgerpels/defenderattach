@@ -1106,9 +1106,9 @@ def _html_escape(value: object) -> str:
 
 def _opportunity_map_labels(template: str) -> str:
     replacements = {
-        "Opportunity Quadrant — DfC growth vs. other Azure growth": "Opportunity map - growth gap vs. Defender penetration",
-        "3-month trend leading up to the latest full month. Bottom-right = top opportunity (Other Azure growing, DfC flat or shrinking). Bubble size = total monthly ACR. Bubble color = priority (red/orange/green) — a green bubble in the red zone means the customer is in the high-opp geometry but already has heavy DfC penetration, so priority is lower. Click any bubble to drill down.": "X-axis shows the 3-month monthly ACR growth gap: Other Azure growth minus Defender for Cloud growth. Y-axis shows current Defender share of total ACR. Bottom-right is the clearest whitespace: Azure footprint growing while Defender penetration is low. Bubble size = total monthly ACR. Click any bubble to drill down.",
-        "3-month trend leading up to the latest full month. Bottom-right = top opportunity (Other Azure growing, DfC flat or shrinking).": "3-month monthly ACR growth gap vs current Defender penetration.",
+        "Opportunity Quadrant — DfC growth vs. other Azure growth": "Service attach opportunities - workloads you sell but don't protect",
+        "3-month trend leading up to the latest full month. Bottom-right = top opportunity (Other Azure growing, DfC flat or shrinking). Bubble size = total monthly ACR. Bubble color = priority (red/orange/green) — a green bubble in the red zone means the customer is in the high-opp geometry but already has heavy DfC penetration, so priority is lower. Click any bubble to drill down.": "Ranked by per-service Defender attach gap. Each account is buying Azure workloads without the matching Defender plan turned on. The largest gap service, the total monthly and annual attach opportunity, and the recommended sales play are shown per account. Click any row to drill down.",
+        "3-month trend leading up to the latest full month. Bottom-right = top opportunity (Other Azure growing, DfC flat or shrinking).": "Ranked by per-service Defender attach gap. Click any row to drill down.",
         "Other Azure 3-month change": "Growth gap",
         "DfC 3-month change": "DfC penetration",
     }
@@ -1316,6 +1316,7 @@ function slAttach(customer) {
     topServiceGap: topGapOpp ? (topGapOpp.gapDollars || 0) : 0,
     topServiceOpener: topGapOpp ? topGapOpp.opener : null,
     signal: topGapOpp ? topGapOpp.signal : null,
+    gapServiceCount: dollarOpps.length,
     priority: SL_RANK_LABEL[priorityRank] || 'Low',
     priorityRank: priorityRank === 9 ? 3 : priorityRank,
     uncoveredEligibleCount: d.uncoveredEligibleCount || 0,
@@ -1377,6 +1378,7 @@ function actionDetails(row) {
       priorityRank: sl.priorityRank,
       topServiceLabel: sl.topServiceLabel,
       topServiceGap: sl.topServiceGap,
+      gapServiceCount: sl.gapServiceCount,
       signal: sl.signal,
       hasGap: sl.hasGap,
       sl: true
@@ -1419,6 +1421,7 @@ function actionDetails(row) {
     priorityRank: legacyRank == null ? 3 : legacyRank,
     topServiceLabel: null,
     topServiceGap: 0,
+    gapServiceCount: belowThreshold ? 1 : 0,
     signal: null,
     hasGap: belowThreshold,
     sl: false
@@ -1464,9 +1467,11 @@ function updateActionQueueMetrics() {
 }
 
 function actionQueueText() {
+  const slMode = hasServiceAttachData();
   return visibleActionQueueRows().map((r, index) => {
     const topService = r.topServiceLabel ? `${r.topServiceLabel}${r.topServiceGap > 0 ? ` (${fmt.money2(r.topServiceGap)}/mo)` : ''}` : 'n/a';
-    return `${index + 1}. ${r.customer} | ${r.perServicePriority} | Monthly Total ACR ${fmt.money2(r.total_monthly_current || r.total_current)} | DfC ${fmt.pctRaw(r.dfc_ratio)} | Top gap service: ${topService} | Attach gap/mo ${fmt.money2(r.estimatedGap)} | Annualized attach opportunity ${fmt.money2(r.estimatedAnnualOpportunity)} | ${r.recommendedAction} - ${r.conversationAngle}`;
+    const coverageCol = slMode ? `Gap services ${r.gapServiceCount || 0}` : `DfC ${fmt.pctRaw(r.dfc_ratio)}`;
+    return `${index + 1}. ${r.customer} | ${r.perServicePriority} | Account ACR/mo ${fmt.money2(r.total_monthly_current || r.total_current)} | ${coverageCol} | Top gap service: ${topService} | Attach gap/mo ${fmt.money2(r.estimatedGap)} | Annualized attach opportunity ${fmt.money2(r.estimatedAnnualOpportunity)} | ${r.recommendedAction} - ${r.conversationAngle}`;
   }).join('\n');
 }
 
@@ -1510,14 +1515,15 @@ function downloadActionQueueCsv() {
     setActionQueueStatus('Nothing to download');
     return;
   }
-  const headers = ['Customer', 'Priority', 'Monthly Total ACR', 'Defender %', 'Top gap service', 'Top gap service $/mo', 'Attach gap / mo', 'Annualized attach opportunity', 'Recommended action', 'Conversation angle', 'Reason'];
+  const slMode = hasServiceAttachData();
+  const headers = ['Customer', 'Priority', 'Account ACR/mo', slMode ? 'Gap services' : 'Defender %', 'Top gap service', 'Top gap service $/mo', 'Attach gap / mo', 'Annualized attach opportunity', 'Recommended action', 'Conversation angle', 'Reason'];
   const lines = [
     headers.map(csvCell).join(','),
     ...rows.map(r => [
       r.customer,
       r.perServicePriority,
       r.total_monthly_current || r.total_current,
-      r.dfc_ratio,
+      slMode ? (r.gapServiceCount || 0) : r.dfc_ratio,
       r.topServiceLabel || '',
       r.topServiceGap || 0,
       r.estimatedGap,
@@ -1696,8 +1702,8 @@ function renderOpportunityHeatmap() {
           <tr>
             <th>Customer</th>
             <th>Priority</th>
-            <th class="num">Monthly Total ACR</th>
-            <th class="num">DfC %</th>
+            <th class="num">${slMode ? 'Account ACR/mo' : 'Monthly Total ACR'}</th>
+            <th class="num">${slMode ? 'Gap services' : 'DfC %'}</th>
             <th>Top gap service</th>
             <th class="num">Attach gap / mo</th>
             <th class="num">Annualized attach opp.</th>
@@ -1710,8 +1716,8 @@ function renderOpportunityHeatmap() {
             <tr class="clickable" data-customer="${r.customer.replace(/"/g, '&quot;')}">
               <td><strong>${r.customer}</strong></td>
               <td>${tagFor(r.perServicePriority)}</td>
-              <td class="num" style="${heat(r.total_monthly_current || r.total_current, maxTotal, '#0078d4')}">${fmt.money2(r.total_monthly_current || r.total_current)}</td>
-              <td class="num" style="${shareStyle(r.dfc_ratio || 0)}">${fmt.pctRaw(r.dfc_ratio)}</td>
+              <td class="num" style="${slMode ? '' : heat(r.total_monthly_current || r.total_current, maxTotal, '#0078d4')}">${fmt.money2(r.total_monthly_current || r.total_current)}</td>
+              <td class="num" style="${slMode ? '' : shareStyle(r.dfc_ratio || 0)}">${slMode ? `${r.gapServiceCount || 0} ${(r.gapServiceCount === 1) ? 'service' : 'services'}` : fmt.pctRaw(r.dfc_ratio)}</td>
               <td>${r.topServiceLabel ? `${escapeHtml(r.topServiceLabel)}${r.topServiceGap > 0 ? ` <span style="font-size:12px;color:#605e5c;">(${fmt.money2(r.topServiceGap)}/mo)</span>` : ''}` : '<span style="color:#a19f9d;">—</span>'}</td>
               <td class="num" style="${heat(Math.max(0, r.estimatedGap || 0), maxGap, '#d13438')}"><strong>${fmt.money2(r.estimatedGap || 0)}</strong></td>
               <td class="num"><strong>${fmt.money2(r.estimatedAnnualOpportunity || 0)}</strong></td>
@@ -1727,7 +1733,7 @@ function renderOpportunityHeatmap() {
   const footEl = document.getElementById('chart-quadrant-foot');
   if (footEl) {
     footEl.innerHTML = slMode
-      ? `Ranked by per-service Defender attach gap — the workloads each account buys but doesn't protect with the matching Defender plan. Top gap service shows the single largest monthly gap; attach gap and annualized opportunity sum every eligible service for that account. Recommended action and conversation angle give the sales play for that account. Total ACR and DfC % are shown for context only.`
+      ? `Ranked by per-service Defender attach gap — the workloads each account buys but doesn't protect with the matching Defender plan. Top gap service shows the single largest monthly gap; gap services counts how many eligible workloads are unprotected; attach gap and annualized opportunity sum every eligible service for that account. Recommended action and conversation angle give the sales play. Account ACR/mo is shown for sizing context only.`
       : `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 6% is the corporate Defender attach baseline (every customer should run at least 6% of total ACR on Defender workloads).`;
   }
 }
