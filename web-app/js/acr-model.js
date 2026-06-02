@@ -89,11 +89,19 @@
       && r2.includes('$ acr')
       && hasFiscalBand;
     const isOld = r1.includes('tpaccountname') && r1.includes('servicecompgrouping');
+    // SL2/SL4 service-attach export: two-row header (FiscalMonth band over a
+    // TPAccountName/ServiceLevel2/ServiceLevel4 + repeated '$ ACR' block).
+    // This belongs to the Service Attach page, not the corp dashboard.
+    const isSlAttach = r1.includes('tpaccountname')
+      && r1.includes('servicelevel2')
+      && r1.includes('servicelevel4')
+      && r1.includes('$ acr');
     if (isNew && isOld) {
       throw new Error('Workbook header matched both the old and new layouts; cannot disambiguate the format.');
     }
     if (isNew) return 'new';
     if (isOld) return 'old';
+    if (isSlAttach) return 'sl2sl4';
     return 'unknown';
   }
 
@@ -106,6 +114,9 @@
     const format = detectFormat(rows);
     if (format === 'new') return buildNew(rows, sourceName);
     if (format === 'old') return buildOld(rows, sourceName);
+    if (format === 'sl2sl4') {
+      throw new Error('This looks like a Service Level 2/4 (ServiceLevel2/ServiceLevel4) export. Open the Service Attach page (service-attach.html) and import it there — this dashboard expects the higher-level corp ACR export (ServiceCompGrouping or ServiceLevel1/ServiceLevel2).');
+    }
     throw new Error('Unrecognised workbook layout. Expected either a TPAccountName/ServiceCompGrouping export or a TPAccountName/ServiceLevel1/ServiceLevel2 weekly export.');
   }
 

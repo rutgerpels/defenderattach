@@ -416,6 +416,20 @@ console.log('\nacr-model.js (new weekly format)');
     assert(threw, 'expected build to throw for a single-month export');
   });
 
+  test('redirects an SL2/SL4 service-attach export to the Service Attach page', () => {
+    const rows = [
+      ['FiscalMonth', null, null, 'FY26-Jul', null, null, null, null],
+      ['TPAccountName', 'ServiceLevel2', 'ServiceLevel4', '$ ACR', '$ ACR MoM',
+       '$ Average Daily ACR', '$ Avg Daily ACR MoM', '% Avg Daily ACR MoM'],
+      ['Acme', 'Container Registry', 'Container Registry', 100, 0, 3, 0, 0],
+      ['Acme', 'Total', null, 100, 0, 3, 0, 0],
+    ];
+    let msg = '';
+    try { sb.AcrModel.build(rows, 'sl2sl4.xlsx'); } catch (e) { msg = e.message; }
+    assert(/service[- ]?attach/i.test(msg) && /servicelevel4/i.test(msg),
+      'SL2/SL4 import must point the user to the Service Attach page');
+  });
+
   test('parses real Date week-start cells (not just ISO strings)', () => {
     const rows3 = [
       ...mkHeader(['FY26-Mar', 'FY26-Apr'], [[new Date(2026, 2, 1)], [new Date(2026, 3, 5)]]),
