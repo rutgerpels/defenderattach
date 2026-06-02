@@ -145,6 +145,9 @@ def build_html() -> str:
 
     closing_body = "</body>"
     extra_scripts = (
+        '<script src="./js/sl-mapping.js"></script>\n'
+        '<script src="./js/sl-parser.js"></script>\n'
+        '<script src="./js/sl-engine.js"></script>\n'
         '<script src="./js/acr-model.js"></script>\n'
         '<script src="./vendor/pptxgen.bundle.js"></script>\n'
         '<script src="./js/pptx-acr.js"></script>\n'
@@ -200,6 +203,9 @@ def build_html() -> str:
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
     _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
+    _assert_contains(html, './js/sl-mapping.js', "sl-mapping.js script")
+    _assert_contains(html, './js/sl-parser.js', "sl-parser.js script")
+    _assert_contains(html, './js/sl-engine.js', "sl-engine.js script")
     _assert_contains(html, './js/pptx-acr.js', "pptx-acr.js script")
     _assert_contains(html, "#app-nav .app-menu", "app-nav inline CSS")
     _assert_contains(html, 'id="app-nav"', "app-nav placeholder")

@@ -287,6 +287,9 @@ console.log('\nacr-model.js');
 console.log('\nacr-model.js (new weekly format)');
 {
   const sb = makeSandbox();
+  loadInto(sb, 'js/sl-mapping.js');
+  loadInto(sb, 'js/sl-parser.js');
+  loadInto(sb, 'js/sl-engine.js');
   loadInto(sb, 'js/acr-model.js');
 
   // 3-row header: row0 fiscal-month band, row1 week-start (or 'Total'), row2 dims + '$ ACR'.
@@ -416,18 +419,36 @@ console.log('\nacr-model.js (new weekly format)');
     assert(threw, 'expected build to throw for a single-month export');
   });
 
-  test('redirects an SL2/SL4 service-attach export to the Service Attach page', () => {
+  test('builds an SL2/SL4 export into the corp dashboard contract (single source)', () => {
     const rows = [
-      ['FiscalMonth', null, null, 'FY26-Jul', null, null, null, null],
-      ['TPAccountName', 'ServiceLevel2', 'ServiceLevel4', '$ ACR', '$ ACR MoM',
-       '$ Average Daily ACR', '$ Avg Daily ACR MoM', '% Avg Daily ACR MoM'],
-      ['Acme', 'Container Registry', 'Container Registry', 100, 0, 3, 0, 0],
-      ['Acme', 'Total', null, 100, 0, 3, 0, 0],
+      [null, null, null, 'FY26-Jul', null, null, null, null, 'FY26-Aug', null, null, null, null],
+      ['TPAccountName', 'ServiceLevel2', 'ServiceLevel4',
+       '$ ACR', '$ ACR MoM', '$ Average Daily ACR', '$ Avg Daily ACR MoM', '% Avg Daily ACR MoM',
+       '$ ACR', '$ ACR MoM', '$ Average Daily ACR', '$ Avg Daily ACR MoM', '% Avg Daily ACR MoM'],
+      ['Acme', 'Container Registry', 'Total',                  100, 0, 3, 0, 0, 120, 0, 4, 0, 0],
+      ['Acme', 'Container Registry', 'Container Registry',     100, 0, 3, 0, 0, 120, 0, 4, 0, 0],
+      ['Acme', 'Microsoft Defender for Cloud', 'Total',          5, 0, 0, 0, 0,   6, 0, 0, 0, 0],
+      ['Acme', 'Microsoft Defender for Cloud', 'Container Registries', 5, 0, 0, 0, 0, 6, 0, 0, 0, 0],
+      ['Acme', 'Total', null,                                  105, 0, 3, 0, 0, 126, 0, 4, 0, 0],
     ];
-    let msg = '';
-    try { sb.AcrModel.build(rows, 'sl2sl4.xlsx'); } catch (e) { msg = e.message; }
-    assert(/service[- ]?attach/i.test(msg) && /servicelevel4/i.test(msg),
-      'SL2/SL4 import must point the user to the Service Attach page');
+    const d = sb.AcrModel.build(rows, 'sl2sl4.xlsx');
+    assertEqual(d.format, 'sl2sl4', 'SL2/SL4 import flagged as sl2sl4 format');
+    assertEqual(d.months.length, 2, 'two months parsed');
+    assertEqual(d.last_full_month, 'FY26-Aug', 'latest month treated as the full month');
+    assertEqual(d.partial_month_idx, -1, 'monthly data has no partial-month tail');
+    assert(d.products.includes('Defender for Cloud'), 'DfC normalised as a product');
+    assert(!d.products.includes('Total'), 'customer Total roll-up is not a product');
+    assert(!d.customers.includes('Total'), 'Total is not surfaced as a customer');
+    const cd = d.customer_data['Acme'];
+    for (let i = 0; i < d.months.length; i += 1) {
+      assert(Math.abs(cd.other_series[i] - (cd.total_series[i] - cd.dfc_series[i])) < 0.01,
+        'other = total − dfc holds');
+      assert(cd.other_series[i] >= -0.01, 'no negative non-Defender ACR');
+    }
+    assertEqual(d.opportunity.length, d.customers.length, 'one opportunity row per customer');
+    assert(d.service_attach && Array.isArray(d.service_attach.dossiers),
+      'per-service attach model attached for drill-down');
+    assert(!d.service_attach_error, 'no service-attach build error');
   });
 
   test('parses real Date week-start cells (not just ISO strings)', () => {
@@ -963,37 +984,14 @@ console.log('\nweb-app service-level attach (SL2/SL4)');
 
   test('SL app scripts make no network calls (client-side privacy guard)', () => {
     const files = fs.readdirSync(path.join(WEBAPP, 'js'))
-      .filter((f) => (f.startsWith('sl-') || f === 'pptx-sl.js') && f.endsWith('.js'));
-    assert(files.length >= 5, 'expected the SL app scripts to be present');
+      .filter((f) => f.startsWith('sl-') && f.endsWith('.js'));
+    assert(files.length >= 3, 'expected the reusable SL modules to be present');
     for (const f of files) {
       const src = fs.readFileSync(path.join(WEBAPP, 'js', f), 'utf8');
       assert(!/https?:\/\//.test(src), `${f} must not reference any remote URL (keep data in-browser)`);
       assert(!/\bfetch\s*\(/.test(src), `${f} must not call fetch() (no server round-trips)`);
       assert(!/XMLHttpRequest/.test(src), `${f} must not use XMLHttpRequest`);
     }
-  });
-
-  test('service-attach.html loads vendored libs + SL modules in order, no CDN', () => {
-    const src = fs.readFileSync(path.join(WEBAPP, 'service-attach.html'), 'utf8');
-    assert(!/https?:\/\//.test(src.replace(/xmlns[^"']*["'][^"']*["']/g, '')) || !/cdn\./.test(src),
-      'no CDN references in the SL page');
-    assert(/vendor\/xlsx\.full\.min\.js/.test(src), 'vendored SheetJS script tag present');
-    assert(/vendor\/pptxgen\.bundle\.js/.test(src), 'vendored pptxgen script tag present');
-    const order = ['sl-mapping.js', 'sl-parser.js', 'sl-engine.js', 'sl-export.js', 'sl-view.js', 'pptx-sl.js', 'sl-app.js'];
-    let last = -1;
-    for (const mod of order) {
-      const idx = src.indexOf('js/' + mod);
-      assert(idx > -1, `${mod} must be loaded by service-attach.html`);
-      assert(idx > last, `${mod} must load after the previous SL module`);
-      last = idx;
-    }
-    assert(!/var\(--color-danger\)/.test(src), 'must use the real --cp-danger token, not --color-danger');
-  });
-
-  test('PPTX export module exposes window.PptxSl.exportDeck', () => {
-    const src = fs.readFileSync(path.join(WEBAPP, 'js', 'pptx-sl.js'), 'utf8');
-    assert(/window\.PptxSl\s*=\s*\{\s*exportDeck\s*\}/.test(src) || /window\.PptxSl\.exportDeck/.test(src) || /exportDeck/.test(src),
-      'pptx-sl.js must expose exportDeck on window.PptxSl');
   });
 }
 

@@ -90,8 +90,8 @@
       && hasFiscalBand;
     const isOld = r1.includes('tpaccountname') && r1.includes('servicecompgrouping');
     // SL2/SL4 service-attach export: two-row header (FiscalMonth band over a
-    // TPAccountName/ServiceLevel2/ServiceLevel4 + repeated '$ ACR' block).
-    // This belongs to the Service Attach page, not the corp dashboard.
+      // TPAccountName/ServiceLevel2/ServiceLevel4 + repeated '$ ACR' block). Folded
+      // into this dashboard as the single, more granular data source.
     const isSlAttach = r1.includes('tpaccountname')
       && r1.includes('servicelevel2')
       && r1.includes('servicelevel4')
@@ -114,10 +114,96 @@
     const format = detectFormat(rows);
     if (format === 'new') return buildNew(rows, sourceName);
     if (format === 'old') return buildOld(rows, sourceName);
-    if (format === 'sl2sl4') {
-      throw new Error('This looks like a Service Level 2/4 (ServiceLevel2/ServiceLevel4) export. Open the Service Attach page (service-attach.html) and import it there — this dashboard expects the higher-level corp ACR export (ServiceCompGrouping or ServiceLevel1/ServiceLevel2).');
-    }
+    if (format === 'sl2sl4') return buildSl2Sl4(rows, sourceName);
     throw new Error('Unrecognised workbook layout. Expected either a TPAccountName/ServiceCompGrouping export or a TPAccountName/ServiceLevel1/ServiceLevel2 weekly export.');
+  }
+
+  // Lazily resolve the SL2/SL4 helper modules. Resolved at call time (not at IIFE
+  // eval) because, in the browser, the SL <script> tags load before this file but
+  // window.SLParser may still be assigned in any order; require() wins in Node.
+  function slParser() {
+    if (typeof require !== 'undefined') { try { return require('./sl-parser.js'); } catch (e) { /* browser */ } }
+    return (typeof window !== 'undefined') ? window.SLParser : null;
+  }
+  function slEngine() {
+    if (typeof require !== 'undefined') { try { return require('./sl-engine.js'); } catch (e) { /* browser */ } }
+    return (typeof window !== 'undefined') ? window.SLEngine : null;
+  }
+
+  // Build the corp dashboard DATA contract from a Service Level 2/4 export.
+  // The SL2/SL4 file is the single source: the customer 'Total' row gives the
+  // authoritative total ACR, the 'Microsoft Defender for Cloud' service subtotal
+  // gives DfC ACR, and every other ServiceLevel2 subtotal becomes a product. Only
+  // Total/subtotal rows feed the pivot (leaf SL4 rows already roll up into them,
+  // so including them would double-count). The RAW frame additionally powers the
+  // per-service attach drill-down via SLEngine (model.service_attach).
+  function buildSl2Sl4(rows, sourceName = '') {
+    const Parser = slParser();
+    if (!Parser || typeof Parser.parseSl2Sl4 !== 'function') {
+      throw new Error('The Service Level 2/4 parser (sl-parser.js) is not loaded; cannot import this export.');
+    }
+    const parsed = Parser.parseSl2Sl4(rows, sourceName);
+    if (!parsed.months || parsed.months.length < 2) {
+      throw new Error('The Service Level 2/4 export must contain at least two completed fiscal months of $ ACR.');
+    }
+    const SERVICE_TOTAL  = Parser.LEVEL_SERVICE_TOTAL  || 'service_total';
+    const CUSTOMER_TOTAL = Parser.LEVEL_CUSTOMER_TOTAL || 'customer_total';
+
+    const months = parsed.months.slice().sort((a, b) => {
+      const ra = fiscalMonthRank(a), rb = fiscalMonthRank(b);
+      return ra[0] - rb[0] || ra[1] - rb[1];
+    });
+    const monthIndex = new Map(months.map((m, i) => [m, i]));
+    const monthLabels = months.map(m => (m.includes('-') ? m.split('-', 2)[1] : m));
+
+    const DEFENDER_SL2 = 'Microsoft Defender for Cloud';
+    const normalize = sl2 => (sl2 === DEFENDER_SL2 ? DEFENDER_SERVICE : sl2);
+
+    const pivot = new Map();         // key: customer||product -> number[] (per month)
+    const customersSet = new Set();
+    const productsSet = new Set();
+    const zeroes = () => months.map(() => 0);
+
+    for (const rec of parsed.frame) {
+      if (rec.level !== SERVICE_TOTAL && rec.level !== CUSTOMER_TOTAL) continue;
+      const idx = monthIndex.get(rec.month);
+      if (idx === undefined) continue;  // skips any 'Total' aggregate column
+      const cust = rec.customer;
+      if (!cust || cust === 'Total') continue;
+      customersSet.add(cust);
+      let product;
+      if (rec.level === CUSTOMER_TOTAL) {
+        product = TOTAL_SERVICE;
+      } else {
+        product = normalize(rec.sl2);
+        if (product === TOTAL_SERVICE) continue;  // never let a service masquerade as the customer total
+        productsSet.add(product);
+      }
+      const key = cust + '||' + product;
+      let s = pivot.get(key);
+      if (!s) { s = zeroes(); pivot.set(key, s); }
+      const num = typeof rec.acr === 'number' ? rec.acr : (rec.acr == null || rec.acr === '' ? 0 : (parseFloat(rec.acr) || 0));
+      s[idx] += num;
+    }
+
+    customersSet.delete('Total');
+    const customers = [...customersSet].sort();
+    const products  = [...productsSet].sort();
+    const series = (c, p) => pivot.get(c + '||' + p) || zeroes();
+
+    const model = assembleFromPivot({ series, customers, products, months, monthLabels, sourceName });
+    model.format = 'sl2sl4';
+    model.reconciliation = parsed.reconciliation || [];
+
+    // Per-service attach drill-down uses the RAW (un-normalised) frame because
+    // SLEngine keys on the original 'Microsoft Defender for Cloud' SL2 and
+    // SLMapping.WORKLOAD_PLANS. Never mutate parsed.frame above.
+    const Engine = slEngine();
+    if (Engine && typeof Engine.buildModel === 'function') {
+      try { model.service_attach = Engine.buildModel(parsed); }
+      catch (e) { model.service_attach_error = String((e && e.message) || e); }
+    }
+    return model;
   }
 
   // --- Week-start header helpers (cells may be Date, Excel serial, or ISO string) ---
@@ -575,6 +661,15 @@
 
     const series = (c, p) => pivot.get(c + '||' + p) || zeroes();
 
+    return assembleFromPivot({ series, customers, products, months, monthLabels, sourceName });
+  }
+
+  // Shared assembler: turns a (customer, product) -> monthly-series accessor into
+  // the dashboard DATA contract. Used by both the legacy ServiceCompGrouping
+  // builder and the SL2/SL4 service-level builder so they emit identical shapes.
+  // `defenderKey`/`totalKey` name the Defender-for-Cloud and customer-total
+  // pseudo-products within the pivot.
+  function assembleFromPivot({ series, customers, products, months, monthLabels, sourceName = '', defenderKey = DEFENDER_SERVICE, totalKey = TOTAL_SERVICE }) {
     const latestIdx = months.length - 1;
     const priorIdx  = Math.max(0, latestIdx - 1);
     const base3mIdx = Math.max(0, latestIdx - 2);
@@ -585,8 +680,8 @@
     const customerData = {};
 
     for (const customer of customers) {
-      const dfc   = series(customer, DEFENDER_SERVICE).map(roundMoney);
-      const total = series(customer, TOTAL_SERVICE).map(roundMoney);
+      const dfc   = series(customer, defenderKey).map(roundMoney);
+      const total = series(customer, totalKey).map(roundMoney);
       const other = total.map((t, i) => roundMoney(t - dfc[i]));
 
       const dfc_current   = dfc[latestIdx];
@@ -667,7 +762,7 @@
 
     // Product monthly aggregations summed across customers.
     const productMonthly = {};
-    for (const p of [...products, TOTAL_SERVICE]) {
+    for (const p of [...products, totalKey]) {
       const monthly = months.map(() => 0);
       for (const c of customers) {
         const s = series(c, p);
@@ -692,7 +787,7 @@
       opportunity,
       customer_data: customerData,
       product_monthly: productMonthly,
-      dfc_total_monthly: productMonthly[DEFENDER_SERVICE] || months.map(() => 0),
+      dfc_total_monthly: productMonthly[defenderKey] || months.map(() => 0),
       counts: {
         high:      opportunity.filter(r => r.opportunity === 'High').length,
         medium:    opportunity.filter(r => r.opportunity === 'Medium').length,
