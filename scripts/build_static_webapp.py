@@ -433,6 +433,13 @@ def _inject_splash(html: str) -> str:
         "splash hide-on-import hook",
     )
 
+    html = _replace_once(
+        html,
+        "    if (!newData) { setStatus('Could not parse — check the sheet structure.', 'error'); return; }",
+        "    if (!newData || !newData.customers || newData.customers.length === 0) { setStatus('Could not read this workbook — no customers found. Make sure it is the ACR Details Excel export with the expected columns.', 'error'); return; }",
+        "import empty-workbook guard",
+    )
+
     splash_wire = (
         "<script>\n"
         "(function(){\n"
@@ -496,6 +503,21 @@ def _inject_splash(html: str) -> str:
         "    var splash = document.getElementById('splash');\n"
         "    if (splash && !splash.hidden) e.preventDefault();\n"
         "  });\n"
+        "\n"
+        "  // Mirror import errors onto the splash overlay. The top-menu status\n"
+        "  // element is hidden behind the splash, so a failed or empty import\n"
+        "  // would otherwise look like 'nothing happened'.\n"
+        "  if (typeof window.setStatus === 'function') {\n"
+        "    var _origSetStatus = window.setStatus;\n"
+        "    window.setStatus = function(msg, kind){\n"
+        "      try { _origSetStatus(msg, kind); } catch (_) {}\n"
+        "      var splashEl = document.getElementById('splash');\n"
+        "      if (err && splashEl && !splashEl.hidden) {\n"
+        "        err.textContent = msg || '';\n"
+        "        err.className = 'splash-error' + (kind ? ' ' + kind : '');\n"
+        "      }\n"
+        "    };\n"
+        "  }\n"
         "})();\n"
         "</script>\n"
     )

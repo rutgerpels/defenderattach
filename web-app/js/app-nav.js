@@ -8,6 +8,7 @@
   root.innerHTML = `
     <nav class="app-menu" aria-label="Main">
       <a href="index.html" class="${linkClass('acr')}">📊 ACR opportunities</a>
+      <a href="service-attach.html" class="${linkClass('service')}">🛡️ Service attach</a>
       <a href="milestones.html" class="${linkClass('milestones')}">🎯 Milestone gaps</a>
       <span class="spacer"></span>
       <span class="source-pill" id="source-pill" title="">No data loaded yet</span>

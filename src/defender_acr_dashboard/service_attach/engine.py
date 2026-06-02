@@ -425,7 +425,8 @@ def build_model(parsed: ParsedData, config: Optional[AttachConfig] = None) -> Bo
                 )
             )
 
-        # Top Azure spend categories for context.
+        # Top Azure spend categories for context. Deterministic tie-break by
+        # sl2 name (ascending) so cross-language ports stay byte-stable.
         top = (
             svc_latest[
                 (svc_latest["sl2"] != DEFENDER_SL2)
@@ -434,10 +435,13 @@ def build_model(parsed: ParsedData, config: Optional[AttachConfig] = None) -> Bo
             ]
             .groupby("sl2")["acr"]
             .sum()
-            .sort_values(ascending=False)
+            .reset_index()
+            .sort_values(["acr", "sl2"], ascending=[False, True], kind="mergesort")
             .head(8)
         )
-        dossier.top_spend = [SpendCategory(sl2=k, acr=float(v)) for k, v in top.items()]
+        dossier.top_spend = [
+            SpendCategory(sl2=r.sl2, acr=float(r.acr)) for r in top.itertuples(index=False)
+        ]
 
         dossiers.append(dossier)
 

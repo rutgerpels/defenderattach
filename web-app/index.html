@@ -455,7 +455,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, {header: 1, defval: null, raw: true});
     const newData = AcrModel.build(rows, file.name);
-    if (!newData) { setStatus('Could not parse — check the sheet structure.', 'error'); return; }
+    if (!newData || !newData.customers || newData.customers.length === 0) { setStatus('Could not read this workbook — no customers found. Make sure it is the ACR Details Excel export with the expected columns.', 'error'); return; }
     DATA = newData;
     const splash = document.getElementById('splash');
     if (splash) splash.hidden = true;
@@ -2434,6 +2434,21 @@ document.addEventListener('DOMContentLoaded', function() {
     var splash = document.getElementById('splash');
     if (splash && !splash.hidden) e.preventDefault();
   });
+
+  // Mirror import errors onto the splash overlay. The top-menu status
+  // element is hidden behind the splash, so a failed or empty import
+  // would otherwise look like 'nothing happened'.
+  if (typeof window.setStatus === 'function') {
+    var _origSetStatus = window.setStatus;
+    window.setStatus = function(msg, kind){
+      try { _origSetStatus(msg, kind); } catch (_) {}
+      var splashEl = document.getElementById('splash');
+      if (err && splashEl && !splashEl.hidden) {
+        err.textContent = msg || '';
+        err.className = 'splash-error' + (kind ? ' ' + kind : '');
+      }
+    };
+  }
 })();
 </script>
 <script src="./js/acr-model.js"></script>

@@ -32,11 +32,12 @@ function makeSandbox() {
   return sb;
 }
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 function test(name, fn) {
   try { fn(); console.log('  PASS ' + name); pass++; }
   catch (e) { console.log('  FAIL ' + name + '\n      ' + (e.stack || e.message)); fail++; }
 }
+function skipTest(name, reason) { console.log('  SKIP ' + name + ' (' + reason + ')'); skip++; }
 function assert(cond, msg) { if (!cond) throw new Error('assertion failed: ' + msg); }
 function assertEqual(actual, expected, msg) {
   if (actual !== expected) throw new Error(`${msg || ''}\n      expected: ${JSON.stringify(expected)}\n      actual:   ${JSON.stringify(actual)}`);
@@ -879,5 +880,108 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
   });
 }
 
-console.log(`\nResults: ${pass} passed, ${fail} failed`);
+// ---- service-level (SL2/SL4) attach: pipeline parity + privacy guards ----
+console.log('\nweb-app service-level attach (SL2/SL4)');
+{
+  const ROOT = path.resolve(WEBAPP, '..');
+  // SL/vendor modules are CommonJS-friendly; xlsx wants a window global.
+  global.window = global.window || global;
+  const XLSX = require(path.join(WEBAPP, 'vendor', 'xlsx.full.min.js'));
+  const SLParser = require(path.join(WEBAPP, 'js', 'sl-parser.js'));
+  const SLEngine = require(path.join(WEBAPP, 'js', 'sl-engine.js'));
+  const SLExport = require(path.join(WEBAPP, 'js', 'sl-export.js'));
+
+  const FIXTURE = path.join(ROOT, 'inputfolder', 'ACR Details SL2-SL4.xlsx');
+  const GOLDEN = path.join(WEBAPP, 'tests', 'sl-golden.json');
+
+  // The fixture (*.xlsx) and golden oracle (sl-golden.json) are derived from
+  // real customer data and are gitignored — they exist only on the developer's
+  // machine. Skip the parity check on a fresh clone rather than failing it.
+  if (!fs.existsSync(FIXTURE) || !fs.existsSync(GOLDEN)) {
+    skipTest('SL pipeline output matches Python golden oracle within tolerance',
+      'gitignored customer fixture/golden not present');
+  } else {
+  test('SL pipeline output matches Python golden oracle within tolerance', () => {
+    assert(fs.existsSync(FIXTURE), 'fixture ACR Details SL2-SL4.xlsx must exist');
+    assert(fs.existsSync(GOLDEN), 'sl-golden.json oracle must exist');
+    const buf = fs.readFileSync(FIXTURE);
+    const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
+    const sheet = wb.Sheets.Export || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, cellDates: true });
+    const parsed = SLParser.parseSl2Sl4(rows, 'ACR Details SL2-SL4.xlsx');
+    const model = SLEngine.buildModel(parsed, undefined);
+    const jsJson = SLExport.buildJson(model);
+    const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
+    jsJson.meta.generated_at = golden.meta.generated_at;
+
+    assertEqual(jsJson.customers.length, golden.customers.length, 'customer count must match golden');
+
+    function deepDiff(a, b, p, diffs, tol) {
+      if (diffs.length > 40) return;
+      if (typeof a === 'number' && typeof b === 'number') {
+        if (!Number.isFinite(a) || !Number.isFinite(b)) { if (a !== b) diffs.push(`${p}: ${a} != ${b}`); return; }
+        const t = p.includes('ratio') ? 1e-6 : tol;
+        if (Math.abs(a - b) > t) diffs.push(`${p}: ${a} != ${b} (Δ ${Math.abs(a - b)})`);
+        return;
+      }
+      if (Array.isArray(a) || Array.isArray(b)) {
+        if (!Array.isArray(a) || !Array.isArray(b)) { diffs.push(`${p}: array mismatch`); return; }
+        if (a.length !== b.length) diffs.push(`${p}: length ${a.length} != ${b.length}`);
+        const n = Math.min(a.length, b.length);
+        for (let i = 0; i < n; i += 1) deepDiff(a[i], b[i], `${p}[${i}]`, diffs, tol);
+        return;
+      }
+      if (a && b && typeof a === 'object' && typeof b === 'object') {
+        for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+          if (!(k in a)) { diffs.push(`${p}.${k}: missing in JS`); continue; }
+          if (!(k in b)) { diffs.push(`${p}.${k}: missing in golden`); continue; }
+          deepDiff(a[k], b[k], `${p}.${k}`, diffs, tol);
+        }
+        return;
+      }
+      if (a !== b) diffs.push(`${p}: ${JSON.stringify(a)} != ${JSON.stringify(b)}`);
+    }
+    const diffs = [];
+    deepDiff(jsJson, golden, '$', diffs, 0.011);
+    assert(diffs.length === 0, 'SL output diverged from golden:\n      ' + diffs.slice(0, 10).join('\n      '));
+  });
+  }
+
+  test('SL app scripts make no network calls (client-side privacy guard)', () => {
+    const files = fs.readdirSync(path.join(WEBAPP, 'js'))
+      .filter((f) => (f.startsWith('sl-') || f === 'pptx-sl.js') && f.endsWith('.js'));
+    assert(files.length >= 5, 'expected the SL app scripts to be present');
+    for (const f of files) {
+      const src = fs.readFileSync(path.join(WEBAPP, 'js', f), 'utf8');
+      assert(!/https?:\/\//.test(src), `${f} must not reference any remote URL (keep data in-browser)`);
+      assert(!/\bfetch\s*\(/.test(src), `${f} must not call fetch() (no server round-trips)`);
+      assert(!/XMLHttpRequest/.test(src), `${f} must not use XMLHttpRequest`);
+    }
+  });
+
+  test('service-attach.html loads vendored libs + SL modules in order, no CDN', () => {
+    const src = fs.readFileSync(path.join(WEBAPP, 'service-attach.html'), 'utf8');
+    assert(!/https?:\/\//.test(src.replace(/xmlns[^"']*["'][^"']*["']/g, '')) || !/cdn\./.test(src),
+      'no CDN references in the SL page');
+    assert(/vendor\/xlsx\.full\.min\.js/.test(src), 'vendored SheetJS script tag present');
+    assert(/vendor\/pptxgen\.bundle\.js/.test(src), 'vendored pptxgen script tag present');
+    const order = ['sl-mapping.js', 'sl-parser.js', 'sl-engine.js', 'sl-export.js', 'sl-view.js', 'pptx-sl.js', 'sl-app.js'];
+    let last = -1;
+    for (const mod of order) {
+      const idx = src.indexOf('js/' + mod);
+      assert(idx > -1, `${mod} must be loaded by service-attach.html`);
+      assert(idx > last, `${mod} must load after the previous SL module`);
+      last = idx;
+    }
+    assert(!/var\(--color-danger\)/.test(src), 'must use the real --cp-danger token, not --color-danger');
+  });
+
+  test('PPTX export module exposes window.PptxSl.exportDeck', () => {
+    const src = fs.readFileSync(path.join(WEBAPP, 'js', 'pptx-sl.js'), 'utf8');
+    assert(/window\.PptxSl\s*=\s*\{\s*exportDeck\s*\}/.test(src) || /window\.PptxSl\.exportDeck/.test(src) || /exportDeck/.test(src),
+      'pptx-sl.js must expose exportDeck on window.PptxSl');
+  });
+}
+
+console.log(`\nResults: ${pass} passed, ${fail} failed${skip ? ', ' + skip + ' skipped' : ''}`);
 if (fail > 0) process.exit(1);

@@ -12,6 +12,11 @@
 *.pptx
 *.ppt
 
+# Test golden oracles derived from customer data (regenerate locally via
+# scripts/gen_sl_golden.py). Never commit — they contain customer names + ACR.
+web-app/tests/sl-golden.json
+*-golden.json
+
 # input/output folders — keep the directory shape (via .gitkeep)
 # but never the data files inside them.
 inputfolder/*
