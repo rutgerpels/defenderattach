@@ -148,6 +148,7 @@
     }
     const SERVICE_TOTAL  = Parser.LEVEL_SERVICE_TOTAL  || 'service_total';
     const CUSTOMER_TOTAL = Parser.LEVEL_CUSTOMER_TOTAL || 'customer_total';
+    const LEAF           = Parser.LEVEL_LEAF           || 'leaf';
 
     const months = parsed.months.slice().sort((a, b) => {
       const ra = fiscalMonthRank(a), rb = fiscalMonthRank(b);
@@ -160,6 +161,7 @@
     const normalize = sl2 => (sl2 === DEFENDER_SL2 ? DEFENDER_SERVICE : sl2);
 
     const pivot = new Map();         // key: customer||product -> number[] (per month)
+    const leafPivot = new Map();     // key: JSON [customer, product, service detail] -> number[] (per month)
     const customersSet = new Set();
     const productsSet = new Set();
     const zeroes = () => months.map(() => 0);
@@ -186,6 +188,23 @@
       s[idx] += num;
     }
 
+    for (const rec of parsed.frame) {
+      if (rec.level !== LEAF) continue;
+      const idx = monthIndex.get(rec.month);
+      if (idx === undefined) continue;
+      const cust = rec.customer;
+      if (!cust || cust === 'Total') continue;
+      const product = normalize(rec.sl2);
+      if (!product || product === TOTAL_SERVICE) continue;
+      const detail = rec.sl4 || rec.sl2 || product;
+      if (!detail || detail === 'Total') continue;
+      const key = JSON.stringify([cust, product, detail]);
+      let s = leafPivot.get(key);
+      if (!s) { s = zeroes(); leafPivot.set(key, s); }
+      const num = typeof rec.acr === 'number' ? rec.acr : (rec.acr == null || rec.acr === '' ? 0 : (parseFloat(rec.acr) || 0));
+      s[idx] += num;
+    }
+
     customersSet.delete('Total');
     const customers = [...customersSet].sort();
     const products  = [...productsSet].sort();
@@ -194,6 +213,36 @@
     const model = assembleFromPivot({ series, customers, products, months, monthLabels, sourceName });
     model.format = 'sl2sl4';
     model.reconciliation = parsed.reconciliation || [];
+
+    const latestIdx = months.length - 1;
+    const priorIdx = Math.max(0, latestIdx - 1);
+    const base3mIdx = Math.max(0, latestIdx - 2);
+    const detailsByProduct = new Map();
+    for (const [key, arr] of leafPivot) {
+      const [customer, product, sku] = JSON.parse(key);
+      const ss = arr.map(roundMoney);
+      const current = ss[latestIdx];
+      const maxV = Math.max.apply(null, ss.length ? ss : [0]);
+      if (current < 1 && maxV < 1) continue;
+      const productKey = customer + '||' + product;
+      if (!detailsByProduct.has(productKey)) detailsByProduct.set(productKey, []);
+      detailsByProduct.get(productKey).push({
+        sku,
+        current: roundMoney(current),
+        mom: pctChange(ss[priorIdx], ss[latestIdx]),
+        three_m: pctChange(ss[base3mIdx], ss[latestIdx]),
+        series: ss,
+      });
+    }
+    for (const customer of customers) {
+      const cd = model.customer_data && model.customer_data[customer];
+      if (!cd || !Array.isArray(cd.products)) continue;
+      for (const p of cd.products) {
+        const details = detailsByProduct.get(customer + '||' + p.product);
+        if (!details || !details.length) continue;
+        p.skus = details.sort((a, b) => b.current - a.current);
+      }
+    }
 
     // Per-service attach drill-down uses the RAW (un-normalised) frame because
     // SLEngine keys on the original 'Microsoft Defender for Cloud' SL2 and

@@ -427,7 +427,8 @@ console.log('\nacr-model.js (new weekly format)');
        '$ ACR', '$ ACR MoM', '$ Average Daily ACR', '$ Avg Daily ACR MoM', '% Avg Daily ACR MoM',
        '$ ACR', '$ ACR MoM', '$ Average Daily ACR', '$ Avg Daily ACR MoM', '% Avg Daily ACR MoM'],
       ['Acme', 'Container Registry', 'Total',                  100, 0, 3, 0, 0, 120, 0, 4, 0, 0],
-      ['Acme', 'Container Registry', 'Container Registry',     100, 0, 3, 0, 0, 120, 0, 4, 0, 0],
+      ['Acme', 'Container Registry', 'Basic Registry',          25, 0, 1, 0, 0,  20, 0, 1, 0, 0],
+      ['Acme', 'Container Registry', 'Premium Registry',        75, 0, 2, 0, 0, 100, 0, 3, 0, 0],
       ['Acme', 'Microsoft Defender for Cloud', 'Total',          5, 0, 0, 0, 0,   6, 0, 0, 0, 0],
       ['Acme', 'Microsoft Defender for Cloud', 'Container Registries', 5, 0, 0, 0, 0, 6, 0, 0, 0, 0],
       ['Acme', 'Total', null,                                  105, 0, 3, 0, 0, 126, 0, 4, 0, 0],
@@ -447,6 +448,15 @@ console.log('\nacr-model.js (new weekly format)');
       assert(cd.other_series[i] >= -0.01, 'no negative non-Defender ACR');
     }
     assertEqual(d.opportunity.length, d.customers.length, 'one opportunity row per customer');
+    const container = cd.products.find(p => p.product === 'Container Registry');
+    assert(container && Array.isArray(container.skus), 'SL2 category exposes SL4 service details');
+    assertEqual(container.skus.length, 2, 'two active SL4 details attached');
+    assertEqual(container.skus[0].sku, 'Premium Registry', 'SL4 details sorted by current ACR');
+    assertEqual(container.skus[0].current, 100, 'SL4 current ACR preserved');
+    assertEqual(container.skus[1].series[0], 25, 'SL4 monthly series preserved');
+    const defender = cd.products.find(p => p.product === 'Defender for Cloud');
+    assert(defender && Array.isArray(defender.skus), 'DfC category exposes Defender plan details');
+    assertEqual(defender.skus[0].sku, 'Container Registries', 'Defender SL4 detail preserved');
     assert(d.service_attach && Array.isArray(d.service_attach.dossiers),
       'per-service attach model attached for drill-down');
     assert(!d.service_attach_error, 'no service-attach build error');
@@ -498,6 +508,11 @@ console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
   test('renders collapsible SKU rows with a toggle handler', () => {
     assert(/data-sku-toggle/.test(src), 'SKU toggle markup present');
     assert(/closest\('\[data-sku-toggle\]'\)/.test(src), 'delegated toggle handler present');
+    assert(/Service Level 4 detail/.test(src), 'SL4 detail copy present');
+    assert(/aria-expanded="false"/.test(src), 'category rows expose expanded state');
+    assert(/Click to show \$\{skus\.length\} service detail/.test(src), 'category rows explain drill-down');
+    assert(/addEventListener\('keydown'/.test(src), 'keyboard drill-down handler present');
+    assert(/\.product-row\[hidden\]\s*\{\s*display:\s*none;\s*\}/.test(src), 'hidden SKU rows are not overridden by grid display CSS');
   });
   test('KPI uses the last full month when the latest month is partial', () => {
     assert(/Math\.max\(0, DATA\.months\.length - 2\) : DATA\.months\.length - 1/.test(src), 'partial-month KPI guard');
@@ -852,20 +867,20 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
     assert(/if \(title\) title\.textContent = name;/.test(src), 'modal title set via textContent (safe)');
   });
   test('matrix customer clicks open the modal instead of navigating', () => {
-    assert(/e\.target\.closest\('#chart-quadrant \[data-customer\], #opp-tbody tr\[data-customer\], #chart-top-dfc \[data-customer\], #action-queue tr\[data-customer\], #all-tbody tr\[data-customer\]'\)/.test(src),
-      'interceptor targets heatmap + action-queue rows + overview top-customers chart + sales action queue + all-customers table');
+    assert(/e\.target\.closest\('#chart-quadrant \[data-customer\], #chart-top-dfc \[data-customer\], #action-queue tr\[data-customer\]'\)/.test(src),
+      'interceptor targets heatmap + overview top-customers chart + sales action queue');
     assert(/if \(e\.target\.closest\('\.prio-badge'\)\) return;/.test(src), 'priority badges are skipped (explainer wins)');
     assert(/openCustomerModal\(name\);/.test(src), 'interceptor opens the modal');
     assert(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?#chart-quadrant \[data-customer\][\s\S]*?e\.stopPropagation\(\);[\s\S]*?e\.preventDefault\(\);[\s\S]*?\}, true\);/.test(src),
       'capture-phase handler stops propagation + default (no selectCustomer navigation)');
   });
-  test('sales action queue + all-customers table rows open the modal', () => {
+  test('sales action queue rows open the modal', () => {
     assert(/#action-queue tr\[data-customer\]/.test(src),
       'sales action queue rows are in the modal interceptor selector');
-    assert(/#all-tbody tr\[data-customer\]/.test(src),
-      'all-customers table rows are in the modal interceptor selector');
-    assert(/\['chart-quadrant', 'opp-tbody', 'chart-top-dfc', 'action-queue', 'all-tbody'\]\.forEach/.test(src),
-      'a11y observers cover the two new table hosts');
+    assert(/\['chart-quadrant', 'chart-top-dfc', 'action-queue'\]\.forEach/.test(src),
+      'a11y observers cover the remaining customer-target hosts');
+    assert(!/#all-tbody tr\[data-customer\]/.test(src), 'removed all-customers table from modal interceptor selector');
+    assert(!/#opp-tbody tr\[data-customer\]/.test(src), 'removed opportunity table from modal interceptor selector');
   });
   test('overview top-customers chart opens the modal (not the drill-down tab)', () => {
     assert(/#chart-top-dfc \[data-customer\]/.test(src),

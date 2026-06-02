@@ -172,7 +172,6 @@ def build_html() -> str:
     _assert_contains(html, "PptxAcr.exportDeck", "export PPT handler")
     _assert_contains(html, "function renderOpportunityHeatmap()", "heatmap function")
     _assert_contains(html, "${escapeHtml(r.customer)}", "escaped customer in heatmap")
-    _assert_contains(html, "${escapeHtml(r.notes)}", "escaped notes in heatmap")
     _assert_contains(html, "${escapeHtml(d.label", "escaped label in bar chart")
     _assert_contains(html, "${escapeHtml(p.label)}", "escaped label in quadrant chart")
     _assert_contains(html, "${escapeHtml(truncated)}", "escaped truncated label in quadrant chart")
@@ -195,7 +194,7 @@ def build_html() -> str:
     _assert_contains(html, "function _ensureCustOverlay(", "customer modal overlay factory")
     _assert_contains(html, 'id="m-cust-title"', "customer modal title node")
     _assert_contains(html, 'id="m-cust-products"', "customer modal product table")
-    _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]", "opportunity matrix click interceptor")
+    _assert_contains(html, "#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]", "opportunity matrix click interceptor")
     _assert_contains(html, "function _enhanceCustomerTargetsA11y()", "customer target a11y enhancer")
     _assert_contains(html, "n.setAttribute('tabindex', '0')", "customer targets made focusable")
     _assert_contains(html, "if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;", "customer target keydown activation")
@@ -739,7 +738,7 @@ def _taxonomy_and_skus(html: str) -> str:
         "escaped product trend legend",
     )
 
-    # 3. Customer drill-down: escape product names + collapsible SKU sub-rows.
+    # 3. Customer drill-down: escape product names + collapsible SL4 detail rows.
     html = _replace_once(
         html,
         "    cd.products.map(p => {\n"
@@ -752,22 +751,30 @@ def _taxonomy_and_skus(html: str) -> str:
         "        <div>${sparkline(p.series, 140, 26, sparkColor)}</div>\n"
         "      </div>`;\n"
         "    }).join('');",
-        "    cd.products.map((p, pi) => {\n"
+        "    `<div class=\"product-row product-header\">\n"
+        "      <div>Azure service category / Service Level 4 detail</div>\n"
+        "      <div class=\"num\">Monthly ACR</div>\n"
+        "      <div class=\"num\">MoM</div>\n"
+        "      <div class=\"num\">3M</div>\n"
+        "      <div>Trend</div>\n"
+        "    </div>` + cd.products.map((p, pi) => {\n"
         "      const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';\n"
         "      const nameEsc = escapeHtml(p.product);\n"
         "      const nameHtml = p.product === 'Defender for Cloud' ? '<strong style=\"color:#0078d4\">' + nameEsc + '</strong>' : nameEsc;\n"
         "      const skus = Array.isArray(p.skus) ? p.skus : [];\n"
         "      const sid = 'sku-' + pi;\n"
-        "      const caret = skus.length ? `<span class=\"sku-caret\" style=\"cursor:pointer;user-select:none;color:#605e5c;margin-right:6px;\">\\u25b8</span>` : '<span style=\"display:inline-block;width:14px;\"></span>';\n"
-        "      const head = `<div class=\"product-row\"${skus.length ? ` data-sku-toggle=\"${sid}\" style=\"cursor:pointer;\"` : ''}>\n"
-        "        <div class=\"name\">${caret}${nameHtml}</div>\n"
+        "      const caret = skus.length ? `<span class=\"sku-caret\">\\u25b8</span>` : '<span class=\"sku-caret\"></span>';\n"
+        "      const detailLabel = skus.length ? `<span class=\"sku-meta\">Click to show ${skus.length} service detail${skus.length === 1 ? '' : 's'}</span>` : '<span class=\"sku-meta\">No active Service Level 4 detail in this category</span>';\n"
+        "      const toggleAttrs = skus.length ? ` data-sku-toggle=\"${sid}\" aria-expanded=\"false\" role=\"button\" tabindex=\"0\"` : '';\n"
+        "      const head = `<div class=\"product-row category-row\"${toggleAttrs}>\n"
+        "        <div class=\"name\">${caret}${nameHtml}${detailLabel}</div>\n"
         "        <div class=\"num\">${fmt.money2(p.current)}</div>\n"
         "        <div class=\"num ${fmt.pctClass(p.mom)}\">${fmt.pct(p.mom)}</div>\n"
         "        <div class=\"num ${fmt.pctClass(p.three_m)}\">${fmt.pct(p.three_m)}</div>\n"
         "        <div>${sparkline(p.series, 140, 26, sparkColor)}</div>\n"
         "      </div>`;\n"
-        "      const subs = skus.map(s => `<div class=\"product-row sku-row ${sid}\" hidden style=\"background:#faf9f8;\">\n"
-        "        <div class=\"name\" style=\"padding-left:22px;color:#605e5c;\">${escapeHtml(s.sku)}</div>\n"
+        "      const subs = skus.map(s => `<div class=\"product-row sku-row ${sid}\" hidden>\n"
+        "        <div class=\"name\">${escapeHtml(s.sku)}</div>\n"
         "        <div class=\"num\">${fmt.money2(s.current)}</div>\n"
         "        <div class=\"num ${fmt.pctClass(s.mom)}\">${fmt.pct(s.mom)}</div>\n"
         "        <div class=\"num ${fmt.pctClass(s.three_m)}\">${fmt.pct(s.three_m)}</div>\n"
@@ -775,7 +782,7 @@ def _taxonomy_and_skus(html: str) -> str:
         "      </div>`).join('');\n"
         "      return head + subs;\n"
         "    }).join('');",
-        "SKU drill-down rows in customer table",
+        "SL4 service detail drill-down rows in customer table",
     )
 
     # 4. Delegated click handler that expands/collapses the SKU sub-rows.
@@ -790,6 +797,14 @@ def _taxonomy_and_skus(html: str) -> str:
         "  rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });\n"
         "  const caret = head.querySelector('.sku-caret');\n"
         "  if (caret) caret.textContent = target ? '\\u25b8' : '\\u25be';\n"
+        "  head.setAttribute('aria-expanded', target ? 'false' : 'true');\n"
+        "});\n"
+        "document.getElementById('cust-products').addEventListener('keydown', (e) => {\n"
+        "  if (e.key !== 'Enter' && e.key !== ' ') return;\n"
+        "  const head = e.target.closest('[data-sku-toggle]');\n"
+        "  if (!head) return;\n"
+        "  e.preventDefault();\n"
+        "  head.click();\n"
         "});"
     )
     html = _replace_once(
@@ -1229,9 +1244,8 @@ def _harden_charts(html: str) -> str:
 def _harden_heatmap(html: str) -> str:
     """Escape Excel-derived values rendered into table markup.
 
-    Covers the injected opportunity heatmap as well as the original
-    Opportunity Map and All Customers Table from the upstream template,
-    all of which originally interpolated raw workbook strings.
+    Covers the injected opportunity heatmap, which originally interpolated
+    raw workbook strings.
     """
 
     html = _replace_exact(
@@ -1239,7 +1253,7 @@ def _harden_heatmap(html: str) -> str:
         '<tr class="clickable" data-customer="${r.customer.replace(/"/g, \'&quot;\')}">',
         '<tr class="clickable" data-customer="${escapeHtml(r.customer)}">',
         "row data-customer attribute",
-        3,
+        1,
     )
     html = _replace_exact(
         html,
@@ -1247,20 +1261,6 @@ def _harden_heatmap(html: str) -> str:
         "<td><strong>${escapeHtml(r.customer)}</strong></td>",
         "heatmap customer cell",
         1,
-    )
-    html = _replace_exact(
-        html,
-        "<td>${r.customer}</td>",
-        "<td>${escapeHtml(r.customer)}</td>",
-        "original table customer cell",
-        2,
-    )
-    html = _replace_exact(
-        html,
-        "<td>${r.notes}</td>",
-        "<td>${escapeHtml(r.notes)}</td>",
-        "original table notes cell",
-        2,
     )
     return html
 
@@ -1605,7 +1605,7 @@ def _inject_customer_modal(html: str) -> str:
       ``m-``-prefixed clones. The same refactor escapes ``opp.notes`` (a
       DOM-XSS sink that previously interpolated Excel-derived text raw).
     * A single capture-phase click listener on ``document`` intercepts customer
-      clicks within ``#chart-quadrant`` / ``#opp-tbody`` before the row's
+      clicks within the Opportunity Matrix before the target's
       bubbling ``selectCustomer`` handler runs, so no navigation happens. It
       early-returns on ``.prio-badge`` so the priority explainer still wins.
     * This pass runs AFTER ``_inject_priority_explainer`` so its document
@@ -1689,7 +1689,7 @@ function _ensureCustOverlay() {
       '<div class="note" id="m-cust-signal"></div>' +
       '<div class="chart-box">' +
         '<div class="title">Product breakdown</div>' +
-        '<div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>' +
+        '<div class="sub">Azure service categories ranked by current monthly ACR. Click a category to reveal the Service Level 4 details from the workbook.</div>' +
         '<div id="m-cust-products"></div>' +
       '</div>' +
     '</div></div>';
@@ -1708,6 +1708,14 @@ function _ensureCustOverlay() {
     rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
     const caret = head.querySelector('.sku-caret');
     if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+    head.setAttribute('aria-expanded', target ? 'false' : 'true');
+  });
+  mprod.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const head = e.target.closest('[data-sku-toggle]');
+    if (!head || !mprod.contains(head)) return;
+    e.preventDefault();
+    head.click();
   });
 
   // Lightweight focus trap so keyboard users stay within the dialog.
@@ -1760,7 +1768,7 @@ function closeCustomerModal() {
 document.addEventListener('click', function (e) {
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;
@@ -1776,7 +1784,7 @@ document.addEventListener('click', function (e) {
 // host containers re-apply this whenever their contents are re-rendered (tab
 // switch, data reload), and an initial pass covers anything already drawn.
 function _enhanceCustomerTargetsA11y() {
-  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (n.getAttribute('tabindex') === null) n.setAttribute('tabindex', '0');
@@ -1788,7 +1796,7 @@ function _enhanceCustomerTargetsA11y() {
     if (nm && !n.getAttribute('aria-label')) n.setAttribute('aria-label', 'Open breakdown for ' + nm);
   }
 }
-['chart-quadrant', 'opp-tbody', 'chart-top-dfc', 'action-queue', 'all-tbody'].forEach(function (id) {
+['chart-quadrant', 'chart-top-dfc', 'action-queue'].forEach(function (id) {
   const host = document.getElementById(id);
   if (!host || typeof MutationObserver !== 'function') return;
   new MutationObserver(_enhanceCustomerTargetsA11y).observe(host, { childList: true, subtree: true });
@@ -1802,7 +1810,7 @@ document.addEventListener('keydown', function (e) {
   if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;

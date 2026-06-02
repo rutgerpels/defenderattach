@@ -108,12 +108,11 @@ The Opportunity Matrix includes a Defender share slider so you can tune the view
 
 ## Dashboard workflow
 
-The main dashboard uses four tabs:
+The main dashboard uses three tabs:
 
 - **Overview** for portfolio KPIs, monthly Defender for Cloud trend, top DfC customers, and product mix.
 - **Opportunity Matrix** for the ranked opportunity heatmap and sales action queue.
 - **Customer Drill-Down** for customer-specific DfC penetration and product breakdown.
-- **All Customers Table** for searchable, sortable account review.
 
 The Excel import button from the original HTML example is disabled in this local app. To refresh data, replace the workbook in `inputfolder` and refresh the browser or restart the container.
 

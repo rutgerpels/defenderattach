@@ -1168,15 +1168,13 @@ function reclassifyOpportunities(thresholdPct) {
 }
 
 let _thresholdRenderTimer = null;
-// Heavy re-render (tables + heatmap + the currently-selected customer detail,
-// which redraws charts) is debounced so dragging the slider stays smooth.
+// Heavy re-render (heatmap + the currently-selected customer detail, which
+// redraws charts) is debounced so dragging the slider stays smooth.
 function applyThresholdRender() {
   if (typeof renderKpis === 'function') renderKpis();
   if (_thresholdRenderTimer) clearTimeout(_thresholdRenderTimer);
   _thresholdRenderTimer = setTimeout(() => {
     _thresholdRenderTimer = null;
-    if (typeof renderOppTable === 'function') renderOppTable();
-    if (typeof renderAllTable === 'function') renderAllTable();
     renderOpportunityHeatmap();
     const sel = document.getElementById('customer-select');
     const drill = document.getElementById('panel-drilldown');

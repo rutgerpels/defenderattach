@@ -112,10 +112,18 @@ tr.clickable:hover { background: #f3f2f1; }
 
 .scroll-table { max-height: 500px; overflow-y: auto; border: 1px solid #edebe9; border-radius: 4px; }
 
-.product-row { padding: 6px 0; border-bottom: 1px solid #edebe9; display: grid;
-  grid-template-columns: 200px 100px 100px 100px 1fr; align-items: center; gap: 12px; }
+.product-row { padding: 8px 10px; border-bottom: 1px solid #edebe9; display: grid;
+  grid-template-columns: minmax(260px, 1.8fr) 110px 90px 90px minmax(140px, 1fr); align-items: center; gap: 12px; }
+.product-row[hidden] { display: none; }
 .product-row:last-child { border-bottom: none; }
 .product-row .name { font-size: 12px; font-weight: 500; }
+.product-row.product-header { background: #faf9f8; color: #605e5c; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; position: sticky; top: 0; z-index: 1; }
+.product-row.category-row[data-sku-toggle] { cursor: pointer; }
+.product-row.category-row[data-sku-toggle]:hover { background: #f3f2f1; }
+.product-row.sku-row { background: #faf9f8; border-left: 3px solid #c8c6c4; }
+.product-row.sku-row .name { padding-left: 28px; color: #605e5c; font-weight: 400; }
+.sku-caret { display: inline-block; width: 14px; margin-right: 6px; color: #605e5c; user-select: none; }
+.sku-meta { display: block; color: #605e5c; font-size: 11px; font-weight: 400; margin-top: 2px; }
 
 .spark { display: inline-block; vertical-align: middle; }
 
@@ -250,7 +258,6 @@ tr.clickable:hover { background: #f3f2f1; }
   <button class="tab active" data-tab="overview">Overview</button>
   <button class="tab" data-tab="opportunity">Opportunity Matrix</button>
   <button class="tab" data-tab="drilldown">Customer Drill-Down</button>
-  <button class="tab" data-tab="all-data">All Customers Table</button>
 </div>
 
 <!-- ============ OVERVIEW ============ -->
@@ -313,28 +320,6 @@ tr.clickable:hover { background: #f3f2f1; }
     <div class="svg-container" id="chart-quadrant"></div>
     <div class="subtle" id="chart-quadrant-foot" style="margin-top:6px;"></div>
   </div>
-
-  <div class="chart-box">
-    <div class="title">High & Medium opportunity customers</div>
-    <div class="sub">Sorted by total monthly ACR (largest first). Click any row to drill down.</div>
-    <div class="scroll-table">
-      <table id="opp-table">
-        <thead>
-          <tr>
-            <th data-sort="customer">Customer</th>
-            <th data-sort="opportunity">Priority</th>
-            <th class="num" data-sort="total_current">Monthly Total ACR</th>
-            <th class="num" data-sort="dfc_current">Monthly DfC ACR</th>
-            <th class="num" data-sort="dfc_ratio">DfC %</th>
-            <th class="num" data-sort="dfc_3m">DfC 3M</th>
-            <th class="num" data-sort="other_3m">Other 3M</th>
-            <th>Signal</th>
-          </tr>
-        </thead>
-        <tbody id="opp-tbody"></tbody>
-      </table>
-    </div>
-  </div>
 </div>
 
 <!-- ============ DRILL-DOWN ============ -->
@@ -352,44 +337,8 @@ tr.clickable:hover { background: #f3f2f1; }
 
   <div class="chart-box">
     <div class="title">Product breakdown</div>
-    <div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>
+    <div class="sub">Azure service categories ranked by current monthly ACR. Click a category to reveal the Service Level 4 details from the workbook.</div>
     <div id="cust-products"></div>
-  </div>
-</div>
-
-<!-- ============ ALL CUSTOMERS TABLE ============ -->
-<div class="panel" id="panel-all-data">
-  <div class="controls">
-    <input type="text" id="search-input" placeholder="Search customer..." style="min-width: 240px;">
-    <select id="filter-priority">
-      <option value="all">All priorities</option>
-      <option value="High">High only</option>
-      <option value="Medium">Medium only</option>
-      <option value="Low">Low only</option>
-      <option value="Too small">Too small only</option>
-    </select>
-    <span class="subtle" id="row-count"></span>
-  </div>
-  <div class="chart-box">
-    <div class="scroll-table">
-      <table id="all-table">
-        <thead>
-          <tr>
-            <th data-sort="customer">Customer</th>
-            <th data-sort="opportunity">Priority</th>
-            <th class="num" data-sort="total_current">Monthly Total ACR</th>
-            <th class="num" data-sort="dfc_current">Monthly DfC ACR</th>
-            <th class="num" data-sort="dfc_ratio">DfC %</th>
-            <th class="num" data-sort="dfc_mom">DfC MoM</th>
-            <th class="num" data-sort="other_mom">Other MoM</th>
-            <th class="num" data-sort="dfc_3m">DfC 3M</th>
-            <th class="num" data-sort="other_3m">Other 3M</th>
-            <th>Signal</th>
-          </tr>
-        </thead>
-        <tbody id="all-tbody"></tbody>
-      </table>
-    </div>
   </div>
 </div>
 
@@ -1007,9 +956,6 @@ const PRODUCT_COLORS = {
   'Sentinel': '#005a9e',
 };
 
-let oppSort = {key: 'total_current', dir: 'desc'};
-let allSort = {key: 'total_current', dir: 'desc'};
-
 function renderKpis() {
   document.getElementById('meta-customers').textContent = DATA.customers.length;
   document.getElementById('meta-month').textContent = (DATA.last_full_month || '').replace(/^FY\d+-/, '');
@@ -1111,63 +1057,6 @@ function renderQuadrant() {
   else if (filter === 'Medium') pts = pts.filter(p => p.opportunity === 'Medium');
   else if (filter === 'HighMed') pts = pts.filter(p => p.opportunity === 'High' || p.opportunity === 'Medium');
   quadrantChart('chart-quadrant', pts);
-}
-
-function renderOppTable() {
-  const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
-  const rows = DATA.opportunity.filter(r => r.opportunity === 'High' || r.opportunity === 'Medium').slice()
-    .sort((a, b) => {
-      let av = a[oppSort.key], bv = b[oppSort.key];
-      if (oppSort.key === 'opportunity') { av = order[av]; bv = order[bv]; }
-      if (av == null) av = -Infinity; if (bv == null) bv = -Infinity;
-      if (typeof av === 'string') return oppSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-      return oppSort.dir === 'asc' ? av - bv : bv - av;
-    });
-  document.getElementById('opp-tbody').innerHTML = rows.map(r => `
-    <tr class="clickable" data-customer="${escapeHtml(r.customer)}">
-      <td>${escapeHtml(r.customer)}</td>
-      <td>${tagFor(r.opportunity)}</td>
-      <td class="num">${fmt.money2(r.total_current)}</td>
-      <td class="num">${fmt.money2(r.dfc_current)}</td>
-      <td class="num">${fmt.pctRaw(r.dfc_ratio)}</td>
-      <td class="num ${fmt.pctClass(r.dfc_3m)}">${fmt.pct(r.dfc_3m)}</td>
-      <td class="num ${fmt.pctClass(r.other_3m)}">${fmt.pct(r.other_3m)}</td>
-      <td>${escapeHtml(r.notes)}</td>
-    </tr>`).join('');
-  document.querySelectorAll('#opp-tbody tr.clickable').forEach(tr =>
-    tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
-}
-
-function renderAllTable() {
-  const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
-  const search = document.getElementById('search-input').value.toLowerCase();
-  const pf = document.getElementById('filter-priority').value;
-  let rows = DATA.opportunity.slice();
-  if (search) rows = rows.filter(r => r.customer.toLowerCase().includes(search));
-  if (pf !== 'all') rows = rows.filter(r => r.opportunity === pf);
-  rows.sort((a, b) => {
-    let av = a[allSort.key], bv = b[allSort.key];
-    if (allSort.key === 'opportunity') { av = order[av]; bv = order[bv]; }
-    if (av == null) av = -Infinity; if (bv == null) bv = -Infinity;
-    if (typeof av === 'string') return allSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-    return allSort.dir === 'asc' ? av - bv : bv - av;
-  });
-  document.getElementById('row-count').textContent = `${rows.length} customers`;
-  document.getElementById('all-tbody').innerHTML = rows.map(r => `
-    <tr class="clickable" data-customer="${escapeHtml(r.customer)}">
-      <td>${escapeHtml(r.customer)}</td>
-      <td>${tagFor(r.opportunity)}</td>
-      <td class="num">${fmt.money2(r.total_current)}</td>
-      <td class="num">${fmt.money2(r.dfc_current)}</td>
-      <td class="num">${fmt.pctRaw(r.dfc_ratio)}</td>
-      <td class="num ${fmt.pctClass(r.dfc_mom)}">${fmt.pct(r.dfc_mom)}</td>
-      <td class="num ${fmt.pctClass(r.other_mom)}">${fmt.pct(r.other_mom)}</td>
-      <td class="num ${fmt.pctClass(r.dfc_3m)}">${fmt.pct(r.dfc_3m)}</td>
-      <td class="num ${fmt.pctClass(r.other_3m)}">${fmt.pct(r.other_3m)}</td>
-      <td>${escapeHtml(r.notes)}</td>
-    </tr>`).join('');
-  document.querySelectorAll('#all-tbody tr.clickable').forEach(tr =>
-    tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
 }
 
 function populateCustomerSelect() {
@@ -1499,22 +1388,30 @@ function renderCustomerDetail(name, idp) {
 
   const ph = document.getElementById(idp + 'cust-products');
   ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">Monthly ACR</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +
-    cd.products.map((p, pi) => {
+    `<div class="product-row product-header">
+      <div>Azure service category / Service Level 4 detail</div>
+      <div class="num">Monthly ACR</div>
+      <div class="num">MoM</div>
+      <div class="num">3M</div>
+      <div>Trend</div>
+    </div>` + cd.products.map((p, pi) => {
       const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';
       const nameEsc = escapeHtml(p.product);
       const nameHtml = p.product === 'Defender for Cloud' ? '<strong style="color:#0078d4">' + nameEsc + '</strong>' : nameEsc;
       const skus = Array.isArray(p.skus) ? p.skus : [];
       const sid = 'sku-' + pi;
-      const caret = skus.length ? `<span class="sku-caret" style="cursor:pointer;user-select:none;color:#605e5c;margin-right:6px;">\u25b8</span>` : '<span style="display:inline-block;width:14px;"></span>';
-      const head = `<div class="product-row"${skus.length ? ` data-sku-toggle="${sid}" style="cursor:pointer;"` : ''}>
-        <div class="name">${caret}${nameHtml}</div>
+      const caret = skus.length ? `<span class="sku-caret">\u25b8</span>` : '<span class="sku-caret"></span>';
+      const detailLabel = skus.length ? `<span class="sku-meta">Click to show ${skus.length} service detail${skus.length === 1 ? '' : 's'}</span>` : '<span class="sku-meta">No active Service Level 4 detail in this category</span>';
+      const toggleAttrs = skus.length ? ` data-sku-toggle="${sid}" aria-expanded="false" role="button" tabindex="0"` : '';
+      const head = `<div class="product-row category-row"${toggleAttrs}>
+        <div class="name">${caret}${nameHtml}${detailLabel}</div>
         <div class="num">${fmt.money2(p.current)}</div>
         <div class="num ${fmt.pctClass(p.mom)}">${fmt.pct(p.mom)}</div>
         <div class="num ${fmt.pctClass(p.three_m)}">${fmt.pct(p.three_m)}</div>
         <div>${sparkline(p.series, 140, 26, sparkColor)}</div>
       </div>`;
-      const subs = skus.map(s => `<div class="product-row sku-row ${sid}" hidden style="background:#faf9f8;">
-        <div class="name" style="padding-left:22px;color:#605e5c;">${escapeHtml(s.sku)}</div>
+      const subs = skus.map(s => `<div class="product-row sku-row ${sid}" hidden>
+        <div class="name">${escapeHtml(s.sku)}</div>
         <div class="num">${fmt.money2(s.current)}</div>
         <div class="num ${fmt.pctClass(s.mom)}">${fmt.pct(s.mom)}</div>
         <div class="num ${fmt.pctClass(s.three_m)}">${fmt.pct(s.three_m)}</div>
@@ -1534,26 +1431,16 @@ document.getElementById('cust-products').addEventListener('click', (e) => {
   rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
   const caret = head.querySelector('.sku-caret');
   if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+  head.setAttribute('aria-expanded', target ? 'false' : 'true');
+});
+document.getElementById('cust-products').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const head = e.target.closest('[data-sku-toggle]');
+  if (!head) return;
+  e.preventDefault();
+  head.click();
 });
 document.getElementById('quadrant-filter').addEventListener('change', renderQuadrant);
-document.getElementById('search-input').addEventListener('input', renderAllTable);
-document.getElementById('filter-priority').addEventListener('change', renderAllTable);
-document.querySelectorAll('#opp-table th[data-sort]').forEach(th => {
-  th.addEventListener('click', () => {
-    const k = th.getAttribute('data-sort');
-    oppSort.dir = (oppSort.key === k && oppSort.dir === 'desc') ? 'asc' : 'desc';
-    oppSort.key = k;
-    renderOppTable();
-  });
-});
-document.querySelectorAll('#all-table th[data-sort]').forEach(th => {
-  th.addEventListener('click', () => {
-    const k = th.getAttribute('data-sort');
-    allSort.dir = (allSort.key === k && allSort.dir === 'desc') ? 'asc' : 'desc';
-    allSort.key = k;
-    renderAllTable();
-  });
-});
 document.getElementById('customer-select').addEventListener('change', e => renderCustomerDetail(e.target.value));
 
 
@@ -1606,15 +1493,13 @@ function reclassifyOpportunities(thresholdPct) {
 }
 
 let _thresholdRenderTimer = null;
-// Heavy re-render (tables + heatmap + the currently-selected customer detail,
-// which redraws charts) is debounced so dragging the slider stays smooth.
+// Heavy re-render (heatmap + the currently-selected customer detail, which
+// redraws charts) is debounced so dragging the slider stays smooth.
 function applyThresholdRender() {
   if (typeof renderKpis === 'function') renderKpis();
   if (_thresholdRenderTimer) clearTimeout(_thresholdRenderTimer);
   _thresholdRenderTimer = setTimeout(() => {
     _thresholdRenderTimer = null;
-    if (typeof renderOppTable === 'function') renderOppTable();
-    if (typeof renderAllTable === 'function') renderAllTable();
     renderOpportunityHeatmap();
     const sel = document.getElementById('customer-select');
     const drill = document.getElementById('panel-drilldown');
@@ -2627,7 +2512,7 @@ function _ensureCustOverlay() {
       '<div id="m-cust-attach"></div>' +
       '<div class="chart-box">' +
         '<div class="title">Product breakdown</div>' +
-        '<div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>' +
+        '<div class="sub">Azure service categories ranked by current monthly ACR. Click a category to reveal the Service Level 4 details from the workbook.</div>' +
         '<div id="m-cust-products"></div>' +
       '</div>' +
     '</div></div>';
@@ -2646,6 +2531,14 @@ function _ensureCustOverlay() {
     rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
     const caret = head.querySelector('.sku-caret');
     if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+    head.setAttribute('aria-expanded', target ? 'false' : 'true');
+  });
+  mprod.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const head = e.target.closest('[data-sku-toggle]');
+    if (!head || !mprod.contains(head)) return;
+    e.preventDefault();
+    head.click();
   });
 
   // Lightweight focus trap so keyboard users stay within the dialog.
@@ -2698,7 +2591,7 @@ function closeCustomerModal() {
 document.addEventListener('click', function (e) {
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;
@@ -2714,7 +2607,7 @@ document.addEventListener('click', function (e) {
 // host containers re-apply this whenever their contents are re-rendered (tab
 // switch, data reload), and an initial pass covers anything already drawn.
 function _enhanceCustomerTargetsA11y() {
-  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (n.getAttribute('tabindex') === null) n.setAttribute('tabindex', '0');
@@ -2726,7 +2619,7 @@ function _enhanceCustomerTargetsA11y() {
     if (nm && !n.getAttribute('aria-label')) n.setAttribute('aria-label', 'Open breakdown for ' + nm);
   }
 }
-['chart-quadrant', 'opp-tbody', 'chart-top-dfc', 'action-queue', 'all-tbody'].forEach(function (id) {
+['chart-quadrant', 'chart-top-dfc', 'action-queue'].forEach(function (id) {
   const host = document.getElementById(id);
   if (!host || typeof MutationObserver !== 'function') return;
   new MutationObserver(_enhanceCustomerTargetsA11y).observe(host, { childList: true, subtree: true });
@@ -2740,7 +2633,7 @@ document.addEventListener('keydown', function (e) {
   if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;
@@ -2892,8 +2785,6 @@ function renderAll() {
   slDecorateOverview();
   renderProductMix();
   renderQuadrant();
-  renderOppTable();
-  renderAllTable();
   populateCustomerSelect();
   const firstHigh = DATA.opportunity.find(r => r.opportunity === 'High') || DATA.opportunity[0];
   if (firstHigh) {
