@@ -332,6 +332,7 @@
         dfcAcr,
         attachRatio,
         opportunities: [],
+        catalog: [],
         foundational: [],
         topSpend: [],
         presentEligibleCount: 0,
@@ -346,9 +347,9 @@
       let uncoveredEligible = 0;
       for (const plan of WORKLOAD_PLANS) {
         const workloadNow = last(seriesFor(cust, months, plan.workloadSl2, null, LEVEL_SERVICE_TOTAL));
+        const defenderNow = last(seriesFor(cust, months, [DEFENDER_SL2], plan.defenderSl4, LEVEL_LEAF));
         if (workloadNow > 0) {
           presentEligible += 1;
-          const defenderNow = last(seriesFor(cust, months, [DEFENDER_SL2], plan.defenderSl4, LEVEL_LEAF));
           if (defenderNow <= config.attachThreshold) uncoveredEligible += 1;
         }
         const ratio = Object.prototype.hasOwnProperty.call(cohort, plan.planLabel)
@@ -359,6 +360,37 @@
           dossier.opportunities.push(opp);
           allOpps.push(opp);
         }
+
+        // Full-catalog entry for the all-services scorecard. Renderer-only:
+        // this field is NOT read by sl-export.js, so golden parity is preserved.
+        let workloadName = '';
+        if (opp !== null && Array.isArray(opp.workloadSl2Present)) {
+          workloadName = opp.workloadSl2Present.join(', ');
+        } else if (workloadNow > 0) {
+          const present = [];
+          for (const sl2 of plan.workloadSl2) {
+            if (last(seriesFor(cust, months, [sl2], null, LEVEL_SERVICE_TOTAL)) > 0) present.push(sl2);
+          }
+          workloadName = present.sort().join(', ');
+        }
+        let status;
+        if (workloadNow <= 0) status = 'not_deployed';
+        else if (opp !== null) status = 'below_threshold';
+        else status = 'on_track';
+        dossier.catalog.push({
+          planLabel: plan.planLabel,
+          eligibleForGap: plan.eligibleForGap,
+          pricingDriver: plan.pricingDriver,
+          workloadName,
+          workloadAcr: workloadNow,
+          defenderActual: defenderNow,
+          status,
+          signal: opp !== null ? opp.signal : null,
+          hasDollarGap: opp !== null ? opp.hasDollarGap : false,
+          gapDollars: opp !== null ? opp.gapDollars : 0.0,
+          expected: opp !== null ? opp.expected : null,
+          coveragePct: opp !== null ? opp.coveragePct : null,
+        });
       }
 
       dossier.presentEligibleCount = presentEligible;

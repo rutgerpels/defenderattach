@@ -954,18 +954,21 @@ console.log('\nweb-app/index.html (per-service Defender attach)');
     assert(/const tierLegend = opps\.length/.test(src), 'tier-definition legend present');
     assert(/workload growing faster than Defender attach/.test(src), 'High tier defined in legend');
   });
-  test('per-service attach renders the Workload-vs-Defender SVG comparison chart', () => {
-    assert(/function _saGapChart\(containerId, opps\)/.test(src), '_saGapChart helper defined');
-    assert(/id="' \+ idp \+ 'sa-gapchart"/.test(src), 'gap chart container mounted with idp prefix');
-    assert(/_saGapChart\(idp \+ 'sa-gapchart', opps\);/.test(src), 'gap chart invoked after innerHTML set');
-    assert(/Workload vs Defender ACR by service/.test(src), 'chart title present');
-    assert(/<svg viewBox=/.test(src) && /data-k="Workload"/.test(src) && /data-k="Defender"/.test(src),
-      'paired workload/defender bars emitted as inline SVG');
-    assert(/showTooltip\(/.test(src) && /hideTooltip/.test(src), 'chart wires tooltip handlers');
+  test('per-service attach renders narrative sentence + all-plans scorecard (no SVG chart)', () => {
+    assert(/function _saSentence\(customer, c\)/.test(src), '_saSentence helper defined');
+    assert(/function _saScorecard\(d\)/.test(src), '_saScorecard helper defined');
+    assert(/attach gap\./.test(src), 'narrative gap sentence phrasing present');
+    assert(/Defender coverage scorecard/.test(src), 'all-plans scorecard title present');
+    assert(/below_threshold: 0, on_track: 1, not_deployed: 2/.test(src),
+      'scorecard sorts below-threshold first');
+    assert(/const scorecard = _saScorecard\(d\);/.test(src), 'scorecard wired into renderer');
+    assert(!/function _saGapChart\(/.test(src), 'old SVG gap chart helper removed');
+    assert(!/Workload vs Defender ACR by service/.test(src), 'old chart title removed');
   });
-  test('per-service attach shows the $ opportunity (money on the table) banner', () => {
-    assert(/ACR \/ month on the table/.test(src), 'monthly opportunity headline present');
-    assert(/ACR \/ year on the table/.test(src), 'annualized opportunity headline present');
+  test('per-service attach shows the Total ACR gap banner (no "on the table" wording)', () => {
+    assert(/Total ACR gap per month/.test(src), 'monthly gap headline present');
+    assert(/Total ACR gap per year/.test(src), 'annual gap headline present');
+    assert(!/on the table/.test(src), '"on the table" wording removed everywhere');
     assert(/const monthlyGap = d\.totalGapDollars \|\| 0/.test(src), 'monthly gap sourced from totalGapDollars');
     assert(/const annualGap = monthlyGap \* 12/.test(src), 'annual gap is monthly x12');
   });
@@ -1047,6 +1050,31 @@ console.log('\nweb-app service-level attach (SL2/SL4)');
     deepDiff(jsJson, golden, '$', diffs, 0.011);
     assert(diffs.length === 0, 'SL output diverged from golden:\n      ' + diffs.slice(0, 10).join('\n      '));
   });
+  }
+
+  if (!fs.existsSync(FIXTURE)) {
+    skipTest('SL engine builds an all-plans catalog per dossier (golden-safe)',
+      'gitignored customer fixture not present');
+  } else {
+    test('SL engine builds an all-plans catalog per dossier (golden-safe)', () => {
+      const buf = fs.readFileSync(FIXTURE);
+      const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
+      const sheet = wb.Sheets.Export || wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, cellDates: true });
+      const parsed = SLParser.parseSl2Sl4(rows, 'ACR Details SL2-SL4.xlsx');
+      const model = SLEngine.buildModel(parsed, undefined);
+      const d = model.dossiers[0];
+      assert(Array.isArray(d.catalog) && d.catalog.length > 0, 'dossier exposes a catalog array');
+      const allowed = new Set(['below_threshold', 'on_track', 'not_deployed']);
+      for (const c of d.catalog) {
+        assert(allowed.has(c.status), `catalog status ${c.status} is from the allowed set`);
+        assert(typeof c.planLabel === 'string' && c.planLabel.length, 'catalog entry has a plan label');
+      }
+      const labels = d.catalog.map((c) => c.planLabel);
+      assert(new Set(labels).size === labels.length, 'catalog has one entry per plan');
+      const jsJson = SLExport.buildJson(model);
+      assert(jsJson.customers.every((c) => !('catalog' in c)), 'catalog is not serialized (parity preserved)');
+    });
   }
 
   test('SL app scripts make no network calls (client-side privacy guard)', () => {

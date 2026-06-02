@@ -210,11 +210,16 @@ def build_html() -> str:
     _assert_contains(html, "escapeHtml(o.opener)", "escaped attach opener (XSS)")
     _assert_contains(html, "escapeHtml(o.planLabel)", "escaped attach plan label (XSS)")
     _assert_contains(html, "escapeHtml(f.planLabel)", "escaped foundational plan label (XSS)")
-    # New per-service visual + $ opportunity surfaces.
-    _assert_contains(html, "function _saGapChart(", "service attach gap chart helper")
-    _assert_contains(html, "sa-gapchart", "service attach gap chart container")
-    _assert_contains(html, "Workload vs Defender ACR by service", "service attach chart title")
-    _assert_contains(html, "ACR / year on the table", "service attach $ opportunity banner")
+    # New per-service narrative + all-plans scorecard surfaces.
+    _assert_contains(html, "function _saSentence(", "service attach narrative sentence helper")
+    _assert_contains(html, "function _saScorecard(", "service attach all-plans scorecard helper")
+    _assert_contains(html, "Defender coverage scorecard", "service attach scorecard title")
+    _assert_contains(html, "attach gap.", "service attach narrative gap phrasing")
+    _assert_contains(html, "Total ACR gap per month", "service attach $ opportunity banner (month)")
+    _assert_contains(html, "Total ACR gap per year", "service attach $ opportunity banner (year)")
+    _assert_absent(html, "on the table", "removed 'on the table' wording")
+    _assert_absent(html, "function _saGapChart(", "removed service attach SVG gap chart helper")
+    _assert_absent(html, "Workload vs Defender ACR by service", "removed service attach chart title")
     _assert_contains(html, "function _prioServiceEvidence(", "priority modal per-service evidence")
     _assert_contains(html, "What\\'s driving this rating", "priority modal lead section")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
@@ -1452,8 +1457,8 @@ function _prioServiceEvidence(customer) {
   const covSignals = opps.filter(function (o) { return !o.hasDollarGap; }).length;
   const banner =
     '<div class="prio-gap-banner">' +
-      '<div><div class="big">' + fmt.money(monthly) + '</div><div class="lbl">ACR / month on the table</div></div>' +
-      '<div><div class="big">' + fmt.money(annual) + '</div><div class="lbl">ACR / year on the table</div></div>' +
+      '<div><div class="big">' + fmt.money(monthly) + '</div><div class="lbl">Total ACR gap per month</div></div>' +
+      '<div><div class="big">' + fmt.money(annual) + '</div><div class="lbl">Total ACR gap per year</div></div>' +
       '<div class="sub">Close these per-service Defender gaps to capture the estimated ACR above' +
         (covSignals > 0 ? ' \u00b7 plus ' + covSignals + ' usage-priced service' + (covSignals === 1 ? '' : 's') + ' with coverage gaps (upside not yet quantified)' : '') +
       '.</div>' +
@@ -1909,50 +1914,63 @@ function _saPct1(v) {
   return (v == null || isNaN(v)) ? '\u2013' : (v * 100).toFixed(1) + '%';
 }
 
-// Dependency-free SVG: per service, a Workload ACR bar over a Defender ACR bar
-// (bars scaled per-row so the coverage gap is legible regardless of size), with
-// a dashed benchmark marker for dollar-gap plans. Makes "you buy X but don't
-// protect X" visible at a glance for execs.
-function _saGapChart(containerId, opps) {
-  const host = document.getElementById(containerId);
-  if (!host) return;
-  const rows = (opps || []).slice(0, 8);
-  if (!rows.length) { host.innerHTML = ''; return; }
-  const W = 760, rowH = 50;
-  const M = { top: 10, right: 96, bottom: 6, left: 196 };
-  const H = M.top + M.bottom + rows.length * rowH;
-  const innerW = W - M.left - M.right;
-  const COL_W = '#0078d4', COL_D = '#107c10', COL_B = '#ff8c00';
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
-  rows.forEach(function (o, i) {
-    const maxV = Math.max(o.workloadAcr || 0, o.defenderActual || 0, o.expected || 0, 1);
-    const sc = function (v) { return Math.max(0, ((v || 0) / maxV) * innerW); };
-    const yTop = M.top + i * rowH;
-    const nm = o.planLabel.length > 26 ? o.planLabel.slice(0, 26) + '\u2026' : o.planLabel;
-    svg += '<text x="' + (M.left - 10) + '" y="' + (yTop + 18) + '" text-anchor="end" font-size="12" font-weight="600" fill="#323130">' + escapeHtml(nm) + '</text>';
-    const wY = yTop + 6, dY = yTop + 26, bh = 14;
-    const wW = sc(o.workloadAcr);
-    svg += '<rect x="' + M.left + '" y="' + wY + '" width="' + wW + '" height="' + bh + '" rx="2" fill="' + COL_W + '" data-k="Workload" data-l="' + escapeHtml(o.planLabel) + '" data-v="' + (o.workloadAcr || 0) + '"/>';
-    svg += '<text x="' + (M.left + wW + 6) + '" y="' + (wY + 11) + '" font-size="10" fill="#605e5c">' + fmt.money(o.workloadAcr) + '</text>';
-    let dW = sc(o.defenderActual);
-    if (o.defenderActual > 0 && dW < 2) dW = 2;
-    const covTxt = (o.hasDollarGap && o.coveragePct != null) ? ' \u00b7 ' + (o.coveragePct * 100).toFixed(0) + '%' : '';
-    svg += '<rect x="' + M.left + '" y="' + dY + '" width="' + dW + '" height="' + bh + '" rx="2" fill="' + COL_D + '" data-k="Defender" data-l="' + escapeHtml(o.planLabel) + '" data-v="' + (o.defenderActual || 0) + '"/>';
-    svg += '<text x="' + (M.left + dW + 6) + '" y="' + (dY + 11) + '" font-size="10" fill="#605e5c">' + fmt.money(o.defenderActual) + covTxt + '</text>';
-    if (o.hasDollarGap && o.expected > 0) {
-      const bx = M.left + sc(o.expected);
-      svg += '<line x1="' + bx + '" y1="' + (wY - 2) + '" x2="' + bx + '" y2="' + (dY + bh + 2) + '" stroke="' + COL_B + '" stroke-width="2" stroke-dasharray="3,2"/>';
+// Plain-language attach sentence for one catalog/opportunity entry.
+// Dollar-gap plans get the "spends $X on workload but only $Y on Defender ..." line;
+// usage-priced plans get a coverage signal with no fabricated dollar figure.
+function _saSentence(customer, c) {
+  const who = escapeHtml(customer || 'This customer');
+  const wname = escapeHtml(c.workloadName || 'this workload');
+  const plan = escapeHtml(c.planLabel || 'the matching Defender plan');
+  if (c.hasDollarGap) {
+    return who + ' spends <strong>' + fmt.money(c.workloadAcr) + '/mo</strong> on ' + wname +
+      ' but only <strong>' + fmt.money(c.defenderActual) + '/mo</strong> on ' + plan +
+      ' \u2014 roughly a <strong>' + fmt.money(c.gapDollars) + '/mo</strong> attach gap.';
+  }
+  return who + ' spends <strong>' + fmt.money(c.workloadAcr) + '/mo</strong> on ' + wname +
+    ' but has <strong>no ' + plan + '</strong> coverage \u2014 usage-priced, so the upside is not yet quantified.';
+}
+
+// All-services scorecard: every Defender plan for the customer, clearly marked
+// below-threshold (open opportunity) / on-track / not-in-use. Returns an HTML string.
+function _saScorecard(d) {
+  const cat = Array.isArray(d.catalog) ? d.catalog : [];
+  if (!cat.length) return '';
+  const order = { below_threshold: 0, on_track: 1, not_deployed: 2 };
+  const sorted = cat.slice().sort(function (a, b) {
+    return ((order[a.status] == null ? 9 : order[a.status]) - (order[b.status] == null ? 9 : order[b.status])) ||
+      ((b.gapDollars || 0) - (a.gapDollars || 0)) ||
+      (a.planLabel < b.planLabel ? -1 : a.planLabel > b.planLabel ? 1 : 0);
+  });
+  const rows = sorted.map(function (c) {
+    let color, bg, dot, label, detail;
+    if (c.status === 'below_threshold') {
+      color = '#a4262c'; bg = '#fdf3f4'; dot = '\u25cf';
+      label = (c.signal === 'expand') ? 'Under-attached' : 'Below threshold';
+      detail = c.hasDollarGap
+        ? fmt.money(c.workloadAcr) + '/mo ' + escapeHtml(c.workloadName) + ' vs ' + fmt.money(c.defenderActual) +
+          '/mo Defender \u00b7 ~' + fmt.money(c.gapDollars) + '/mo gap'
+        : fmt.money(c.workloadAcr) + '/mo ' + escapeHtml(c.workloadName) + ' \u00b7 no coverage (usage-priced)';
+    } else if (c.status === 'on_track') {
+      color = '#107c10'; bg = '#f3f9ef'; dot = '\u2713'; label = 'On track';
+      detail = fmt.money(c.defenderActual) + '/mo Defender on ' + fmt.money(c.workloadAcr) + '/mo workload';
+    } else {
+      color = '#8a8886'; bg = '#f3f2f1'; dot = '\u25cb'; label = 'Not in use';
+      detail = 'Customer does not run this workload yet';
     }
-  });
-  svg += '</svg>';
-  host.innerHTML = svg;
-  host.querySelectorAll('rect').forEach(function (r) {
-    r.addEventListener('mousemove', function (e) {
-      showTooltip('<b>' + escapeHtml(r.getAttribute('data-l')) + '</b><br/>' + escapeHtml(r.getAttribute('data-k')) +
-        ': $' + parseFloat(r.getAttribute('data-v')).toLocaleString('en-US', { maximumFractionDigits: 2 }), e.pageX, e.pageY);
-    });
-    r.addEventListener('mouseleave', hideTooltip);
-  });
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-left:3px solid ' + color +
+        ';background:' + bg + ';border-radius:4px;">' +
+      '<span style="color:' + color + ';font-weight:700;width:14px;text-align:center;">' + dot + '</span>' +
+      '<div style="flex:1 1 auto;min-width:0;">' +
+        '<div style="font-weight:600;color:#323130;">' + escapeHtml(c.planLabel) + '</div>' +
+        '<div style="font-size:11px;color:#605e5c;">' + detail + '</div>' +
+      '</div>' +
+      '<span style="font-size:11px;font-weight:700;color:' + color + ';white-space:nowrap;">' + label + '</span>' +
+    '</div>';
+  }).join('');
+  return '<div style="margin-top:14px;font-size:13px;color:#323130;font-weight:600;">Defender coverage scorecard</div>' +
+    '<div style="font-size:11px;color:#605e5c;margin-bottom:6px;">Every Defender for Cloud plan for this customer. ' +
+      'Plans marked <strong style="color:#a4262c;">below threshold</strong> are the open attach opportunities.</div>' +
+    '<div style="display:flex;flex-direction:column;gap:4px;">' + rows + '</div>';
 }
 
 function renderServiceAttach(idp, name) {
@@ -2065,7 +2083,7 @@ function renderServiceAttach(idp, name) {
       'Heads-up: provided totals did not fully reconcile against summed service rows for this customer \u2014 treat figures as directional.</div>';
   }
 
-  // Headline "money on the table": quantified monthly gap (sum of dollar-gap plans)
+  // Headline open attach gap: quantified monthly gap (sum of dollar-gap plans)
   // annualized x12, plus a count of usage-priced coverage-signal services as
   // separate unquantified upside (never fabricate a $ for those).
   const monthlyGap = d.totalGapDollars || 0;
@@ -2074,28 +2092,26 @@ function renderServiceAttach(idp, name) {
   const gapBanner = (monthlyGap > 0 || covSignals > 0)
     ? '<div style="margin-top:12px;border:1px solid #e3d3f5;background:#fbf6ff;border-radius:8px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;">' +
         '<div><div style="font-size:24px;font-weight:700;color:#5c2d91;">' + fmt.money(monthlyGap) + '</div>' +
-          '<div style="font-size:12px;color:#605e5c;">ACR / month on the table</div></div>' +
+          '<div style="font-size:12px;color:#605e5c;">Total ACR gap per month</div></div>' +
         '<div><div style="font-size:24px;font-weight:700;color:#5c2d91;">' + fmt.money(annualGap) + '</div>' +
-          '<div style="font-size:12px;color:#605e5c;">ACR / year on the table</div></div>' +
+          '<div style="font-size:12px;color:#605e5c;">Total ACR gap per year</div></div>' +
         '<div style="flex:1 1 220px;font-size:12px;color:#605e5c;">Estimated additional Defender for Cloud ACR if these per-service gaps are closed to benchmark.' +
           (covSignals > 0 ? ' Plus ' + covSignals + ' usage-priced service' + (covSignals === 1 ? '' : 's') + ' with coverage gaps (upside not yet quantified).' : '') +
         '</div>' +
       '</div>'
     : '';
 
-  // Inline-SVG comparison: Workload ACR vs Defender ACR per service.
-  const chartLegend =
-    '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#605e5c;margin:6px 0 0;">' +
-      '<span><span style="display:inline-block;width:10px;height:10px;background:#0078d4;border-radius:2px;vertical-align:middle;"></span> Workload ACR</span>' +
-      '<span><span style="display:inline-block;width:10px;height:10px;background:#107c10;border-radius:2px;vertical-align:middle;"></span> Defender ACR</span>' +
-      '<span><span style="display:inline-block;width:14px;height:0;border-top:2px dashed #ff8c00;vertical-align:middle;"></span> Benchmark target</span>' +
-      '<span>Bars scaled per service</span>' +
-    '</div>';
-  const chartBox = opps.length
-    ? '<div style="margin-top:14px;font-size:13px;color:#323130;font-weight:600;">Workload vs Defender ACR by service</div>' +
-      '<div style="font-size:11px;color:#605e5c;margin-bottom:4px;">The bigger the gap between the blue (workload) and green (Defender) bars, the more spend is running unprotected.</div>' +
-      '<div id="' + idp + 'sa-gapchart"></div>' + chartLegend
+  // Plain-language lead: the single biggest below-threshold gap, stated as a sentence.
+  const leadEntry = (Array.isArray(d.catalog) ? d.catalog : [])
+    .filter(function (c) { return c.status === 'below_threshold'; })
+    .sort(function (a, b) {
+      return (Number(b.hasDollarGap) - Number(a.hasDollarGap)) || ((b.gapDollars || 0) - (a.gapDollars || 0));
+    })[0];
+  const leadBox = leadEntry
+    ? '<div class="note" style="margin-top:14px;border-left-color:#a4262c;background:#fdf3f4;color:#5d1a1d;font-size:14px;line-height:1.5;">' +
+        _saSentence(d.customer, leadEntry) + '</div>'
     : '';
+  const scorecard = _saScorecard(d);
 
   host.innerHTML =
     '<div class="chart-box" style="margin-top:18px;">' +
@@ -2103,14 +2119,13 @@ function renderServiceAttach(idp, name) {
       '<div class="sub">Where this customer buys an Azure service but is not protecting it with the matching Defender plan. Ranked by opportunity score.</div>' +
       kpis +
       gapBanner +
+      leadBox +
       reconHtml +
-      chartBox +
+      scorecard +
       '<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">' + oppHtml + '</div>' +
       tierLegend +
       foundHtml +
     '</div>';
-
-  _saGapChart(idp + 'sa-gapchart', opps);
 }
 
 '''
