@@ -198,6 +198,19 @@ tr.clickable:hover { background: #f3f2f1; }
 #splash button:hover { background: #106ebe; }
 #splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a8886; }
 #splash .splash-error { margin-top: 12px; font-size: 13px; color: #a4262c; min-height: 18px; }
+#splash .splash-progress {
+  margin-top: 16px; height: 6px; border-radius: 999px;
+  background: #e6e9ef; overflow: hidden; display: none;
+}
+#splash .splash-progress.active { display: block; }
+#splash .splash-progress .bar {
+  height: 100%; width: 0%; border-radius: 999px;
+  background: linear-gradient(90deg, #0078d4, #4aa3e8);
+  transition: width 0.28s ease;
+}
+#splash .splash-progress-label {
+  margin-top: 8px; font-size: 12px; color: #605e5c; min-height: 16px;
+}
 </style>
 </head>
 <body>
@@ -211,6 +224,8 @@ tr.clickable:hover { background: #f3f2f1; }
       <div class="dz-sub">or click to browse</div>
     </div>
     <button type="button" id="splash-import-btn">📂 Choose Excel file</button>
+    <div class="splash-progress" id="splash-progress" role="progressbar" aria-label="Loading file" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="bar"></div></div>
+    <div class="splash-progress-label" id="splash-progress-label" aria-live="polite"></div>
     <div class="splash-error" id="splash-error" role="alert"></div>
     <div class="splash-hint">You can swap files later from the top menu.</div>
   </div>
@@ -449,14 +464,22 @@ document.getElementById('import-btn').addEventListener('click', () => {
 
 document.getElementById('file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0]; if (!file) return;
+  const _prog = (p, l) => { if (window.__attachProgress) window.__attachProgress(p, l); };
+  const _paint = () => new Promise((r) => setTimeout(r, 0));
   setStatus('Reading "' + file.name + '"…');
+  _prog(8, 'Reading "' + file.name + '"…');
   try {
+    await _paint();
     const buf = await file.arrayBuffer();
+    _prog(32, 'Parsing workbook…'); await _paint();
     const wb = XLSX.read(buf, {type: 'array'});
     const ws = wb.Sheets[wb.SheetNames[0]];
+    _prog(56, 'Extracting rows…'); await _paint();
     const rows = XLSX.utils.sheet_to_json(ws, {header: 1, defval: null, raw: true});
+    _prog(74, 'Scoring customers…'); await _paint();
     const newData = AcrModel.build(rows, file.name);
     if (!newData || !newData.customers || newData.customers.length === 0) { setStatus('Could not read this workbook — no customers found. Make sure it is the ACR Details Excel export with the expected columns.', 'error'); return; }
+    _prog(90, 'Rendering dashboards…'); await _paint();
     DATA = newData;
     const splash = document.getElementById('splash');
     if (splash) splash.hidden = true;
@@ -467,6 +490,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
       if (json.length < 4500000) sessionStorage.setItem(ACR_CACHE_KEY, json);
     } catch (cacheErr) { console.warn('Could not cache data:', cacheErr); }
     if (window.AppNav) AppNav.setSource(file.name);
+    _prog(100, 'Done');
     setStatus('✓ Loaded "' + file.name + '" — ' + DATA.customers.length + ' customers, ' + DATA.months.length + ' months', 'success');
   } catch (err) {
     console.error(err);
@@ -2901,12 +2925,29 @@ document.addEventListener('DOMContentLoaded', function() {
   var btn = document.getElementById('splash-import-btn');
   var dz = document.getElementById('splash-dropzone');
   var err = document.getElementById('splash-error');
+  var prog = document.getElementById('splash-progress');
+  var plabel = document.getElementById('splash-progress-label');
   var importBtn = document.getElementById('import-btn');
   var fileInput = document.getElementById('file-input');
   if (!importBtn || !fileInput) return;
 
-  function showError(msg){ if (err) err.textContent = msg || ''; }
+  function showError(msg){ if (err) err.textContent = msg || ''; if (msg && prog) prog.classList.remove('active'); if (msg && plabel) plabel.textContent = ''; }
   function clickBrowse(){ showError(''); importBtn.click(); }
+
+  // Determinate progress driver used by the import handler. Each import
+  // stage (read -> parse -> score -> render) sets a percentage so the bar
+  // visibly fills, repainting between the synchronous parse/build steps.
+  window.__attachProgress = function(pct, label){
+    var splashEl = document.getElementById('splash');
+    if (!prog || (splashEl && splashEl.hidden)) return;
+    prog.classList.add('active');
+    var bar = prog.querySelector('.bar');
+    var p = Math.max(0, Math.min(100, Number(pct) || 0));
+    if (bar) bar.style.width = p + '%';
+    prog.setAttribute('aria-valuenow', String(Math.round(p)));
+    if (plabel && typeof label === 'string') plabel.textContent = label;
+    if (err) { err.textContent = ''; err.className = 'splash-error'; }
+  };
 
   if (btn) btn.addEventListener('click', clickBrowse);
 
@@ -2959,17 +3000,32 @@ document.addEventListener('DOMContentLoaded', function() {
     if (splash && !splash.hidden) e.preventDefault();
   });
 
-  // Mirror import errors onto the splash overlay. The top-menu status
+  // Mirror import status onto the splash overlay. The top-menu status
   // element is hidden behind the splash, so a failed or empty import
-  // would otherwise look like 'nothing happened'.
+  // would otherwise look like 'nothing happened'. Errors show red text;
+  // in-progress messages reveal the determinate bar (filled via
+  // window.__attachProgress from the import handler).
   if (typeof window.setStatus === 'function') {
     var _origSetStatus = window.setStatus;
     window.setStatus = function(msg, kind){
       try { _origSetStatus(msg, kind); } catch (_) {}
       var splashEl = document.getElementById('splash');
-      if (err && splashEl && !splashEl.hidden) {
+      if (!(err && splashEl && !splashEl.hidden)) return;
+      if (kind === 'error') {
+        if (prog) prog.classList.remove('active');
+        if (plabel) plabel.textContent = '';
         err.textContent = msg || '';
-        err.className = 'splash-error' + (kind ? ' ' + kind : '');
+        err.className = 'splash-error error';
+      } else if (kind) {
+        if (prog) prog.classList.remove('active');
+        if (plabel) plabel.textContent = '';
+        err.textContent = '';
+        err.className = 'splash-error';
+      } else {
+        err.textContent = '';
+        err.className = 'splash-error';
+        if (prog) prog.classList.add('active');
+        if (plabel) plabel.textContent = msg || 'Loading…';
       }
     };
   }

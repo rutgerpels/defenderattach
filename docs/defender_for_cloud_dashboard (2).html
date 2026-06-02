@@ -362,16 +362,25 @@ document.getElementById('import-btn').addEventListener('click', () => {
 
 document.getElementById('file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0]; if (!file) return;
+  const _prog = (p, l) => { if (window.__attachProgress) window.__attachProgress(p, l); };
+  const _paint = () => new Promise((r) => setTimeout(r, 0));
   setStatus('Reading "' + file.name + '"…');
+  _prog(8, 'Reading "' + file.name + '"…');
   try {
+    await _paint();
     const buf = await file.arrayBuffer();
+    _prog(32, 'Parsing workbook…'); await _paint();
     const wb = XLSX.read(buf, {type: 'array'});
     const ws = wb.Sheets[wb.SheetNames[0]];
+    _prog(56, 'Extracting rows…'); await _paint();
     const rows = XLSX.utils.sheet_to_json(ws, {header: 1, defval: null, raw: true});
+    _prog(74, 'Scoring customers…'); await _paint();
     const newData = parseAndScore(rows);
     if (!newData) { setStatus('Could not parse — check the sheet structure.', 'error'); return; }
+    _prog(90, 'Rendering dashboards…'); await _paint();
     DATA = newData;
     renderAll();
+    _prog(100, 'Done');
     setStatus('✓ Loaded "' + file.name + '" — ' + DATA.customers.length + ' customers, ' + DATA.months.length + ' months', 'success');
   } catch (err) {
     console.error(err);

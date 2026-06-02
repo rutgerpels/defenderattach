@@ -240,6 +240,7 @@ def build_html() -> str:
     _assert_contains(html, 'id="app-nav"', "app-nav placeholder")
     _assert_contains(html, 'id="splash"', "splash overlay")
     _assert_contains(html, 'id="splash-dropzone"', "splash dropzone")
+    _assert_contains(html, 'id="splash-progress"', "splash loading bar")
     _assert_contains(html, "splash.hidden = true", "splash hide-on-load")
     _assert_contains(html, "if (!DATA.customers || DATA.customers.length === 0) return;", "renderAll empty-state guard")
     _assert_contains(html, "  __slDossierMap = null;\n  reclassifyOpportunities(dfcShareThreshold);", "renderAll dossier-cache reset (stale-data guard)")
@@ -428,6 +429,19 @@ def _inject_splash(html: str) -> str:
         "#splash button:hover { background: #106ebe; }\n"
         "#splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a8886; }\n"
         "#splash .splash-error { margin-top: 12px; font-size: 13px; color: #a4262c; min-height: 18px; }\n"
+        "#splash .splash-progress {\n"
+        "  margin-top: 16px; height: 6px; border-radius: 999px;\n"
+        "  background: #e6e9ef; overflow: hidden; display: none;\n"
+        "}\n"
+        "#splash .splash-progress.active { display: block; }\n"
+        "#splash .splash-progress .bar {\n"
+        "  height: 100%; width: 0%; border-radius: 999px;\n"
+        "  background: linear-gradient(90deg, #0078d4, #4aa3e8);\n"
+        "  transition: width 0.28s ease;\n"
+        "}\n"
+        "#splash .splash-progress-label {\n"
+        "  margin-top: 8px; font-size: 12px; color: #605e5c; min-height: 16px;\n"
+        "}\n"
     )
     html = _replace_once(html, "</style>\n</head>", splash_css + "</style>\n</head>", "closing style/head tags (splash)")
 
@@ -443,6 +457,8 @@ def _inject_splash(html: str) -> str:
         '      <div class="dz-sub">or click to browse</div>\n'
         '    </div>\n'
         '    <button type="button" id="splash-import-btn">📂 Choose Excel file</button>\n'
+        '    <div class="splash-progress" id="splash-progress" role="progressbar" aria-label="Loading file" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="bar"></div></div>\n'
+        '    <div class="splash-progress-label" id="splash-progress-label" aria-live="polite"></div>\n'
         '    <div class="splash-error" id="splash-error" role="alert"></div>\n'
         '    <div class="splash-hint">You can swap files later from the top menu.</div>\n'
         '  </div>\n'
@@ -487,12 +503,29 @@ def _inject_splash(html: str) -> str:
         "  var btn = document.getElementById('splash-import-btn');\n"
         "  var dz = document.getElementById('splash-dropzone');\n"
         "  var err = document.getElementById('splash-error');\n"
+        "  var prog = document.getElementById('splash-progress');\n"
+        "  var plabel = document.getElementById('splash-progress-label');\n"
         "  var importBtn = document.getElementById('import-btn');\n"
         "  var fileInput = document.getElementById('file-input');\n"
         "  if (!importBtn || !fileInput) return;\n"
         "\n"
-        "  function showError(msg){ if (err) err.textContent = msg || ''; }\n"
+        "  function showError(msg){ if (err) err.textContent = msg || ''; if (msg && prog) prog.classList.remove('active'); if (msg && plabel) plabel.textContent = ''; }\n"
         "  function clickBrowse(){ showError(''); importBtn.click(); }\n"
+        "\n"
+        "  // Determinate progress driver used by the import handler. Each import\n"
+        "  // stage (read -> parse -> score -> render) sets a percentage so the bar\n"
+        "  // visibly fills, repainting between the synchronous parse/build steps.\n"
+        "  window.__attachProgress = function(pct, label){\n"
+        "    var splashEl = document.getElementById('splash');\n"
+        "    if (!prog || (splashEl && splashEl.hidden)) return;\n"
+        "    prog.classList.add('active');\n"
+        "    var bar = prog.querySelector('.bar');\n"
+        "    var p = Math.max(0, Math.min(100, Number(pct) || 0));\n"
+        "    if (bar) bar.style.width = p + '%';\n"
+        "    prog.setAttribute('aria-valuenow', String(Math.round(p)));\n"
+        "    if (plabel && typeof label === 'string') plabel.textContent = label;\n"
+        "    if (err) { err.textContent = ''; err.className = 'splash-error'; }\n"
+        "  };\n"
         "\n"
         "  if (btn) btn.addEventListener('click', clickBrowse);\n"
         "\n"
@@ -545,17 +578,32 @@ def _inject_splash(html: str) -> str:
         "    if (splash && !splash.hidden) e.preventDefault();\n"
         "  });\n"
         "\n"
-        "  // Mirror import errors onto the splash overlay. The top-menu status\n"
+        "  // Mirror import status onto the splash overlay. The top-menu status\n"
         "  // element is hidden behind the splash, so a failed or empty import\n"
-        "  // would otherwise look like 'nothing happened'.\n"
+        "  // would otherwise look like 'nothing happened'. Errors show red text;\n"
+        "  // in-progress messages reveal the determinate bar (filled via\n"
+        "  // window.__attachProgress from the import handler).\n"
         "  if (typeof window.setStatus === 'function') {\n"
         "    var _origSetStatus = window.setStatus;\n"
         "    window.setStatus = function(msg, kind){\n"
         "      try { _origSetStatus(msg, kind); } catch (_) {}\n"
         "      var splashEl = document.getElementById('splash');\n"
-        "      if (err && splashEl && !splashEl.hidden) {\n"
+        "      if (!(err && splashEl && !splashEl.hidden)) return;\n"
+        "      if (kind === 'error') {\n"
+        "        if (prog) prog.classList.remove('active');\n"
+        "        if (plabel) plabel.textContent = '';\n"
         "        err.textContent = msg || '';\n"
-        "        err.className = 'splash-error' + (kind ? ' ' + kind : '');\n"
+        "        err.className = 'splash-error error';\n"
+        "      } else if (kind) {\n"
+        "        if (prog) prog.classList.remove('active');\n"
+        "        if (plabel) plabel.textContent = '';\n"
+        "        err.textContent = '';\n"
+        "        err.className = 'splash-error';\n"
+        "      } else {\n"
+        "        err.textContent = '';\n"
+        "        err.className = 'splash-error';\n"
+        "        if (prog) prog.classList.add('active');\n"
+        "        if (plabel) plabel.textContent = msg || 'Loading…';\n"
         "      }\n"
         "    };\n"
         "  }\n"
