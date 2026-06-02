@@ -527,21 +527,8 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
     assert(/labels = weekly \? DATA\.week_labels : DATA\.month_labels/.test(src), 'weekly x-axis labels wired');
     assert(!/lineChart\('chart-dfc-trend', \[\{label: 'Defender for Cloud', values: DATA\.dfc_total_monthly, color: '#0078d4'\}\]\);/.test(src), 'no stale month-only DfC trend call');
   });
-  test('customer drill-down charts auto-select weekly when available', () => {
-    assert(/const cWeekly = !!\(DATA\.weekly_enabled && Array\.isArray\(cd\.dfc_weekly\) && Array\.isArray\(cd\.other_weekly\) && Array\.isArray\(cd\.total_weekly\)\);/.test(src), 'customer weekly guard present');
-    assert(/const dfcSeries = cWeekly \? cd\.dfc_weekly : cd\.dfc_series;/.test(src), 'customer DfC series switched');
-    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer DfC chart relabelled');
-    assert(/lineChart\(idp \+ 'chart-cust-pct', .*\{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx, format: 'percent'\}\);/.test(src), 'customer % chart relabelled');
-  });
-  test('DfC penetration chart renders percent axis and tooltip', () => {
-    assert(/opts\.format === 'percent' \? yv\.toFixed\(yMax < 10 \? 1 : 0\) \+ '%'/.test(src), 'lineChart percent Y-axis branch present');
-    assert(/opts\.format === 'percent' \? parseFloat\(val\)\.toFixed\(2\) \+ '%'/.test(src), 'lineChart percent tooltip branch present');
-    // The dollar-based DfC trend chart must NOT inherit percent formatting.
-    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'DfC dollar chart keeps dollar (no percent) opts');
-  });
   test('legacy monthly data still falls back without blank charts', () => {
     assert(/weekly \? DATA\.dfc_total_weekly : DATA\.dfc_total_monthly/.test(src), 'DfC monthly fallback retained');
-    assert(/cWeekly \? cd\.dfc_weekly : cd\.dfc_series/.test(src), 'customer monthly fallback retained');
   });
   test('partial-month marker is suppressed on weekly charts', () => {
     assert(/const partialIdx = \(opts\.partialIdx != null\) \? opts\.partialIdx : DATA\.partial_month_idx;/.test(src), 'lineChart honours opts.partialIdx');
@@ -549,15 +536,11 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
     assert(!/const isPartial = i === DATA\.partial_month_idx;/.test(src), 'no hard-coded monthly partial index');
     const passed = (src.match(/partialIdx: weekly \? -1 : DATA\.partial_month_idx/g) || []).length;
     assert(passed === 1, 'overview DfC chart passes weekly partialIdx (got ' + passed + ')');
-    const cPassed = (src.match(/partialIdx: cWeekly \? -1 : DATA\.partial_month_idx/g) || []).length;
-    assert(cPassed === 2, 'customer charts pass weekly partialIdx (got ' + cPassed + ')');
   });
   test('trend chart titles/subtitles no longer hard-code "monthly"', () => {
     assert(/Defender for Cloud — ACR across all customers/.test(src), 'DfC trend title neutral');
     assert(/ACR trend \(weekly where available\)/.test(src), 'DfC trend sub clarifies weekly');
     assert(/Product mix — share of ACR by service/.test(src), 'product mix donut title');
-    assert(/ACR trend — does DfC track with the rest of the footprint\?/.test(src), 'customer DfC sub neutral');
-    assert(/DfC as % of total ACR for this customer/.test(src), 'customer pct sub neutral');
     assert(!/Monthly ACR across all customers/.test(src), 'no stale DfC trend title');
     assert(!/monthly ACR trend by service/.test(src), 'no stale product trend title');
   });
@@ -852,8 +835,6 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
     assert(/document\.getElementById\(idp \+ 'cust-priority'\)\.innerHTML = tagFor/.test(src), 'priority target is prefixed');
     assert(/const note = document\.getElementById\(idp \+ 'cust-signal'\);/.test(src), 'signal target is prefixed');
     assert(/const ph = document\.getElementById\(idp \+ 'cust-products'\);/.test(src), 'products target is prefixed');
-    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[/.test(src), 'DfC chart target is prefixed');
-    assert(/lineChart\(idp \+ 'chart-cust-pct', /.test(src), 'pct chart target is prefixed');
   });
   test('drill-down signal note escapes Excel-derived notes (XSS)', () => {
     assert(/note\.innerHTML = `<strong>Signal:<\/strong> \$\{escapeHtml\(opp\.notes\)\}`;/.test(src), 'opp.notes must be escaped');
@@ -866,8 +847,6 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
     assert(/id="m-cust-title"/.test(src), 'modal title node present');
     assert(/id="m-cust-cards"/.test(src), 'modal cards node present');
     assert(/id="m-cust-signal"/.test(src), 'modal signal node present');
-    assert(/id="m-chart-cust-dfc"/.test(src), 'modal DfC chart container present');
-    assert(/id="m-chart-cust-pct"/.test(src), 'modal pct chart container present');
     assert(/id="m-cust-products"/.test(src), 'modal products node present');
     assert(/renderCustomerDetail\(name, 'm-'\);/.test(src), 'modal renders the breakdown with the m- prefix');
     assert(/if \(title\) title\.textContent = name;/.test(src), 'modal title set via textContent (safe)');
@@ -965,6 +944,15 @@ console.log('\nweb-app/index.html (per-service Defender attach)');
     assert(/const scorecard = _saScorecard\(d\);/.test(src), 'scorecard wired into renderer');
     assert(!/function _saGapChart\(/.test(src), 'old SVG gap chart helper removed');
     assert(!/Workload vs Defender ACR by service/.test(src), 'old chart title removed');
+  });
+  test('per-service attach folds scoring into click-to-expand scorecard accordions', () => {
+    assert(/function _saOppDetail\(o\)/.test(src), '_saOppDetail expanded-detail helper defined');
+    assert(/data-sa-toggle/.test(src), 'scorecard rows carry the accordion toggle hook');
+    assert(/class="sa-detail"/.test(src), 'hidden per-plan detail panel present');
+    assert(/window\.__saAccordionWired/.test(src), 'accordion handler wired once');
+    assert(/aria-expanded/.test(src), 'accordion rows expose aria-expanded state');
+    // The standalone opportunity cards must be gone (folded into the scorecard).
+    assert(!/let oppHtml;/.test(src), 'old standalone opportunity-card block removed');
   });
   test('per-service attach shows the Total ACR gap banner (no "on the table" wording)', () => {
     assert(/Total ACR gap per month/.test(src), 'monthly gap headline present');

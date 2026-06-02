@@ -253,23 +253,6 @@ tr.clickable:hover { background: #f3f2f1; }
 
   <div class="note" id="cust-signal"></div>
 
-  <div class="grid-2">
-    <div class="chart-box">
-      <div class="title">Defender for Cloud vs. other Azure workloads</div>
-      <div class="sub">Daily ACR — does DfC track with the rest of the footprint?</div>
-      <div class="svg-container" id="chart-cust-dfc"></div>
-      <div class="legend">
-        <span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>
-        <span class="legend-item"><span class="legend-swatch" style="background:#605e5c"></span>Other Azure (Total - DfC)</span>
-      </div>
-    </div>
-    <div class="chart-box">
-      <div class="title">DfC penetration over time</div>
-      <div class="sub">DfC as % of total daily ACR for this customer</div>
-      <div class="svg-container" id="chart-cust-pct"></div>
-    </div>
-  </div>
-
   <div class="chart-box">
     <div class="title">Product breakdown</div>
     <div class="sub">All workloads ranked by current daily ACR. Spark line shows full trajectory.</div>
@@ -1006,16 +989,6 @@ function renderCustomerDetail(name) {
   note.style.borderLeftColor = opp.opportunity === 'High' ? '#d13438' : opp.opportunity === 'Medium' ? '#ff8c00' : '#107c10';
   note.style.background = opp.opportunity === 'High' ? '#fdf3f4' : opp.opportunity === 'Medium' ? '#fffaf0' : '#f3f9ef';
   note.style.color = opp.opportunity === 'High' ? '#5d1014' : opp.opportunity === 'Medium' ? '#5d3a00' : '#0e3a0e';
-
-  lineChart('chart-cust-dfc', [
-    {label: 'Defender for Cloud', values: cd.dfc_series, color: '#0078d4'},
-    {label: 'Other Azure', values: cd.other_series, color: '#605e5c', dash: '4 3'},
-  ]);
-  const pctSeries = cd.dfc_series.map((v, i) => {
-    const t = cd.total_series[i];
-    return t > 0 ? (v / t) * 100 : 0;
-  });
-  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}]);
 
   const ph = document.getElementById('cust-products');
   ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">$/day</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +

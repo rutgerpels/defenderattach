@@ -195,10 +195,6 @@ def build_html() -> str:
     _assert_contains(html, "function _ensureCustOverlay(", "customer modal overlay factory")
     _assert_contains(html, 'id="m-cust-title"', "customer modal title node")
     _assert_contains(html, 'id="m-cust-products"', "customer modal product table")
-    _assert_contains(html, 'id="m-chart-cust-dfc"', "customer modal dfc chart container")
-    _assert_contains(html, 'id="m-chart-cust-pct"', "customer modal pct chart container")
-    _assert_contains(html, "opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%'", "lineChart percent Y-axis label")
-    _assert_contains(html, "format: 'percent'});", "DfC penetration chart percent format")
     _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]", "opportunity matrix click interceptor")
     _assert_contains(html, "function _enhanceCustomerTargetsA11y()", "customer target a11y enhancer")
     _assert_contains(html, "n.setAttribute('tabindex', '0')", "customer targets made focusable")
@@ -215,11 +211,15 @@ def build_html() -> str:
     _assert_contains(html, 'id="m-cust-attach"', "modal service attach anchor")
     _assert_contains(html, "renderServiceAttach(idp, name);", "service attach render call")
     _assert_contains(html, "escapeHtml(o.opener)", "escaped attach opener (XSS)")
-    _assert_contains(html, "escapeHtml(o.planLabel)", "escaped attach plan label (XSS)")
+    _assert_contains(html, "escapeHtml(c.planLabel)", "escaped attach plan label (XSS)")
     _assert_contains(html, "escapeHtml(f.planLabel)", "escaped foundational plan label (XSS)")
     # New per-service narrative + all-plans scorecard surfaces.
     _assert_contains(html, "function _saSentence(", "service attach narrative sentence helper")
     _assert_contains(html, "function _saScorecard(", "service attach all-plans scorecard helper")
+    _assert_contains(html, "function _saOppDetail(", "service attach expanded opportunity detail helper")
+    _assert_contains(html, "data-sa-toggle", "service attach scorecard accordion toggle")
+    _assert_contains(html, 'class="sa-detail"', "service attach scorecard accordion panel")
+    _assert_contains(html, "window.__saAccordionWired", "service attach accordion delegated handler")
     _assert_contains(html, "Defender coverage scorecard", "service attach scorecard title")
     _assert_contains(html, "attach gap.", "service attach narrative gap phrasing")
     _assert_contains(html, "Total ACR gap per month", "service attach $ opportunity banner (month)")
@@ -259,7 +259,6 @@ def build_html() -> str:
 
     _assert_contains(html, "function renderDfcTrend()", "weekly-preferring DfC overview trend")
     _assert_contains(html, "const weekly = !!(DATA.weekly_enabled && DATA.dfc_total_weekly);", "weekly DfC series auto-selected")
-    _assert_contains(html, "cd.dfc_weekly", "weekly customer series wired into drill-down")
     _assert_absent(html, "lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values: DATA.dfc_total_monthly, color: '#0078d4'}]);", "stale month-only DfC overview trend call")
     _assert_absent(html, 'id="product-trend-grain"', "removed monthly/weekly granularity toggle")
     _assert_absent(html, 'id="cust-trend-grain"', "removed customer granularity toggle")
@@ -876,35 +875,6 @@ def _weekly_views(html: str) -> str:
         "renderAll DfC trend routing",
     )
 
-    # 5. Customer drill-down charts: prefer weekly series + labels.
-    html = _replace_once(
-        html,
-        "  lineChart('chart-cust-dfc', [\n"
-        "    {label: 'Defender for Cloud', values: cd.dfc_series, color: '#0078d4'},\n"
-        "    {label: 'Other Azure', values: cd.other_series, color: '#605e5c', dash: '4 3'},\n"
-        "  ]);\n"
-        "  const pctSeries = cd.dfc_series.map((v, i) => {\n"
-        "    const t = cd.total_series[i];\n"
-        "    return t > 0 ? (v / t) * 100 : 0;\n"
-        "  });\n"
-        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}]);",
-        "  const cWeekly = !!(DATA.weekly_enabled && Array.isArray(cd.dfc_weekly) && Array.isArray(cd.other_weekly) && Array.isArray(cd.total_weekly));\n"
-        "  const dfcSeries = cWeekly ? cd.dfc_weekly : cd.dfc_series;\n"
-        "  const otherSeries = cWeekly ? cd.other_weekly : cd.other_series;\n"
-        "  const totalSeries = cWeekly ? cd.total_weekly : cd.total_series;\n"
-        "  const cLabels = cWeekly ? DATA.week_labels : DATA.month_labels;\n"
-        "  lineChart('chart-cust-dfc', [\n"
-        "    {label: 'Defender for Cloud', values: dfcSeries, color: '#0078d4'},\n"
-        "    {label: 'Other Azure', values: otherSeries, color: '#605e5c', dash: '4 3'},\n"
-        "  ], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});\n"
-        "  const pctSeries = dfcSeries.map((v, i) => {\n"
-        "    const t = totalSeries[i];\n"
-        "    return t > 0 ? (v / t) * 100 : 0;\n"
-        "  });\n"
-        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});",
-        "weekly customer drill-down charts",
-    )
-
     # 6. lineChart partial-month marker: honour an explicit opts.partialIdx so
     #    weekly charts (which pass -1) don't stamp the red "*" onto an arbitrary
     #    week. Monthly fallback callers omit it and keep DATA.partial_month_idx.
@@ -935,40 +905,9 @@ def _weekly_views(html: str) -> str:
         '    <div class="title">Product mix — ACR trend by service</div>',
         "product trend title relabel",
     )
-    html = _replace_once(
-        html,
-        '      <div class="sub">Monthly ACR — does DfC track with the rest of the footprint?</div>',
-        '      <div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>',
-        "customer dfc trend sub relabel",
-    )
-    html = _replace_once(
-        html,
-        '      <div class="sub">DfC as % of total monthly ACR for this customer</div>',
-        '      <div class="sub">DfC as % of total ACR for this customer</div>',
-        "customer pct trend sub relabel",
-    )
 
-    # 8. DfC penetration chart is a percentage series, but lineChart formats the
-    #    Y axis and tooltip as dollars. Teach lineChart an opts.format ='percent'
-    #    mode and flag the penetration call so its axis/tooltip read in %.
-    html = _replace_once(
-        html,
-        "    const lbl = indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0));",
-        "    const lbl = opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%' : (indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0)));",
-        "lineChart percent Y-axis label",
-    )
-    html = _replace_once(
-        html,
-        "      const display = indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2});",
-        "      const display = opts.format === 'percent' ? parseFloat(val).toFixed(2) + '%' : (indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2}));",
-        "lineChart percent tooltip",
-    )
-    html = _replace_once(
-        html,
-        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});",
-        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx, format: 'percent'});",
-        "DfC penetration chart percent format",
-    )
+    # 8. DfC penetration chart removed: the percent-format lineChart transforms
+    #    that supported it are gone, so the base lineChart stays dollar-only.
 
     return html
 
@@ -1708,18 +1647,6 @@ def _inject_customer_modal(html: str) -> str:
     )
     html = _replace_once(
         html,
-        "lineChart('chart-cust-dfc', [",
-        "lineChart(idp + 'chart-cust-dfc', [",
-        "chart-cust-dfc id prefix",
-    )
-    html = _replace_once(
-        html,
-        "lineChart('chart-cust-pct', [{label: 'DfC % of total'",
-        "lineChart(idp + 'chart-cust-pct', [{label: 'DfC % of total'",
-        "chart-cust-pct id prefix",
-    )
-    html = _replace_once(
-        html,
         "const ph = document.getElementById('cust-products');",
         "const ph = document.getElementById(idp + 'cust-products');",
         "cust-products id prefix",
@@ -1760,22 +1687,6 @@ function _ensureCustOverlay() {
       '<div class="controls" style="margin-bottom:14px;"><span id="m-cust-priority"></span></div>' +
       '<div class="cards" id="m-cust-cards"></div>' +
       '<div class="note" id="m-cust-signal"></div>' +
-      '<div class="grid-2">' +
-        '<div class="chart-box">' +
-          '<div class="title">Defender for Cloud vs. other Azure workloads</div>' +
-          '<div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>' +
-          '<div class="svg-container" id="m-chart-cust-dfc"></div>' +
-          '<div class="legend">' +
-            '<span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>' +
-            '<span class="legend-item"><span class="legend-swatch" style="background:#605e5c"></span>Other Azure (Total - DfC)</span>' +
-          '</div>' +
-        '</div>' +
-        '<div class="chart-box">' +
-          '<div class="title">DfC penetration over time</div>' +
-          '<div class="sub">DfC as % of total ACR for this customer</div>' +
-          '<div class="svg-container" id="m-chart-cust-pct"></div>' +
-        '</div>' +
-      '</div>' +
       '<div class="chart-box">' +
         '<div class="title">Product breakdown</div>' +
         '<div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>' +
@@ -1994,11 +1905,71 @@ function _saSentence(customer, c) {
     ' but has <strong>no ' + plan + '</strong> coverage \u2014 usage-priced, so the upside is not yet quantified.';
 }
 
+// Rich detail for an open (below-threshold) opportunity, shown inside an
+// expanded scorecard row. Mirrors the former standalone opportunity card,
+// minus the plan label (the row head already shows it).
+function _saOppDetail(o) {
+  const isAttach = o.signal === 'attach';
+  const pr = (o.priority || '').toLowerCase();
+  const prClass = pr === 'high' ? 'high' : (pr === 'medium' ? 'medium' : 'low');
+  const prTag = o.priority
+    ? '<span class="tag ' + prClass + '">' + escapeHtml(o.priority) + ' priority</span>'
+    : '';
+  const badge = isAttach
+    ? '<span class="tag high">Not protected</span>'
+    : '<span class="tag medium">Under-protected</span>';
+  const covTip = 'This Defender plan is billed by usage \u2014 per resource, machine, or transaction \u2014 not as a share of spend. '
+    + 'So we flag the unprotected workload but do not guess a dollar gap, which would be too speculative. '
+    + 'Confirm the resource count with the customer to size the real upside.';
+  const gapStr = o.hasDollarGap
+    ? fmt.money(o.gapDollars) + ' / mo gap'
+    : 'usage-priced \u00b7 coverage signal '
+      + '<span class="prio-badge-i" tabindex="0" role="img" '
+      + 'aria-label="What does usage-priced coverage signal mean?" '
+      + 'style="cursor:help;" title="' + covTip + '">&#9432;</span>';
+  const cov = (o.hasDollarGap && o.coveragePct != null)
+    ? ' \u00b7 ' + (o.coveragePct * 100).toFixed(0) + '% of benchmark'
+    : '';
+  const reason = o.priorityReason
+    ? '<div style="font-size:11px;color:#605e5c;margin-top:4px;">Why: ' + escapeHtml(o.priorityReason) + '</div>'
+    : '';
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+      '<div>' + prTag + ' ' + badge + '</div>' +
+      '<div style="font-weight:600;white-space:nowrap;">' + gapStr + '</div>' +
+    '</div>' +
+    reason +
+    '<div class="note" style="margin:8px 0 0;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">' +
+      escapeHtml(o.opener) + '</div>' +
+    '<div style="font-size:12px;color:#605e5c;margin-top:8px;">' +
+      'Workload ' + fmt.money(o.workloadAcr) + ' / mo (' + fmt.pct(o.workloadGrowth) + ' 3M) \u00b7 ' +
+      'Defender ' + fmt.money(o.defenderActual) + ' / mo (' + fmt.pct(o.defenderGrowth) + ' 3M)' + cov +
+    '</div>';
+}
+
+// Detail for an on-track plan (already protecting its workload to benchmark).
+function _saOnTrackDetail(c) {
+  const covTxt = (c.coveragePct != null) ? ' \u00b7 ' + (c.coveragePct * 100).toFixed(0) + '% of benchmark' : '';
+  return '<div style="font-size:12px;color:#323130;">Defender <strong>' + fmt.money(c.defenderActual) +
+    '/mo</strong> protecting <strong>' + fmt.money(c.workloadAcr) + '/mo</strong> of ' +
+    escapeHtml(c.workloadName || 'this workload') + covTxt + '</div>';
+}
+
+// Minimal fallback when a below-threshold plan has no matching opportunity record.
+function _saPlainDetail(c) {
+  return '<div style="font-size:12px;color:#323130;">' + _saSentence(null, c) + '</div>';
+}
+
 // All-services scorecard: every Defender plan for the customer, clearly marked
-// below-threshold (open opportunity) / on-track / not-in-use. Returns an HTML string.
+// below-threshold (open opportunity) / on-track / not-in-use. Below-threshold
+// and on-track rows are click-to-expand accordions revealing the recommended
+// play; not-in-use rows are static. Returns an HTML string.
 function _saScorecard(d) {
   const cat = Array.isArray(d.catalog) ? d.catalog : [];
   if (!cat.length) return '';
+  const oppByPlan = {};
+  (Array.isArray(d.opportunities) ? d.opportunities : []).forEach(function (o) {
+    if (o && o.planLabel != null) oppByPlan[o.planLabel] = o;
+  });
   const order = { below_threshold: 0, on_track: 1, not_deployed: 2 };
   const sorted = cat.slice().sort(function (a, b) {
     return ((order[a.status] == null ? 9 : order[a.status]) - (order[b.status] == null ? 9 : order[b.status])) ||
@@ -2006,7 +1977,7 @@ function _saScorecard(d) {
       (a.planLabel < b.planLabel ? -1 : a.planLabel > b.planLabel ? 1 : 0);
   });
   const rows = sorted.map(function (c) {
-    let color, bg, dot, label, detail;
+    let color, bg, dot, label, detail, expandable, panelInner;
     if (c.status === 'below_threshold') {
       color = '#a4262c'; bg = '#fdf3f4'; dot = '\u25cf';
       label = (c.signal === 'expand') ? 'Under-attached' : 'Below threshold';
@@ -2014,15 +1985,29 @@ function _saScorecard(d) {
         ? fmt.money(c.workloadAcr) + '/mo ' + escapeHtml(c.workloadName) + ' vs ' + fmt.money(c.defenderActual) +
           '/mo Defender \u00b7 ~' + fmt.money(c.gapDollars) + '/mo gap'
         : fmt.money(c.workloadAcr) + '/mo ' + escapeHtml(c.workloadName) + ' \u00b7 no coverage (usage-priced)';
+      expandable = true;
+      panelInner = oppByPlan[c.planLabel] ? _saOppDetail(oppByPlan[c.planLabel]) : _saPlainDetail(c);
     } else if (c.status === 'on_track') {
       color = '#107c10'; bg = '#f3f9ef'; dot = '\u2713'; label = 'On track';
       detail = fmt.money(c.defenderActual) + '/mo Defender on ' + fmt.money(c.workloadAcr) + '/mo workload';
+      expandable = true;
+      panelInner = _saOnTrackDetail(c);
     } else {
       color = '#8a8886'; bg = '#f3f2f1'; dot = '\u25cb'; label = 'Not in use';
       detail = 'Customer does not run this workload yet';
+      expandable = false;
+      panelInner = '';
     }
-    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-left:3px solid ' + color +
+    const caret = expandable
+      ? '<span class="sa-caret" style="color:' + color + ';width:12px;display:inline-block;text-align:center;">\u25b8</span>'
+      : '<span style="width:12px;display:inline-block;"></span>';
+    const headOpen = expandable
+      ? '<div data-sa-toggle role="button" tabindex="0" aria-expanded="false" style="cursor:pointer;'
+      : '<div style="';
+    const head = headOpen +
+        'display:flex;align-items:center;gap:8px;padding:8px 12px;border-left:3px solid ' + color +
         ';background:' + bg + ';border-radius:4px;">' +
+      caret +
       '<span style="color:' + color + ';font-weight:700;width:14px;text-align:center;">' + dot + '</span>' +
       '<div style="flex:1 1 auto;min-width:0;">' +
         '<div style="font-weight:600;color:#323130;">' + escapeHtml(c.planLabel) + '</div>' +
@@ -2030,15 +2015,45 @@ function _saScorecard(d) {
       '</div>' +
       '<span style="font-size:11px;font-weight:700;color:' + color + ';white-space:nowrap;">' + label + '</span>' +
     '</div>';
+    const panel = expandable
+      ? '<div class="sa-detail" hidden style="padding:10px 12px 12px 34px;background:#ffffff;' +
+          'border:1px solid #edebe9;border-top:none;border-radius:0 0 4px 4px;margin:-2px 0 2px;">' +
+          panelInner + '</div>'
+      : '';
+    return '<div>' + head + panel + '</div>';
   }).join('');
   return '<div style="margin-top:14px;font-size:13px;color:#323130;font-weight:600;">Defender coverage scorecard</div>' +
     '<div style="font-size:11px;color:#605e5c;margin-bottom:6px;">Every Defender for Cloud plan for this customer. ' +
-      'Plans marked <strong style="color:#a4262c;">below threshold</strong> are the open attach opportunities.</div>' +
+      'Plans marked <strong style="color:#a4262c;">below threshold</strong> are the open attach opportunities. ' +
+      'Click an open or on-track plan to reveal the recommended play.</div>' +
     '<div style="display:flex;flex-direction:column;gap:4px;">' + rows + '</div>';
 }
 
 function renderServiceAttach(idp, name) {
   idp = idp || '';
+  if (!window.__saAccordionWired) {
+    window.__saAccordionWired = true;
+    const _saToggle = function (head) {
+      const panel = head.nextElementSibling;
+      if (!panel || panel.className !== 'sa-detail') return;
+      const opening = panel.hasAttribute('hidden');
+      if (opening) { panel.removeAttribute('hidden'); } else { panel.setAttribute('hidden', ''); }
+      head.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      const caret = head.querySelector('.sa-caret');
+      if (caret) caret.textContent = opening ? '\u25be' : '\u25b8';
+    };
+    document.addEventListener('click', function (e) {
+      const head = e.target.closest('[data-sa-toggle]');
+      if (head) _saToggle(head);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      const head = e.target.closest('[data-sa-toggle]');
+      if (!head) return;
+      e.preventDefault();
+      _saToggle(head);
+    });
+  }
   const host = document.getElementById(idp + 'cust-attach');
   if (!host) return;
   const sa = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach : null;
@@ -2075,51 +2090,9 @@ function renderServiceAttach(idp, name) {
           ((b.blendedScore || 0) - (a.blendedScore || 0));
       })
     : [];
-  let oppHtml;
-  if (!opps.length) {
-    oppHtml = '<div class="note" style="border-left-color:#107c10;background:#f3f9ef;color:#0e3a0e;">' +
-      'No open per-service attach gaps \u2014 this customer protects the Azure services they run.</div>';
-  } else {
-    oppHtml = opps.map(function (o) {
-      const isAttach = o.signal === 'attach';
-      const pr = (o.priority || '').toLowerCase();
-      const prClass = pr === 'high' ? 'high' : (pr === 'medium' ? 'medium' : 'low');
-      const prTag = o.priority
-        ? '<span class="tag ' + prClass + '">' + escapeHtml(o.priority) + ' priority</span>'
-        : '';
-      const badge = isAttach
-        ? '<span class="tag high">Not protected</span>'
-        : '<span class="tag medium">Under-protected</span>';
-      const covTip = 'This Defender plan is billed by usage \u2014 per resource, machine, or transaction \u2014 not as a share of spend. '
-        + 'So we flag the unprotected workload but do not guess a dollar gap, which would be too speculative. '
-        + 'Confirm the resource count with the customer to size the real upside.';
-      const gapStr = o.hasDollarGap
-        ? fmt.money(o.gapDollars) + ' / mo gap'
-        : 'usage-priced \u00b7 coverage signal '
-          + '<span class="prio-badge-i" tabindex="0" role="img" '
-          + 'aria-label="What does usage-priced coverage signal mean?" '
-          + 'style="cursor:help;" title="' + covTip + '">&#9432;</span>';
-      const cov = (o.hasDollarGap && o.coveragePct != null)
-        ? ' \u00b7 ' + (o.coveragePct * 100).toFixed(0) + '% of benchmark'
-        : '';
-      const reason = o.priorityReason
-        ? '<div style="font-size:11px;color:#605e5c;margin-top:4px;">Why: ' + escapeHtml(o.priorityReason) + '</div>'
-        : '';
-      return '<div class="product-row" style="display:block;padding:12px 14px;">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
-          '<div><strong>' + escapeHtml(o.planLabel) + '</strong> ' + prTag + ' ' + badge + '</div>' +
-          '<div style="font-weight:600;white-space:nowrap;">' + gapStr + '</div>' +
-        '</div>' +
-        reason +
-        '<div class="note" style="margin:8px 0 0;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">' +
-          escapeHtml(o.opener) + '</div>' +
-        '<div style="font-size:12px;color:#605e5c;margin-top:8px;">' +
-          'Workload ' + fmt.money(o.workloadAcr) + ' / mo (' + fmt.pct(o.workloadGrowth) + ' 3M) \u00b7 ' +
-          'Defender ' + fmt.money(o.defenderActual) + ' / mo (' + fmt.pct(o.defenderGrowth) + ' 3M)' + cov +
-        '</div>' +
-      '</div>';
-    }).join('');
-  }
+  const emptyNote = opps.length ? '' :
+    '<div class="note" style="border-left-color:#107c10;background:#f3f9ef;color:#0e3a0e;">' +
+    'No open per-service attach gaps \u2014 this customer protects the Azure services they run.</div>';
 
   const tierLegend = opps.length
     ? '<div style="font-size:11px;color:#605e5c;margin-top:10px;line-height:1.6;">' +
@@ -2192,7 +2165,7 @@ function renderServiceAttach(idp, name) {
       leadBox +
       reconHtml +
       scorecard +
-      '<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">' + oppHtml + '</div>' +
+      emptyNote +
       tierLegend +
       foundHtml +
     '</div>';
