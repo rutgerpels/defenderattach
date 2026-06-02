@@ -1,0 +1,2476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Defender for Cloud — ACR Opportunity Dashboard</title>
+<script src="./vendor/xlsx.full.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f3f2f1; color: #201f1e; padding: 20px; line-height: 1.4;
+}
+h1 { font-size: 22px; color: #201f1e; }
+h2 { font-size: 16px; margin: 24px 0 12px 0; color: #323130; }
+h3 { font-size: 14px; margin: 16px 0 8px 0; color: #605e5c; font-weight: 600; }
+.subtle { color: #605e5c; font-size: 12px; }
+
+.header {
+  background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
+  color: white; padding: 20px 28px; border-radius: 8px; margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+}
+.header h1 { color: white; }
+.header .meta { color: #d4e8f7; font-size: 12px; margin-top: 6px; }
+.header .header-left { flex: 1; min-width: 280px; }
+
+.import-panel { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.import-btn {
+  background: white; color: #0078d4; border: none; padding: 8px 16px;
+  font-size: 13px; font-weight: 600; border-radius: 4px; cursor: pointer;
+  font-family: inherit; box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+.import-btn:hover { background: #faf9f8; }
+.import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.import-status { font-size: 11px; color: #d4e8f7; }
+.import-status.error { color: #ffd1d4; }
+.import-status.success { color: #c5f0c5; }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #d2d0ce; }
+.tab {
+  padding: 10px 18px; cursor: pointer; border: none; background: transparent;
+  font-size: 13px; font-weight: 600; color: #605e5c; border-bottom: 2px solid transparent;
+}
+.tab.active { color: #0078d4; border-bottom-color: #0078d4; }
+.tab:hover:not(.active) { color: #323130; background: #faf9f8; }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.card {
+  background: white; padding: 16px 18px; border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05); border-left: 4px solid #0078d4;
+}
+.card .label { color: #605e5c; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.card .val { font-size: 26px; font-weight: 600; margin-top: 4px; color: #201f1e; }
+.card .delta { font-size: 12px; margin-top: 2px; }
+.card.high { border-left-color: #d13438; }
+.card.medium { border-left-color: #ff8c00; }
+.card.low { border-left-color: #107c10; }
+.card.small { border-left-color: #8a8886; }
+
+.chart-box {
+  background: white; border-radius: 6px; padding: 16px 18px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05); margin-bottom: 16px;
+}
+.chart-box .title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.chart-box .sub { font-size: 11px; color: #605e5c; margin-bottom: 12px; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1100px) { .grid-2 { grid-template-columns: 1fr; } }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { background: #faf9f8; padding: 8px 10px; text-align: left; font-weight: 600; color: #323130;
+     border-bottom: 1px solid #d2d0ce; cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 1; }
+th:hover { background: #f3f2f1; }
+td { padding: 8px 10px; border-bottom: 1px solid #edebe9; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: #f3f2f1; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.pos { color: #107c10; }
+.neg { color: #d13438; }
+.zero { color: #8a8886; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.tag.high { background: #fde7e9; color: #a4262c; }
+.tag.medium { background: #fff4ce; color: #8e562e; }
+.tag.low { background: #dff6dd; color: #107c10; }
+.tag.small-tag { background: #f3f2f1; color: #605e5c; }
+
+.controls { display: flex; gap: 10px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+.controls input, .controls select {
+  padding: 6px 10px; font-size: 13px; border: 1px solid #c8c6c4; border-radius: 4px;
+  font-family: inherit;
+}
+.controls input:focus, .controls select:focus { outline: 2px solid #0078d4; border-color: #0078d4; }
+.controls label { font-size: 12px; color: #605e5c; }
+
+.svg-container { width: 100%; overflow: visible; }
+.svg-container svg { width: 100%; height: auto; display: block; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; margin-top: 8px; }
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+
+.tooltip {
+  position: absolute; background: #201f1e; color: white; padding: 6px 10px;
+  font-size: 11px; border-radius: 4px; pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  z-index: 100; max-width: 280px;
+}
+.tooltip.show { opacity: 0.97; }
+
+.scroll-table { max-height: 500px; overflow-y: auto; border: 1px solid #edebe9; border-radius: 4px; }
+
+.product-row { padding: 6px 0; border-bottom: 1px solid #edebe9; display: grid;
+  grid-template-columns: 200px 100px 100px 100px 1fr; align-items: center; gap: 12px; }
+.product-row:last-child { border-bottom: none; }
+.product-row .name { font-size: 12px; font-weight: 500; }
+
+.spark { display: inline-block; vertical-align: middle; }
+
+.note { background: #fffaf0; border-left: 3px solid #ff8c00; padding: 8px 12px;
+  border-radius: 4px; font-size: 12px; color: #5d3a00; margin: 12px 0; }
+
+.legend-strip { display: flex; gap: 16px; padding: 8px 12px; background: #faf9f8; border-radius: 4px;
+  margin-bottom: 12px; font-size: 12px; flex-wrap: wrap; }
+
+.import-help { font-size: 10px; color: #d4e8f7; max-width: 240px; text-align: right; line-height: 1.3; }
+
+/* shared app nav (matches web-app/css/app.css .app-menu rules) */
+#app-nav .app-menu {
+  display: flex; gap: 12px; align-items: center;
+  padding: 10px 18px 0;
+  background: #f3f2f1;
+  border-bottom: 1px solid #edebe9;
+}
+#app-nav .app-menu a {
+  color: #605e5c; text-decoration: none; font-weight: 700;
+  padding: 12px 14px 10px; border-bottom: 4px solid transparent;
+  font-size: 14px;
+}
+#app-nav .app-menu a.active {
+  color: #0078d4; border-bottom-color: #0078d4;
+}
+#app-nav .app-menu a:not(.active):hover {
+  color: #0078d4; border-bottom-color: #0078d4;
+}
+#app-nav .app-menu .spacer { flex: 1; }
+#app-nav .app-menu .source-pill {
+  font-size: 11px; color: #605e5c;
+  padding: 4px 10px; background: #ffffff;
+  border: 1px solid #edebe9; border-radius: 12px;
+  max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-weight: 400;
+}
+#app-nav .app-menu button.menu-action {
+  font-size: 12px; padding: 6px 12px;
+  background: #ffffff; border: 1px solid #edebe9;
+  border-radius: 4px; color: #0078d4;
+  cursor: pointer; font-weight: 600;
+}
+#app-nav .app-menu button.menu-action:hover { background: #faf9f8; }
+
+/* empty-state splash (visible until first import) */
+#splash {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(243, 242, 241, 0.96);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+#splash[hidden] { display: none; }
+#splash .splash-card {
+  background: #ffffff; border: 1px solid #edebe9;
+  border-radius: 8px; padding: 36px 44px; max-width: 520px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12); text-align: center;
+}
+#splash h2 { margin: 0 0 8px; color: #0078d4; font-size: 22px; }
+#splash p { margin: 0 0 20px; color: #605e5c; font-size: 14px; line-height: 1.5; }
+#splash-dropzone {
+  border: 2px dashed #c8c6c4; border-radius: 6px;
+  padding: 28px 20px; margin-bottom: 16px;
+  background: #faf9f8; transition: all 0.15s ease;
+  cursor: pointer;
+}
+#splash-dropzone:hover { border-color: #0078d4; background: #f3f9fd; }
+#splash-dropzone.dragover {
+  border-color: #0078d4; background: #deecf9;
+  border-style: solid;
+}
+#splash-dropzone .dz-icon { font-size: 32px; line-height: 1; margin-bottom: 8px; }
+#splash-dropzone .dz-main { color: #323130; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+#splash-dropzone .dz-sub { color: #605e5c; font-size: 12px; }
+#splash button {
+  background: #0078d4; color: #ffffff; border: 0;
+  padding: 12px 28px; border-radius: 4px; font-size: 15px;
+  font-weight: 600; cursor: pointer;
+}
+#splash button:hover { background: #106ebe; }
+#splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a8886; }
+#splash .splash-error { margin-top: 12px; font-size: 13px; color: #a4262c; min-height: 18px; }
+</style>
+</head>
+<body>
+<div id="splash">
+  <div class="splash-card">
+    <h2>Welcome — load your ACR export</h2>
+    <p>Pick an "ACR Details by … Month" Excel export to populate the dashboard. Your data stays on this machine — nothing is uploaded.</p>
+    <div id="splash-dropzone" role="button" tabindex="0" aria-label="Drop an Excel file here or click to browse">
+      <div class="dz-icon" aria-hidden="true">📥</div>
+      <div class="dz-main">Drop your Excel file here</div>
+      <div class="dz-sub">or click to browse</div>
+    </div>
+    <button type="button" id="splash-import-btn">📂 Choose Excel file</button>
+    <div class="splash-error" id="splash-error" role="alert"></div>
+    <div class="splash-hint">You can swap files later from the top menu.</div>
+  </div>
+</div>
+<div id="app-nav" data-active="acr"></div>
+
+<div class="header">
+  <div class="header-left">
+    <h1>Defender for Cloud — Customer Opportunity Dashboard</h1>
+    <div class="meta" id="header-meta">FY26 &nbsp;•&nbsp; <span id="meta-customers">–</span> customers &nbsp;•&nbsp; Monthly ACR basis &nbsp;•&nbsp; Last full month: <span id="meta-month">–</span></div>
+  </div>
+  <div class="import-panel">
+    <input type="file" id="file-input" accept=".xlsx,.xls" style="display:none">
+    <button class="import-btn" id="import-btn">📂 Import new Excel</button>
+    <button class="import-btn" id="export-pptx-btn" style="margin-left:8px">📑 Export to PowerPoint</button>
+    <div class="import-status" id="import-status">Pick an Excel export to load the dashboard. Your data stays on this machine.</div>
+    <div class="import-help">Upload a fresh "ACR Details by … Month" export to refresh the entire dashboard.</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="overview">Overview</button>
+  <button class="tab" data-tab="opportunity">Opportunity Matrix</button>
+  <button class="tab" data-tab="drilldown">Customer Drill-Down</button>
+  <button class="tab" data-tab="all-data">All Customers Table</button>
+</div>
+
+<!-- ============ OVERVIEW ============ -->
+<div class="panel active" id="panel-overview">
+  <div class="cards">
+    <div class="card high"><div class="label">High Opportunity</div><div class="val" id="kpi-high">–</div><div class="delta">customers to prioritize</div></div>
+    <div class="card medium"><div class="label">Medium Opportunity</div><div class="val" id="kpi-med">–</div><div class="delta">undersold accounts</div></div>
+    <div class="card low"><div class="label">Healthy</div><div class="val" id="kpi-low">–</div><div class="delta">DfC growing or stable</div></div>
+    <div class="card small"><div class="label">Too Small</div><div class="val" id="kpi-small">–</div><div class="delta">&lt; $1,500/month total ACR</div></div>
+    <div class="card"><div class="label">DfC Monthly ACR</div><div class="val" id="kpi-dfc-acr">–</div><div class="delta" id="kpi-dfc-mom">–</div></div>
+    <div class="card"><div class="label">DfC % of Portfolio</div><div class="val" id="kpi-dfc-pct">–</div><div class="delta">share of total ACR</div></div>
+  </div>
+
+  <div class="note">
+    <strong>How to read this:</strong> "Opportunity" flags customers where Defender for Cloud is flat or shrinking while their other Azure workloads grow — a signal that DfC is underused relative to their footprint. To refresh with the latest data, click <em>Import new Excel</em> and pick your latest export.
+  </div>
+
+  <div class="grid-2">
+    <div class="chart-box">
+      <div class="title">Defender for Cloud — ACR across all customers</div>
+      <div class="sub">ACR trend (weekly where available)</div>
+      <div class="svg-container" id="chart-dfc-trend"></div>
+    </div>
+    <div class="chart-box">
+      <div class="title">Product mix — share of ACR by service</div>
+      <div class="sub">ACR split across tracked workloads (weekly where available)</div>
+      <div class="svg-container" id="chart-product-mix"></div>
+      <div class="legend" id="legend-product-mix"></div>
+    </div>
+  </div>
+
+  <div class="chart-box">
+    <div class="title">Top 15 customers by Defender for Cloud monthly ACR</div>
+    <div class="sub">Click a bar to drill down</div>
+    <div class="svg-container" id="chart-top-dfc"></div>
+  </div>
+</div>
+
+<!-- ============ OPPORTUNITY MATRIX ============ -->
+<div class="panel" id="panel-opportunity">
+  <div class="legend-strip">
+    <span><span class="tag high">High</span> Other Azure growing, DfC flat or declining (or zero spend)</span>
+    <span><span class="tag medium">Medium</span> DfC underpenetrated or growing slower than rest</span>
+    <span><span class="tag low">Low</span> DfC tracking with rest of portfolio</span>
+    <span><span class="tag small-tag">Too small</span> Total ACR under $1,500/month</span>
+  </div>
+
+  <div class="chart-box">
+    <div class="title">Opportunity map - growth gap vs. Defender penetration</div>
+    <div class="sub">X-axis shows the 3-month monthly ACR growth gap: Other Azure growth minus Defender for Cloud growth. Y-axis shows current Defender share of total ACR. Bottom-right is the clearest whitespace: Azure footprint growing while Defender penetration is low. Bubble size = total monthly ACR. Click any bubble to drill down.</div>
+    <div class="controls">
+      <label>Filter:</label>
+      <select id="quadrant-filter">
+        <option value="all">All customers</option>
+        <option value="High">High opportunity only</option>
+        <option value="Medium">Medium opportunity only</option>
+        <option value="HighMed" selected>High + Medium</option>
+      </select>
+    </div>
+    <div class="svg-container" id="chart-quadrant"></div>
+    <div class="subtle" id="chart-quadrant-foot" style="margin-top:6px;"></div>
+  </div>
+
+  <div class="chart-box">
+    <div class="title">High & Medium opportunity customers</div>
+    <div class="sub">Sorted by total monthly ACR (largest first). Click any row to drill down.</div>
+    <div class="scroll-table">
+      <table id="opp-table">
+        <thead>
+          <tr>
+            <th data-sort="customer">Customer</th>
+            <th data-sort="opportunity">Priority</th>
+            <th class="num" data-sort="total_current">Monthly Total ACR</th>
+            <th class="num" data-sort="dfc_current">Monthly DfC ACR</th>
+            <th class="num" data-sort="dfc_ratio">DfC %</th>
+            <th class="num" data-sort="dfc_3m">DfC 3M</th>
+            <th class="num" data-sort="other_3m">Other 3M</th>
+            <th>Signal</th>
+          </tr>
+        </thead>
+        <tbody id="opp-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============ DRILL-DOWN ============ -->
+<div class="panel" id="panel-drilldown">
+  <div class="controls">
+    <label>Customer:</label>
+    <select id="customer-select" style="min-width: 320px;"></select>
+    <span id="cust-priority"></span>
+  </div>
+
+  <div class="cards" id="cust-cards"></div>
+
+  <div class="note" id="cust-signal"></div>
+
+  <div class="grid-2">
+    <div class="chart-box">
+      <div class="title">Defender for Cloud vs. other Azure workloads</div>
+      <div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>
+      <div class="svg-container" id="chart-cust-dfc"></div>
+      <div class="legend">
+        <span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:#605e5c"></span>Other Azure (Total - DfC)</span>
+      </div>
+    </div>
+    <div class="chart-box">
+      <div class="title">DfC penetration over time</div>
+      <div class="sub">DfC as % of total ACR for this customer</div>
+      <div class="svg-container" id="chart-cust-pct"></div>
+    </div>
+  </div>
+
+  <div class="chart-box">
+    <div class="title">Product breakdown</div>
+    <div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>
+    <div id="cust-products"></div>
+  </div>
+</div>
+
+<!-- ============ ALL CUSTOMERS TABLE ============ -->
+<div class="panel" id="panel-all-data">
+  <div class="controls">
+    <input type="text" id="search-input" placeholder="Search customer..." style="min-width: 240px;">
+    <select id="filter-priority">
+      <option value="all">All priorities</option>
+      <option value="High">High only</option>
+      <option value="Medium">Medium only</option>
+      <option value="Low">Low only</option>
+      <option value="Too small">Too small only</option>
+    </select>
+    <span class="subtle" id="row-count"></span>
+  </div>
+  <div class="chart-box">
+    <div class="scroll-table">
+      <table id="all-table">
+        <thead>
+          <tr>
+            <th data-sort="customer">Customer</th>
+            <th data-sort="opportunity">Priority</th>
+            <th class="num" data-sort="total_current">Monthly Total ACR</th>
+            <th class="num" data-sort="dfc_current">Monthly DfC ACR</th>
+            <th class="num" data-sort="dfc_ratio">DfC %</th>
+            <th class="num" data-sort="dfc_mom">DfC MoM</th>
+            <th class="num" data-sort="other_mom">Other MoM</th>
+            <th class="num" data-sort="dfc_3m">DfC 3M</th>
+            <th class="num" data-sort="other_3m">Other 3M</th>
+            <th>Signal</th>
+          </tr>
+        </thead>
+        <tbody id="all-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+let DATA = {
+  months: [], month_labels: [], partial_month_idx: -1,
+  last_full_month: "", prior_month: "",
+  customers: [], products: [], opportunity: [],
+  generated_at: "", source_name: ""
+};
+
+// ============ Helpers ============
+const fmt = {
+  money: v => v == null ? '–' : '$' + v.toLocaleString('en-US', {maximumFractionDigits: 0}),
+  money2: v => v == null ? '–' : '$' + v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}),
+  pct: v => v == null || isNaN(v) ? '–' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%',
+  pctClass: v => v == null || isNaN(v) ? 'zero' : (v > 0.005 ? 'pos' : (v < -0.005 ? 'neg' : 'zero')),
+  pctRaw: v => v == null || isNaN(v) ? '–' : v.toFixed(1) + '%',
+};
+
+function tagFor(opp) {
+  const cls = opp === 'High' ? 'high' : opp === 'Medium' ? 'medium' : opp === 'Low' ? 'low' : 'small-tag';
+  return `<span class="tag ${cls}">${opp}</span>`;
+}
+
+const tooltipEl = document.getElementById('tooltip');
+function showTooltip(html, x, y) {
+  tooltipEl.innerHTML = html;
+  tooltipEl.style.left = (x + 12) + 'px';
+  tooltipEl.style.top = (y + 12) + 'px';
+  tooltipEl.classList.add('show');
+}
+function hideTooltip() { tooltipEl.classList.remove('show'); }
+
+// ============ Tab switching ============
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ============ Excel import & recompute ============
+document.getElementById('import-btn').addEventListener('click', () => {
+  if (typeof XLSX === 'undefined') {
+    setStatus('Excel library failed to load (no internet?). Try a different network.', 'error');
+    return;
+  }
+  document.getElementById('file-input').click();
+});
+
+document.getElementById('file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  setStatus('Reading "' + file.name + '"…');
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type: 'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {header: 1, defval: null, raw: true});
+    const newData = AcrModel.build(rows, file.name);
+    if (!newData) { setStatus('Could not parse — check the sheet structure.', 'error'); return; }
+    DATA = newData;
+    const splash = document.getElementById('splash');
+    if (splash) splash.hidden = true;
+    renderAll();
+    try {
+      const json = JSON.stringify(DATA);
+      // 4.5 MB ceiling — leaves headroom under the 5 MB sessionStorage quota.
+      if (json.length < 4500000) sessionStorage.setItem(ACR_CACHE_KEY, json);
+    } catch (cacheErr) { console.warn('Could not cache data:', cacheErr); }
+    if (window.AppNav) AppNav.setSource(file.name);
+    setStatus('✓ Loaded "' + file.name + '" — ' + DATA.customers.length + ' customers, ' + DATA.months.length + ' months', 'success');
+  } catch (err) {
+    console.error(err);
+    setStatus('Import failed: ' + err.message, 'error');
+  }
+});
+
+function setStatus(msg, kind) {
+  const el = document.getElementById('import-status');
+  el.textContent = msg;
+  el.className = 'import-status' + (kind ? ' ' + kind : '');
+}
+
+// Parser: takes 2D row array (from XLSX.utils.sheet_to_json header:1)
+// Returns the same shape as the embedded DATA object.
+function parseAndScore(rows) {
+  if (!rows || rows.length < 3) return null;
+  const row1 = rows[0];
+  const row2 = rows[1];
+
+  // Find month columns: row1 has month label in column index where row2 starts a 5-metric block
+  const months = [];
+  const monthStarts = [];
+  for (let i = 0; i < row1.length; i++) {
+    const v = row1[i];
+    if (v && v !== 'FiscalMonth' && v !== 'Total') {
+      // Detect month-ish: e.g. "FY26-Jul" or any value that's not blank and not "Total"
+      months.push(String(v));
+      monthStarts.push(i);
+    }
+  }
+  if (months.length === 0) return null;
+
+  const DAILY_METRIC_OFFSET = 2; // row2: $ ACR, $ ACR MoM, $ ACR, ...
+
+  // Iterate data rows starting at index 2 (row3 in Excel)
+  // Build customer × product daily series
+  const dailyMap = {}; // key: customer||product -> array of values per month
+  let currentCustomer = null;
+  for (let r = 2; r < rows.length; r++) {
+    const row = rows[r] || [];
+    let customerCell = row[0];
+    const product = row[1];
+    if (customerCell != null && customerCell !== '') {
+      const cs = String(customerCell);
+      if (cs.startsWith('Applied filters')) { currentCustomer = null; continue; }
+      if (cs === 'Total') { currentCustomer = null; continue; }
+      currentCustomer = cs;
+    }
+    if (!currentCustomer || !product) continue;
+    const key = currentCustomer + '||' + String(product);
+    if (!dailyMap[key]) dailyMap[key] = months.map(_ => 0);
+    for (let mi = 0; mi < months.length; mi++) {
+      const cell = row[monthStarts[mi] + DAILY_METRIC_OFFSET];
+      const num = (typeof cell === 'number') ? cell : (cell == null ? 0 : (parseFloat(cell) || 0));
+      dailyMap[key][mi] = num;
+    }
+  }
+
+  // Build customer & product lists
+  const customers = [...new Set(Object.keys(dailyMap).map(k => k.split('||')[0]))].sort();
+  const productsSet = new Set(Object.keys(dailyMap).map(k => k.split('||')[1]));
+  productsSet.delete('Total');
+  const products = [...productsSet].sort();
+
+  function get(customer, product) {
+    return dailyMap[customer + '||' + product] || months.map(_ => 0);
+  }
+
+  const APR_IDX = months.length - 1;       // last full month
+  const MAR_IDX = Math.max(0, months.length - 2);
+  const FEB_IDX = Math.max(0, months.length - 3);
+
+  function pctChange(a, b) {
+    if (a == null || a === 0) return null;
+    return (b - a) / a;
+  }
+
+  const opportunity = [];
+  const customerData = {};
+  for (const customer of customers) {
+    const dfc = get(customer, 'Defender for Cloud');
+    const total = get(customer, 'Total');
+    const other = total.map((t, i) => t - dfc[i]);
+
+    const dfc_current = dfc[APR_IDX];
+    const total_current = total[APR_IDX];
+    const other_current = other[APR_IDX];
+
+    const dfc_mom = pctChange(dfc[MAR_IDX], dfc[APR_IDX]);
+    const other_mom = pctChange(other[MAR_IDX], other[APR_IDX]);
+    const total_mom = pctChange(total[MAR_IDX], total[APR_IDX]);
+    const dfc_3m = pctChange(dfc[FEB_IDX], dfc[APR_IDX]);
+    const other_3m = pctChange(other[FEB_IDX], other[APR_IDX]);
+    const total_3m = pctChange(total[FEB_IDX], total[APR_IDX]);
+
+    const dfc_ratio = total_current > 0 ? (dfc_current / total_current) : 0;
+
+    // Per-product breakdown
+    const breakdown = [];
+    for (const p of products) {
+      const ps = get(customer, p);
+      const cur = ps[APR_IDX];
+      const maxV = Math.max(...ps);
+      if (cur < 1 && maxV < 1) continue;
+      breakdown.push({
+        product: p, current: Math.round(cur*100)/100,
+        mom: pctChange(ps[MAR_IDX], ps[APR_IDX]),
+        three_m: pctChange(ps[FEB_IDX], ps[APR_IDX]),
+        series: ps.map(v => Math.round(v*100)/100),
+      });
+    }
+    breakdown.sort((a, b) => b.current - a.current);
+
+    let opp = 'Low';
+    const notes = [];
+    if (total_current < 50) {
+      opp = 'Too small';
+      notes.push('Customer ACR under $1,500/month - sales priority low');
+    } else if (dfc_current < 0.5 && total_current > 100) {
+      opp = 'High'; notes.push('No Defender for Cloud spend at all');
+    } else if (other_3m != null && other_3m > 0.05) {
+      if (dfc_3m == null || dfc_3m < -0.05) {
+        opp = 'High';
+        notes.push('Other Azure +' + (other_3m*100).toFixed(0) + '% over 3 months while DfC declining');
+      } else if (dfc_3m < 0.02 && dfc_ratio < 0.02) {
+        opp = 'High';
+        notes.push('Other Azure growing, DfC flat AND under 2% of total ACR');
+      } else if (dfc_ratio < 0.015) {
+        opp = 'Medium';
+        notes.push('DfC penetration only ' + (dfc_ratio*100).toFixed(1) + '% — undersold');
+      } else if (dfc_3m < other_3m - 0.05) {
+        opp = 'Medium';
+        notes.push('DfC growing slower than rest of Azure');
+      }
+    } else if (dfc_ratio < 0.005 && total_current > 200) {
+      opp = 'Medium'; notes.push('Very low DfC penetration');
+    }
+
+    if (dfc_3m != null && dfc_3m > 0.10 && (other_3m == null || dfc_3m > other_3m)) {
+      if (opp === 'Low' || opp === 'Too small') notes.push('DfC growing healthily +' + (dfc_3m*100).toFixed(0) + '% over 3 months');
+    }
+
+    opportunity.push({
+      customer, opportunity: opp, notes: notes.length ? notes.join('; ') : '—',
+      dfc_current: Math.round(dfc_current*100)/100,
+      other_current: Math.round(other_current*100)/100,
+      total_current: Math.round(total_current*100)/100,
+      dfc_ratio: Math.round(dfc_ratio*10000)/100,
+      dfc_mom, other_mom, total_mom, dfc_3m, other_3m, total_3m,
+    });
+
+    customerData[customer] = {
+      dfc_series: dfc.map(v => Math.round(v*100)/100),
+      other_series: other.map(v => Math.round(v*100)/100),
+      total_series: total.map(v => Math.round(v*100)/100),
+      products: breakdown,
+    };
+  }
+
+  // Aggregate product totals
+  const productMonthly = {};
+  const allProducts = [...products, 'Total'];
+  for (const p of allProducts) {
+    const monthly = months.map(_ => 0);
+    for (const c of customers) {
+      const s = get(c, p);
+      for (let i = 0; i < months.length; i++) monthly[i] += s[i];
+    }
+    productMonthly[p] = monthly.map(v => Math.round(v*100)/100);
+  }
+
+  const counts = {
+    high: opportunity.filter(r => r.opportunity === 'High').length,
+    medium: opportunity.filter(r => r.opportunity === 'Medium').length,
+    low: opportunity.filter(r => r.opportunity === 'Low').length,
+    too_small: opportunity.filter(r => r.opportunity === 'Too small').length,
+    total: customers.length,
+  };
+
+  // Sort opportunity table for display: priority then total ACR desc
+  const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+  opportunity.sort((a, b) => order[a.opportunity] - order[b.opportunity] || b.total_current - a.total_current);
+
+  return {
+    months,
+    month_labels: months.map(m => m.replace(/^FY\d+-/, '')),
+    partial_month_idx: -1,
+    last_full_month: months[months.length - 1],
+    prior_month: months[Math.max(0, months.length - 2)],
+    customers, products, opportunity,
+    customer_data: customerData,
+    product_monthly: productMonthly,
+    dfc_total_monthly: productMonthly['Defender for Cloud'] || months.map(_ => 0),
+    counts,
+  };
+}
+
+// ============ Chart utilities ============
+function donutChart(containerId, items, opts = {}) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const W = opts.width || 600, H = opts.height || 260;
+  const cx = W / 2, cy = H / 2;
+  const rOuter = Math.min(W, H) / 2 - 14, rInner = rOuter * 0.6;
+  const total = items.reduce((a, d) => a + (Number(d.value) || 0), 0);
+  if (!(total > 0)) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#a19f9d;font-size:12px;">No service ACR to display</div>';
+    return;
+  }
+  const totalLbl = total >= 1e6 ? '$' + (total / 1e6).toFixed(2) + 'M' : total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  if (items.length === 1) {
+    const d = items[0];
+    svg += `<circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="${d.color}" data-label="${escapeHtml(d.label)}" data-val="${(Number(d.value) || 0).toFixed(2)}" data-pct="100.0" style="cursor:pointer"/>`;
+    svg += `<circle cx="${cx}" cy="${cy}" r="${rInner}" fill="#ffffff"/>`;
+  } else {
+    let a0 = -Math.PI / 2;
+    items.forEach(d => {
+      const frac = (Number(d.value) || 0) / total;
+      const a1 = a0 + frac * Math.PI * 2;
+      const large = (a1 - a0) > Math.PI ? 1 : 0;
+      const xo0 = cx + rOuter * Math.cos(a0), yo0 = cy + rOuter * Math.sin(a0);
+      const xo1 = cx + rOuter * Math.cos(a1), yo1 = cy + rOuter * Math.sin(a1);
+      const xi1 = cx + rInner * Math.cos(a1), yi1 = cy + rInner * Math.sin(a1);
+      const xi0 = cx + rInner * Math.cos(a0), yi0 = cy + rInner * Math.sin(a0);
+      const dPath = `M${xo0.toFixed(2)},${yo0.toFixed(2)} A${rOuter},${rOuter} 0 ${large} 1 ${xo1.toFixed(2)},${yo1.toFixed(2)} L${xi1.toFixed(2)},${yi1.toFixed(2)} A${rInner},${rInner} 0 ${large} 0 ${xi0.toFixed(2)},${yi0.toFixed(2)} Z`;
+      svg += `<path d="${dPath}" fill="${d.color}" stroke="#ffffff" stroke-width="1.5" data-label="${escapeHtml(d.label)}" data-val="${(Number(d.value) || 0).toFixed(2)}" data-pct="${(frac * 100).toFixed(1)}" style="cursor:pointer"/>`;
+      a0 = a1;
+    });
+  }
+  svg += `<text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="15" font-weight="700" fill="#323130">${totalLbl}</text>`;
+  svg += `<text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10" fill="#605e5c">avg monthly ACR</text>`;
+  svg += `</svg>`;
+  el.innerHTML = svg;
+  el.querySelectorAll('[data-label]').forEach(seg => {
+    seg.addEventListener('mousemove', e => {
+      const label = seg.getAttribute('data-label');
+      const val = parseFloat(seg.getAttribute('data-val'));
+      const pct = seg.getAttribute('data-pct');
+      showTooltip(`<b>${escapeHtml(label)}</b><br/>$${val.toLocaleString('en-US', {maximumFractionDigits: 0})} avg/mo · ${pct}%`, e.pageX, e.pageY);
+    });
+    seg.addEventListener('mouseleave', hideTooltip);
+    // Drill-down: each slice opens its underlying services. Keyboard-accessible.
+    const lbl = seg.getAttribute('data-label');
+    seg.setAttribute('tabindex', '0');
+    seg.setAttribute('role', 'button');
+    seg.setAttribute('aria-label', 'Show services in ' + lbl);
+    seg.addEventListener('click', () => { if (typeof openCategoryBreakdown === 'function') openCategoryBreakdown(seg.getAttribute('data-label')); });
+    seg.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); if (typeof openCategoryBreakdown === 'function') openCategoryBreakdown(seg.getAttribute('data-label')); } });
+  });
+}
+
+function lineChart(containerId, series, opts = {}) {
+  const W = opts.width || 600, H = opts.height || 260;
+  const M = {top: 20, right: 16, bottom: 36, left: 56};
+  const labels = opts.labels || DATA.month_labels;
+  const indexed = opts.indexed || false;
+
+  let allVals = [];
+  let processed = series.map(s => {
+    let vals = s.values.slice();
+    if (indexed) {
+      const base = vals.find(v => v > 0) || 1;
+      vals = vals.map(v => v ? (v / base) * 100 : null);
+    }
+    allVals = allVals.concat(vals.filter(v => v != null));
+    return {...s, vals};
+  });
+
+  let yMin = 0, yMax = Math.max(...allVals, 1);
+  if (indexed) yMin = Math.min(...allVals, 100);
+  yMax = yMax * 1.08;
+  if (indexed && yMin > 80) yMin = Math.max(0, yMin * 0.95);
+
+  const innerW = W - M.left - M.right, innerH = H - M.top - M.bottom;
+  const xStep = labels.length > 1 ? innerW / (labels.length - 1) : innerW;
+  const x = i => M.left + i * xStep;
+  const y = v => v == null ? null : M.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  const yTicks = 4;
+  for (let t = 0; t <= yTicks; t++) {
+    const yv = yMin + (yMax - yMin) * t / yTicks;
+    const yp = y(yv);
+    svg += `<line x1="${M.left}" y1="${yp}" x2="${W - M.right}" y2="${yp}" stroke="#edebe9" stroke-width="1"/>`;
+    const lbl = opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%' : (indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0)));
+    svg += `<text x="${M.left - 6}" y="${yp + 3}" text-anchor="end" font-size="10" fill="#605e5c">${lbl}</text>`;
+  }
+  const partialIdx = (opts.partialIdx != null) ? opts.partialIdx : DATA.partial_month_idx;
+  labels.forEach((l, i) => {
+    const isPartial = i === partialIdx;
+    svg += `<text x="${x(i)}" y="${H - M.bottom + 14}" text-anchor="middle" font-size="10" fill="${isPartial ? '#a4262c' : '#605e5c'}">${l}${isPartial ? '*' : ''}</text>`;
+  });
+
+  processed.forEach(s => {
+    const color = s.color || '#0078d4';
+    let pathD = '';
+    s.vals.forEach((v, i) => {
+      const yp = y(v); if (yp == null) return;
+      pathD += (pathD ? 'L' : 'M') + x(i) + ',' + yp;
+    });
+    if (pathD) svg += `<path d="${pathD}" fill="none" stroke="${color}" stroke-width="2" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''}/>`;
+    s.vals.forEach((v, i) => {
+      const yp = y(v); if (yp == null) return;
+      svg += `<circle cx="${x(i)}" cy="${yp}" r="3" fill="${color}" data-month="${labels[i]}" data-label="${escapeHtml(s.label)}" data-val="${v != null ? v.toFixed(2) : '–'}"/>`;
+    });
+  });
+  svg += `</svg>`;
+  document.getElementById(containerId).innerHTML = svg;
+
+  document.querySelectorAll(`#${containerId} circle`).forEach(c => {
+    c.addEventListener('mousemove', e => {
+      const month = c.getAttribute('data-month');
+      const label = c.getAttribute('data-label');
+      const val = c.getAttribute('data-val');
+      const display = opts.format === 'percent' ? parseFloat(val).toFixed(2) + '%' : (indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2}));
+      showTooltip(`<b>${escapeHtml(label)}</b><br/>${month}: ${display}`, e.pageX, e.pageY);
+    });
+    c.addEventListener('mouseleave', hideTooltip);
+  });
+}
+
+function barChartHorizontal(containerId, items) {
+  const W = 760;
+  const rowH = 24;
+  const M = {top: 12, right: 120, bottom: 8, left: 230};
+  const H = M.top + M.bottom + items.length * rowH;
+  const innerW = W - M.left - M.right;
+  const maxV = Math.max(...items.map(d => d.value || 0), 1);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  items.forEach((d, i) => {
+    const yp = M.top + i * rowH;
+    const w = (d.value / maxV) * innerW;
+    const color = d.color || '#0078d4';
+    svg += `<text x="${M.left - 8}" y="${yp + rowH/2 + 4}" text-anchor="end" font-size="12" fill="#323130">${escapeHtml(d.label.length > 28 ? d.label.slice(0, 28) + '…' : d.label)}</text>`;
+    svg += `<rect x="${M.left}" y="${yp + 4}" width="${w}" height="${rowH - 8}" fill="${color}" data-customer="${escapeHtml(d.label)}" data-val="${d.value}" style="cursor:pointer"/>`;
+    svg += `<text x="${M.left + w + 8}" y="${yp + rowH/2 + 4}" font-size="11" fill="#605e5c">$${d.value.toLocaleString('en-US', {maximumFractionDigits: 0})}</text>`;
+  });
+  svg += `</svg>`;
+  document.getElementById(containerId).innerHTML = svg;
+
+  document.querySelectorAll(`#${containerId} rect`).forEach(r => {
+    r.addEventListener('mousemove', e => {
+      showTooltip(`<b>${escapeHtml(r.getAttribute('data-customer'))}</b><br/>$${parseFloat(r.getAttribute('data-val')).toLocaleString('en-US', {maximumFractionDigits: 2})}`, e.pageX, e.pageY);
+    });
+    r.addEventListener('mouseleave', hideTooltip);
+    r.addEventListener('click', () => selectCustomer(r.getAttribute('data-customer')));
+  });
+}
+
+function quadrantChart(containerId, allPoints) {
+  const W = 900, H = 460;
+  const M = {top: 30, right: 30, bottom: 50, left: 60};
+  const innerW = W - M.left - M.right, innerH = H - M.top - M.bottom;
+
+  // Filter out noise floor: customers with DfC base under $30/month three months ago
+  // (their percentages are unreliable — going from $0.10 to $1.10 is "+1000%" but trivially small)
+  const NOISE_FLOOR = 1.0;
+  const filtered = allPoints.filter(p =>
+    p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y)
+  );
+  const plotPoints = filtered.filter(p => (p.dfc_base || 0) >= NOISE_FLOOR);
+  const noiseCount = filtered.length - plotPoints.length;
+
+  // Fixed view window — clamp visualization to a meaningful range
+  const X_LIMIT = 0.6;   // ±60% on the x-axis (other Azure growth)
+  const Y_LIMIT = 1.0;   // ±100% on the y-axis (DfC growth)
+  const xMin = -X_LIMIT, xMax = X_LIMIT;
+  const yMin = -Y_LIMIT, yMax = Y_LIMIT;
+
+  const xScale = v => M.left + ((v - xMin) / (xMax - xMin)) * innerW;
+  const yScale = v => M.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
+
+  const sizes = plotPoints.map(p => p.size || 1);
+  const sMax = Math.max(...sizes, 1);
+  const sScale = s => 4 + Math.sqrt(s / sMax) * 22;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  const x0 = xScale(0), y0 = yScale(0);
+  svg += `<rect x="${x0}" y="${y0}" width="${W - M.right - x0}" height="${H - M.bottom - y0}" fill="#fde7e9" opacity="0.4"/>`;
+  svg += `<rect x="${x0}" y="${M.top}" width="${W - M.right - x0}" height="${y0 - M.top}" fill="#dff6dd" opacity="0.4"/>`;
+  svg += `<rect x="${M.left}" y="${M.top}" width="${x0 - M.left}" height="${y0 - M.top}" fill="#fff4ce" opacity="0.4"/>`;
+  svg += `<rect x="${M.left}" y="${y0}" width="${x0 - M.left}" height="${H - M.bottom - y0}" fill="#f3f2f1" opacity="0.6"/>`;
+
+  // Gridlines & tick labels at clean intervals
+  const xTicks = [-0.6, -0.3, 0, 0.3, 0.6];
+  const yTicks = [-1.0, -0.5, 0, 0.5, 1.0];
+  xTicks.forEach(xv => {
+    svg += `<line x1="${xScale(xv)}" y1="${M.top}" x2="${xScale(xv)}" y2="${H - M.bottom}" stroke="#edebe9"/>`;
+    svg += `<text x="${xScale(xv)}" y="${H - M.bottom + 14}" text-anchor="middle" font-size="10" fill="#605e5c">${(xv*100).toFixed(0)}%</text>`;
+  });
+  yTicks.forEach(yv => {
+    svg += `<line x1="${M.left}" y1="${yScale(yv)}" x2="${W - M.right}" y2="${yScale(yv)}" stroke="#edebe9"/>`;
+    svg += `<text x="${M.left - 6}" y="${yScale(yv) + 3}" text-anchor="end" font-size="10" fill="#605e5c">${(yv*100).toFixed(0)}%</text>`;
+  });
+
+  svg += `<line x1="${x0}" y1="${M.top}" x2="${x0}" y2="${H - M.bottom}" stroke="#a19f9d" stroke-width="1.5"/>`;
+  svg += `<line x1="${M.left}" y1="${y0}" x2="${W - M.right}" y2="${y0}" stroke="#a19f9d" stroke-width="1.5"/>`;
+  svg += `<text x="${M.left + innerW/2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#323130" font-weight="600">Growth gap → growing</text>`;
+  svg += `<text x="18" y="${M.top + innerH/2}" text-anchor="middle" font-size="11" fill="#323130" font-weight="600" transform="rotate(-90 18 ${M.top + innerH/2})">DfC penetration → growing</text>`;
+  // Zone labels — pinned to corners so bubbles never sit on top of them
+  svg += `<text x="${W - M.right - 8}" y="${H - M.bottom - 8}" text-anchor="end" font-size="11" fill="#a4262c" font-weight="700" opacity="0.85">⚠ HIGH OPPORTUNITY</text>`;
+  svg += `<text x="${W - M.right - 8}" y="${M.top + 14}" text-anchor="end" font-size="11" fill="#107c10" font-weight="700" opacity="0.85">✓ Healthy alignment</text>`;
+  svg += `<text x="${M.left + 8}" y="${M.top + 14}" text-anchor="start" font-size="11" fill="#8e562e" font-weight="700" opacity="0.7">DfC outpacing rest</text>`;
+  svg += `<text x="${M.left + 8}" y="${H - M.bottom - 8}" text-anchor="start" font-size="11" fill="#605e5c" font-weight="700" opacity="0.7">Both shrinking</text>`;
+
+  // Axis-edge note for clipped customers
+  let clippedHigh = 0, clippedLow = 0;
+  plotPoints.forEach(p => {
+    if (p.y > Y_LIMIT) clippedHigh++;
+    if (p.y < -Y_LIMIT) clippedLow++;
+  });
+
+  const colorMap = {High: '#d13438', Medium: '#ff8c00', Low: '#107c10', 'Too small': '#a19f9d'};
+  const opacityMap = {High: 0.78, Medium: 0.7, Low: 0.32, 'Too small': 0.25};
+  // Sort so high-priority bubbles render on top of low-priority ones
+  const oppRank = {High: 3, Medium: 2, Low: 1, 'Too small': 0};
+  const orderedPoints = plotPoints.slice().sort((a, b) => (oppRank[a.opportunity] || 0) - (oppRank[b.opportunity] || 0));
+
+  // Pick which bubbles get a name label: only High/Medium customers in or near the high-opp quadrant
+  // (right half of the chart), top 10 by total monthly ACR. Reduces clutter; surfaces what matters.
+  const labelCandidates = orderedPoints
+    .filter(p => (p.opportunity === 'High' || p.opportunity === 'Medium') && p.x >= -0.05)
+    .sort((a, b) => (b.size || 0) - (a.size || 0))
+    .slice(0, 10);
+  const labeledSet = new Set(labelCandidates.map(p => p.label));
+
+  const drawnLabels = []; // for collision avoidance
+
+  orderedPoints.forEach(p => {
+    // Clamp to viewport — out-of-range points sit at the edge with a marker
+    let visualX = Math.max(xMin, Math.min(xMax, p.x));
+    let visualY = Math.max(yMin, Math.min(yMax, p.y));
+    const isClippedY = p.y > yMax || p.y < yMin;
+    const isClippedX = p.x > xMax || p.x < xMin;
+    let cx = xScale(visualX), cy = yScale(visualY);
+    const r = sScale(p.size || 1);
+    const fill = colorMap[p.opportunity] || '#0078d4';
+    const op = opacityMap[p.opportunity] != null ? opacityMap[p.opportunity] : 0.65;
+    const stroke = (isClippedY || isClippedX) ? '#201f1e' : 'white';
+    const strokeWidth = (isClippedY || isClippedX) ? 2 : 1.5;
+    svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" opacity="${op}" stroke="${stroke}" stroke-width="${strokeWidth}" data-customer="${escapeHtml(p.label)}" data-x="${p.x}" data-y="${p.y}" data-size="${p.size}" data-opp="${p.opportunity}" data-clipped="${isClippedY || isClippedX ? '1' : '0'}" style="cursor:pointer"/>`;
+    // arrow indicator for clipped points
+    if (isClippedY && p.y > yMax) {
+      svg += `<text x="${cx}" y="${cy - r - 2}" text-anchor="middle" font-size="11" fill="#201f1e" font-weight="700">▲</text>`;
+    } else if (isClippedY && p.y < yMin) {
+      svg += `<text x="${cx}" y="${cy + r + 10}" text-anchor="middle" font-size="11" fill="#201f1e" font-weight="700">▼</text>`;
+    }
+
+    // Direct customer label for the top N high/medium opportunity bubbles
+    if (labeledSet.has(p.label)) {
+      const truncated = p.label.length > 22 ? p.label.slice(0, 22) + '…' : p.label;
+      // Try to place above-right of bubble; if that collides, try below-right; then above-left.
+      const anchors = [
+        {x: cx + r + 4, y: cy - r - 2, align: 'start'},
+        {x: cx + r + 4, y: cy + r + 10, align: 'start'},
+        {x: cx - r - 4, y: cy - r - 2, align: 'end'},
+        {x: cx - r - 4, y: cy + r + 10, align: 'end'},
+      ];
+      const charW = 5.5;
+      const labelW = truncated.length * charW;
+      const labelH = 12;
+      let chosen = null;
+      for (const a of anchors) {
+        const lx = a.align === 'end' ? a.x - labelW : a.x;
+        const ly = a.y - labelH;
+        const collides = drawnLabels.some(d =>
+          lx < d.x + d.w && lx + labelW > d.x && ly < d.y + d.h && ly + labelH > d.y
+        );
+        if (!collides && lx >= M.left && lx + labelW <= W - M.right && ly >= M.top && ly + labelH <= H - M.bottom) {
+          chosen = a; drawnLabels.push({x: lx, y: ly, w: labelW, h: labelH}); break;
+        }
+      }
+      if (chosen) {
+        svg += `<text x="${chosen.x}" y="${chosen.y}" text-anchor="${chosen.align}" font-size="10" fill="#201f1e" font-weight="600" style="paint-order:stroke; stroke:#ffffff; stroke-width:3px; stroke-linejoin:round;">${escapeHtml(truncated)}</text>`;
+      }
+    }
+  });
+
+  // Footnote
+  let foot = `Axis range fixed to ±60% (other Azure) × ±100% (DfC) for readability.`;
+  if (noiseCount > 0) foot += ` ${noiseCount} customer${noiseCount === 1 ? '' : 's'} hidden (DfC base &lt; $30/month, % unreliable).`;
+  if (clippedHigh > 0) foot += ` ${clippedHigh} ▲ at top edge.`;
+  if (clippedLow > 0) foot += ` ${clippedLow} ▼ at bottom edge.`;
+  svg += `</svg>`;
+  document.getElementById(containerId).innerHTML = svg;
+  // Add footnote below the chart
+  const footEl = document.getElementById(containerId + '-foot');
+  if (footEl) footEl.innerHTML = foot;
+
+  document.querySelectorAll(`#${containerId} circle`).forEach(c => {
+    c.addEventListener('mousemove', e => {
+      const clipped = c.getAttribute('data-clipped') === '1';
+      const html = `<b>${escapeHtml(c.getAttribute('data-customer'))}</b><br/>
+        Priority: ${c.getAttribute('data-opp')}<br/>
+        DfC 3M change: ${(parseFloat(c.getAttribute('data-y'))*100).toFixed(1)}%${clipped ? ' (off-chart)' : ''}<br/>
+        Other Azure 3M change: ${(parseFloat(c.getAttribute('data-x'))*100).toFixed(1)}%<br/>
+        Total: $${parseFloat(c.getAttribute('data-size')).toLocaleString('en-US',{maximumFractionDigits:0})}`;
+      showTooltip(html, e.pageX, e.pageY);
+    });
+    c.addEventListener('mouseleave', hideTooltip);
+    c.addEventListener('click', () => selectCustomer(c.getAttribute('data-customer')));
+  });
+}
+
+function sparkline(values, w=120, h=24, color='#0078d4') {
+  const max = Math.max(...values, 0.01);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const xStep = w / (values.length - 1);
+  let path = '';
+  values.forEach((v, i) => {
+    const yp = h - ((v - min) / range) * h * 0.85 - 2;
+    path += (path ? 'L' : 'M') + (i * xStep).toFixed(1) + ',' + yp.toFixed(1);
+  });
+  const lastV = values[values.length - 1];
+  const lastY = h - ((lastV - min) / range) * h * 0.85 - 2;
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><path d="${path}" fill="none" stroke="${color}" stroke-width="1.5"/><circle cx="${w}" cy="${lastY}" r="2.2" fill="${color}"/></svg>`;
+}
+
+// ============ Renderers ============
+const TRACK_PRODUCTS = ['Defender for Cloud', 'Azure Virtual Desktop', 'General Purpose Compute', 'AI Services', 'Network Security', 'Sentinel'];
+const PRODUCT_COLORS = {
+  'Defender for Cloud': '#0078d4',
+  'Azure Virtual Desktop': '#107c10',
+  'General Purpose Compute': '#ff8c00',
+  'AI Services': '#8764b8',
+  'Network Security': '#d13438',
+  'Sentinel': '#005a9e',
+};
+
+let oppSort = {key: 'total_current', dir: 'desc'};
+let allSort = {key: 'total_current', dir: 'desc'};
+
+function renderKpis() {
+  document.getElementById('meta-customers').textContent = DATA.customers.length;
+  document.getElementById('meta-month').textContent = (DATA.last_full_month || '').replace(/^FY\d+-/, '');
+  document.getElementById('kpi-high').textContent = DATA.counts.high;
+  document.getElementById('kpi-med').textContent = DATA.counts.medium;
+  document.getElementById('kpi-low').textContent = DATA.counts.low;
+  document.getElementById('kpi-small').textContent = DATA.counts.too_small;
+
+  const lastIdx = (DATA.partial_month_idx >= 0 && DATA.partial_month_idx === DATA.months.length - 1)
+    ? Math.max(0, DATA.months.length - 2) : DATA.months.length - 1;
+  const priorIdx = Math.max(0, lastIdx - 1);
+  const dfcCurrent = DATA.dfc_total_monthly[lastIdx];
+  const dfcPrior = DATA.dfc_total_monthly[priorIdx];
+  const dfcMom = dfcPrior ? (dfcCurrent - dfcPrior) / dfcPrior : 0;
+  document.getElementById('kpi-dfc-acr').textContent = fmt.money(dfcCurrent) ;
+  const momEl = document.getElementById('kpi-dfc-mom');
+  momEl.textContent = fmt.pct(dfcMom) + ' MoM';
+  momEl.className = 'delta ' + fmt.pctClass(dfcMom);
+
+  const totalDaily = DATA.product_monthly['Total'] ? DATA.product_monthly['Total'][lastIdx] : 0;
+  const dfcPct = totalDaily ? (dfcCurrent / totalDaily) * 100 : 0;
+  document.getElementById('kpi-dfc-pct').textContent = dfcPct.toFixed(1) + '%';
+}
+
+function renderDfcTrend() {
+  const weekly = !!(DATA.weekly_enabled && DATA.dfc_total_weekly);
+  const values = weekly ? DATA.dfc_total_weekly : DATA.dfc_total_monthly;
+  const labels = weekly ? DATA.week_labels : DATA.month_labels;
+  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#0078d4'}], {labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});
+}
+
+// Pure selection + reconciliation math for the product-mix donut. Kept separate from
+// the DOM rendering so it can be unit-tested in isolation. Takes the monthly category
+// series (DATA.product_monthly) + the partial/accumulating month index; returns the
+// drillable slices (`items`), the categories folded into 'Other' (`otherCats`), and the
+// reconciliation totals. Donut shows AVERAGE MONTHLY ACR share across COMPLETE months
+// only (the partial last month is excluded), so the centre equals a representative
+// monthly ACR, not a cumulative period total. Slices = top categories by avg monthly
+// ACR (Defender for Cloud is always pinned in) up to a cap; everything below the cap
+// rolls into an 'Other services' slice so the slices sum to the true total. Decoupled
+// from DATA.track_products (the 8-cap used by the taxonomy trend / SKU drill-down) so
+// large real categories (Storage, Networking, ...) surface here instead of hiding.
+function computeDonutSlices(src, partial) {
+  src = src || {};
+  const DFC = 'Defender for Cloud';
+  const MAX_SLICES = 12;
+  const p = (typeof partial === 'number') ? partial : -1;
+  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== p); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };
+  const isHex = c => /^#[0-9a-fA-F]{6}$/.test(c);
+  // Deterministic palette by rank; DfC (#0078d4) and Sentinel (#005a9e) keep their
+  // brand colours and are intentionally excluded from the rotation to avoid collisions.
+  const PALETTE = ['#107c10','#5c2d91','#d83b01','#008272','#a4262c','#c19c00','#004e8c','#874800','#5d5a58','#018574','#8764b8','#e3008c'];
+  const colorFor = (label, rank) => { if (label === DFC) return '#0078d4'; if (label === 'Sentinel') return '#005a9e'; const c = PALETTE[rank % PALETTE.length]; return isHex(c) ? c : '#605e5c'; };
+  const all = Object.keys(src).filter(k => k !== 'Total')
+    .map(k => ({label: k, value: avgOf(src[k])}))
+    .filter(d => d.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const named = all.slice(0, MAX_SLICES);
+  // Pin Defender for Cloud: if it ranks below the cap, swap it in for the lowest named.
+  const dfc = all.find(d => d.label === DFC);
+  if (dfc && named.indexOf(dfc) === -1 && named.length) { named[named.length - 1] = dfc; named.sort((a, b) => b.value - a.value); }
+  const namedLabels = new Set(named.map(d => d.label));
+  const items = named.map((d, i) => ({label: d.label, value: d.value, color: colorFor(d.label, i)}));
+  const totalAvg = avgOf(src['Total']);
+  const namedSum = items.reduce((s, d) => s + d.value, 0);
+  const otherVal = Math.max(0, totalAvg - namedSum);
+  // Stash the categories that fold into 'Other' (plus any total-vs-leaf residual) so the
+  // Other slice's drill-down reconciles to the slice value.
+  const tail = all.filter(d => !namedLabels.has(d.label));
+  const tailSum = tail.reduce((s, d) => s + d.value, 0);
+  const otherCats = tail.map(d => ({label: d.label, value: d.value}));
+  if (otherVal - tailSum > 1) otherCats.push({label: 'Unmapped / residual', value: otherVal - tailSum});
+  if (otherVal > 1) items.push({label: 'Other services', value: otherVal, color: '#c8c6c4'});
+  return {items: items, otherCats: otherCats, totalAvg: totalAvg, otherVal: otherVal};
+}
+function renderProductMix() {
+  // Each slice is drillable into its underlying services (see donutChart + the
+  // category modal). All selection/reconciliation math lives in computeDonutSlices.
+  const r = computeDonutSlices(DATA.product_monthly, DATA.partial_month_idx);
+  window._donutOtherCats = r.otherCats;
+  donutChart('chart-product-mix', r.items);
+  document.getElementById('legend-product-mix').innerHTML = r.items.map(d =>
+    `<span class="legend-item"><span class="legend-swatch" style="background:${d.color}"></span>${escapeHtml(d.label)}</span>`).join('');
+}
+
+function renderQuadrant() {
+  const filter = document.getElementById('quadrant-filter').value;
+  const months = DATA.months;
+  const baseIdx = Math.max(0, months.length - 3);   // start of the 3-month window
+  let pts = DATA.opportunity
+    .filter(r => r.opportunity !== 'Too small')
+    .filter(r => r.dfc_3m != null && r.other_3m != null && !isNaN(r.dfc_3m) && !isNaN(r.other_3m))
+    .map(r => {
+      const cd = DATA.customer_data[r.customer];
+      const dfcBase = cd && cd.dfc_series ? cd.dfc_series[baseIdx] : 0;
+      return {label: r.customer, x: r.other_3m, y: r.dfc_3m, size: r.total_current, opportunity: r.opportunity, dfc_base: dfcBase};
+    });
+  if (filter === 'High') pts = pts.filter(p => p.opportunity === 'High');
+  else if (filter === 'Medium') pts = pts.filter(p => p.opportunity === 'Medium');
+  else if (filter === 'HighMed') pts = pts.filter(p => p.opportunity === 'High' || p.opportunity === 'Medium');
+  quadrantChart('chart-quadrant', pts);
+}
+
+function renderOppTable() {
+  const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+  const rows = DATA.opportunity.filter(r => r.opportunity === 'High' || r.opportunity === 'Medium').slice()
+    .sort((a, b) => {
+      let av = a[oppSort.key], bv = b[oppSort.key];
+      if (oppSort.key === 'opportunity') { av = order[av]; bv = order[bv]; }
+      if (av == null) av = -Infinity; if (bv == null) bv = -Infinity;
+      if (typeof av === 'string') return oppSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return oppSort.dir === 'asc' ? av - bv : bv - av;
+    });
+  document.getElementById('opp-tbody').innerHTML = rows.map(r => `
+    <tr class="clickable" data-customer="${escapeHtml(r.customer)}">
+      <td>${escapeHtml(r.customer)}</td>
+      <td>${tagFor(r.opportunity)}</td>
+      <td class="num">${fmt.money2(r.total_current)}</td>
+      <td class="num">${fmt.money2(r.dfc_current)}</td>
+      <td class="num">${fmt.pctRaw(r.dfc_ratio)}</td>
+      <td class="num ${fmt.pctClass(r.dfc_3m)}">${fmt.pct(r.dfc_3m)}</td>
+      <td class="num ${fmt.pctClass(r.other_3m)}">${fmt.pct(r.other_3m)}</td>
+      <td>${escapeHtml(r.notes)}</td>
+    </tr>`).join('');
+  document.querySelectorAll('#opp-tbody tr.clickable').forEach(tr =>
+    tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
+}
+
+function renderAllTable() {
+  const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+  const search = document.getElementById('search-input').value.toLowerCase();
+  const pf = document.getElementById('filter-priority').value;
+  let rows = DATA.opportunity.slice();
+  if (search) rows = rows.filter(r => r.customer.toLowerCase().includes(search));
+  if (pf !== 'all') rows = rows.filter(r => r.opportunity === pf);
+  rows.sort((a, b) => {
+    let av = a[allSort.key], bv = b[allSort.key];
+    if (allSort.key === 'opportunity') { av = order[av]; bv = order[bv]; }
+    if (av == null) av = -Infinity; if (bv == null) bv = -Infinity;
+    if (typeof av === 'string') return allSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    return allSort.dir === 'asc' ? av - bv : bv - av;
+  });
+  document.getElementById('row-count').textContent = `${rows.length} customers`;
+  document.getElementById('all-tbody').innerHTML = rows.map(r => `
+    <tr class="clickable" data-customer="${escapeHtml(r.customer)}">
+      <td>${escapeHtml(r.customer)}</td>
+      <td>${tagFor(r.opportunity)}</td>
+      <td class="num">${fmt.money2(r.total_current)}</td>
+      <td class="num">${fmt.money2(r.dfc_current)}</td>
+      <td class="num">${fmt.pctRaw(r.dfc_ratio)}</td>
+      <td class="num ${fmt.pctClass(r.dfc_mom)}">${fmt.pct(r.dfc_mom)}</td>
+      <td class="num ${fmt.pctClass(r.other_mom)}">${fmt.pct(r.other_mom)}</td>
+      <td class="num ${fmt.pctClass(r.dfc_3m)}">${fmt.pct(r.dfc_3m)}</td>
+      <td class="num ${fmt.pctClass(r.other_3m)}">${fmt.pct(r.other_3m)}</td>
+      <td>${escapeHtml(r.notes)}</td>
+    </tr>`).join('');
+  document.querySelectorAll('#all-tbody tr.clickable').forEach(tr =>
+    tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
+}
+
+function populateCustomerSelect() {
+  const sel = document.getElementById('customer-select');
+  sel.innerHTML = '';
+  DATA.customers.forEach(c => {
+    const opt = document.createElement('option'); opt.value = c; opt.textContent = c;
+    sel.appendChild(opt);
+  });
+}
+
+function selectCustomer(name) {
+  document.getElementById('customer-select').value = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('.tab[data-tab="drilldown"]').classList.add('active');
+  document.getElementById('panel-drilldown').classList.add('active');
+  renderCustomerDetail(name);
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+function renderCustomerDetail(name, idp) {
+  idp = idp || '';
+  const opp = DATA.opportunity.find(r => r.customer === name);
+  const cd = DATA.customer_data[name];
+  if (!opp || !cd) return;
+  document.getElementById(idp + 'cust-priority').innerHTML = tagFor(opp.opportunity);
+  document.getElementById(idp + 'cust-cards').innerHTML = `
+    <div class="card"><div class="label">Total Monthly ACR</div><div class="val">${fmt.money2(opp.total_current)}</div><div class="delta ${fmt.pctClass(opp.total_mom)}">${fmt.pct(opp.total_mom)} MoM</div></div>
+    <div class="card"><div class="label">Defender for Cloud</div><div class="val">${fmt.money2(opp.dfc_current)}</div><div class="delta ${fmt.pctClass(opp.dfc_mom)}">${fmt.pct(opp.dfc_mom)} MoM</div></div>
+    <div class="card"><div class="label">DfC % of Portfolio</div><div class="val">${fmt.pctRaw(opp.dfc_ratio)}</div><div class="delta">share of total</div></div>
+    <div class="card"><div class="label">DfC 3-Month Trend</div><div class="val ${fmt.pctClass(opp.dfc_3m)}">${fmt.pct(opp.dfc_3m)}</div><div class="delta">last 3 months</div></div>
+    <div class="card"><div class="label">Other Azure 3-Month Trend</div><div class="val ${fmt.pctClass(opp.other_3m)}">${fmt.pct(opp.other_3m)}</div><div class="delta">last 3 months</div></div>
+  `;
+  const note = document.getElementById(idp + 'cust-signal');
+  note.innerHTML = `<strong>Signal:</strong> ${escapeHtml(opp.notes)}`;
+  note.style.borderLeftColor = opp.opportunity === 'High' ? '#d13438' : opp.opportunity === 'Medium' ? '#ff8c00' : '#107c10';
+  note.style.background = opp.opportunity === 'High' ? '#fdf3f4' : opp.opportunity === 'Medium' ? '#fffaf0' : '#f3f9ef';
+  note.style.color = opp.opportunity === 'High' ? '#5d1014' : opp.opportunity === 'Medium' ? '#5d3a00' : '#0e3a0e';
+
+  const cWeekly = !!(DATA.weekly_enabled && Array.isArray(cd.dfc_weekly) && Array.isArray(cd.other_weekly) && Array.isArray(cd.total_weekly));
+  const dfcSeries = cWeekly ? cd.dfc_weekly : cd.dfc_series;
+  const otherSeries = cWeekly ? cd.other_weekly : cd.other_series;
+  const totalSeries = cWeekly ? cd.total_weekly : cd.total_series;
+  const cLabels = cWeekly ? DATA.week_labels : DATA.month_labels;
+  lineChart(idp + 'chart-cust-dfc', [
+    {label: 'Defender for Cloud', values: dfcSeries, color: '#0078d4'},
+    {label: 'Other Azure', values: otherSeries, color: '#605e5c', dash: '4 3'},
+  ], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});
+  const pctSeries = dfcSeries.map((v, i) => {
+    const t = totalSeries[i];
+    return t > 0 ? (v / t) * 100 : 0;
+  });
+  lineChart(idp + 'chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx, format: 'percent'});
+
+  const ph = document.getElementById(idp + 'cust-products');
+  ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">Monthly ACR</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +
+    cd.products.map((p, pi) => {
+      const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';
+      const nameEsc = escapeHtml(p.product);
+      const nameHtml = p.product === 'Defender for Cloud' ? '<strong style="color:#0078d4">' + nameEsc + '</strong>' : nameEsc;
+      const skus = Array.isArray(p.skus) ? p.skus : [];
+      const sid = 'sku-' + pi;
+      const caret = skus.length ? `<span class="sku-caret" style="cursor:pointer;user-select:none;color:#605e5c;margin-right:6px;">\u25b8</span>` : '<span style="display:inline-block;width:14px;"></span>';
+      const head = `<div class="product-row"${skus.length ? ` data-sku-toggle="${sid}" style="cursor:pointer;"` : ''}>
+        <div class="name">${caret}${nameHtml}</div>
+        <div class="num">${fmt.money2(p.current)}</div>
+        <div class="num ${fmt.pctClass(p.mom)}">${fmt.pct(p.mom)}</div>
+        <div class="num ${fmt.pctClass(p.three_m)}">${fmt.pct(p.three_m)}</div>
+        <div>${sparkline(p.series, 140, 26, sparkColor)}</div>
+      </div>`;
+      const subs = skus.map(s => `<div class="product-row sku-row ${sid}" hidden style="background:#faf9f8;">
+        <div class="name" style="padding-left:22px;color:#605e5c;">${escapeHtml(s.sku)}</div>
+        <div class="num">${fmt.money2(s.current)}</div>
+        <div class="num ${fmt.pctClass(s.mom)}">${fmt.pct(s.mom)}</div>
+        <div class="num ${fmt.pctClass(s.three_m)}">${fmt.pct(s.three_m)}</div>
+        <div>${sparkline(s.series, 140, 26, '#a19f9d')}</div>
+      </div>`).join('');
+      return head + subs;
+    }).join('');
+}
+
+// Wire static event listeners
+document.getElementById('cust-products').addEventListener('click', (e) => {
+  const head = e.target.closest('[data-sku-toggle]');
+  if (!head) return;
+  const sid = head.getAttribute('data-sku-toggle');
+  const rows = document.querySelectorAll('#cust-products .' + sid);
+  let target = null;
+  rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
+  const caret = head.querySelector('.sku-caret');
+  if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+});
+document.getElementById('quadrant-filter').addEventListener('change', renderQuadrant);
+document.getElementById('search-input').addEventListener('input', renderAllTable);
+document.getElementById('filter-priority').addEventListener('change', renderAllTable);
+document.querySelectorAll('#opp-table th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const k = th.getAttribute('data-sort');
+    oppSort.dir = (oppSort.key === k && oppSort.dir === 'desc') ? 'asc' : 'desc';
+    oppSort.key = k;
+    renderOppTable();
+  });
+});
+document.querySelectorAll('#all-table th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const k = th.getAttribute('data-sort');
+    allSort.dir = (allSort.key === k && allSort.dir === 'desc') ? 'asc' : 'desc';
+    allSort.key = k;
+    renderAllTable();
+  });
+});
+document.getElementById('customer-select').addEventListener('change', e => renderCustomerDetail(e.target.value));
+
+
+const DEFAULT_DFC_SHARE_THRESHOLD = 6;
+let dfcShareThreshold = DEFAULT_DFC_SHARE_THRESHOLD;
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function fmtThreshold(value) {
+  return Number.isInteger(value) ? `${value}%` : `${value.toFixed(1)}%`;
+}
+
+// Re-run the opportunity classifier against the selected attach baseline so the
+// slider actually drives priority (not just sorting). Mutates DATA.opportunity
+// rows in place and recomputes DATA.counts. Safe to call when DATA is empty.
+function reclassifyOpportunities(thresholdPct) {
+  if (!DATA || !Array.isArray(DATA.opportunity) || !window.AcrModel ||
+      typeof AcrModel.classifyOpportunity !== 'function') {
+    return;
+  }
+  const threshold = (Number.isFinite(thresholdPct) ? thresholdPct : DEFAULT_DFC_SHARE_THRESHOLD) / 100;
+  for (const row of DATA.opportunity) {
+    const [priority, notes] = AcrModel.classifyOpportunity({
+      dfc_current: row.dfc_current,
+      total_current: row.total_current,
+      dfc_ratio: (Number(row.dfc_ratio) || 0) / 100,
+      dfc_3m: row.dfc_3m,
+      other_3m: row.other_3m,
+      growth_cat_3m: (row.growth_cat_3m == null ? null : row.growth_cat_3m),
+      growth_cat_names: row.growth_cat_names || null,
+      threshold: threshold,
+    });
+    row.opportunity = priority;
+    row.notes = notes;
+  }
+  DATA.counts = {
+    high:      DATA.opportunity.filter(r => r.opportunity === 'High').length,
+    medium:    DATA.opportunity.filter(r => r.opportunity === 'Medium').length,
+    low:       DATA.opportunity.filter(r => r.opportunity === 'Low').length,
+    too_small: DATA.opportunity.filter(r => r.opportunity === 'Too small').length,
+    total:     (DATA.customers && DATA.customers.length) || DATA.opportunity.length,
+  };
+}
+
+let _thresholdRenderTimer = null;
+// Heavy re-render (tables + heatmap + the currently-selected customer detail,
+// which redraws charts) is debounced so dragging the slider stays smooth.
+function applyThresholdRender() {
+  if (typeof renderKpis === 'function') renderKpis();
+  if (_thresholdRenderTimer) clearTimeout(_thresholdRenderTimer);
+  _thresholdRenderTimer = setTimeout(() => {
+    _thresholdRenderTimer = null;
+    if (typeof renderOppTable === 'function') renderOppTable();
+    if (typeof renderAllTable === 'function') renderAllTable();
+    renderOpportunityHeatmap();
+    const sel = document.getElementById('customer-select');
+    const drill = document.getElementById('panel-drilldown');
+    if (sel && sel.value && drill && drill.classList.contains('active') &&
+        typeof renderCustomerDetail === 'function') {
+      renderCustomerDetail(sel.value);
+    }
+  }, 120);
+}
+
+function ensureDfcThresholdControl() {
+  if (document.getElementById('dfc-threshold')) return;
+  const filter = document.getElementById('quadrant-filter');
+  if (!filter || !filter.parentElement) return;
+  const wrap = document.createElement('label');
+  wrap.setAttribute('for', 'dfc-threshold');
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.gap = '8px';
+  wrap.style.minWidth = '360px';
+  wrap.innerHTML = `
+    Defender share threshold
+    <input id="dfc-threshold" type="range" min="0" max="20" step="0.5" value="${DEFAULT_DFC_SHARE_THRESHOLD}" aria-label="Defender for Cloud share threshold" style="width:180px;">
+    <strong id="dfc-threshold-value">${fmtThreshold(DEFAULT_DFC_SHARE_THRESHOLD)}</strong>
+    <span id="dfc-threshold-count" style="color:#605e5c;"></span>`;
+  filter.parentElement.appendChild(wrap);
+  updateExportLink();
+  document.getElementById('dfc-threshold').addEventListener('input', e => {
+    const next = parseFloat(e.target.value);
+    dfcShareThreshold = Number.isFinite(next) ? next : DEFAULT_DFC_SHARE_THRESHOLD;
+    const valEl = document.getElementById('dfc-threshold-value');
+    if (valEl) valEl.textContent = fmtThreshold(dfcShareThreshold);
+    updateExportLink();
+    reclassifyOpportunities(dfcShareThreshold);
+    applyThresholdRender();
+  });
+}
+
+function updateExportLink() {
+  const exportLink = document.querySelector('a[href^="/export-ppt"]');
+  if (exportLink) exportLink.href = `/export-ppt?threshold=${encodeURIComponent(dfcShareThreshold)}`;
+}
+
+function ensureActionQueueShell() {
+  if (document.getElementById('action-queue-section')) return;
+  const chart = document.getElementById('chart-quadrant');
+  const chartBox = chart?.closest('.chart-box');
+  if (!chartBox || !chartBox.parentElement) return;
+  const section = document.createElement('div');
+  section.id = 'action-queue-section';
+  section.innerHTML = `
+    <div class="cards">
+      <div class="card high"><div class="label">Annualized DfC ACR Opportunity</div><div class="val" id="action-annual-opportunity">-</div><div class="delta" id="action-annual-opportunity-note">run-rate gap to threshold</div></div>
+      <div class="card medium"><div class="label">Monthly DfC ACR Gap</div><div class="val" id="action-monthly-gap">-</div><div class="delta">latest month basis</div></div>
+      <div class="card"><div class="label">Accounts Below Threshold</div><div class="val" id="action-below-threshold">-</div><div class="delta" id="action-below-threshold-note">visible opportunity rows</div></div>
+    </div>
+    <div class="chart-box" id="action-queue-card">
+      <div class="title">Sales action queue</div>
+      <div class="sub">Prioritized follow-up list based on the selected Defender share threshold. Estimated gap is directional sizing only.</div>
+      <div class="controls">
+        <label>Rows
+          <select id="action-queue-limit">
+            <option value="10">Top 10</option>
+            <option value="25">Top 25</option>
+            <option value="all">All visible</option>
+          </select>
+        </label>
+        <button class="import-btn" id="copy-action-queue" type="button">Copy action list</button>
+        <button class="import-btn" id="download-action-queue" type="button">Download CSV</button>
+        <span id="action-queue-status" style="font-size:12px;color:#605e5c;"></span>
+      </div>
+      <div id="action-queue"></div>
+    </div>`;
+  chartBox.parentElement.insertBefore(section, chartBox);
+  document.getElementById('action-queue-limit').addEventListener('change', renderActionQueue);
+  document.getElementById('copy-action-queue').addEventListener('click', copyActionQueue);
+  document.getElementById('download-action-queue').addEventListener('click', downloadActionQueueCsv);
+}
+
+function filteredOpportunityRows() {
+  const filter = document.getElementById('quadrant-filter').value;
+  let rows = DATA.opportunity.filter(r => r.opportunity !== 'Too small');
+  if (filter === 'High') rows = rows.filter(r => r.opportunity === 'High');
+  else if (filter === 'Medium') rows = rows.filter(r => r.opportunity === 'Medium');
+  else if (filter === 'HighMed') rows = rows.filter(r => r.opportunity === 'High' || r.opportunity === 'Medium');
+  return rows;
+}
+
+function actionDetails(row) {
+  const belowThreshold = (row.dfc_ratio || 0) < dfcShareThreshold;
+  const estimatedGap = Math.max(0, (row.total_monthly_current || row.total_current || 0) * (dfcShareThreshold / 100) - (row.dfc_monthly_current || row.dfc_current || 0));
+  const estimatedAnnualOpportunity = estimatedGap * 12;
+  const products = DATA.customer_data?.[row.customer]?.products || [];
+  const workload = (products.find(p => p.product !== 'Defender for Cloud' && (p.current || 0) > 0) || {}).product || 'core Azure workloads';
+  let recommendedAction = 'Monitor Defender attach';
+  let conversationAngle = `Confirm Defender for Cloud coverage keeps pace with ${workload}.`;
+  let actionReason = row.notes && row.notes !== '-' ? row.notes : 'No urgent attach gap under the selected threshold.';
+  if ((row.dfc_monthly_current || row.dfc_current || 0) < 30 && (row.total_monthly_current || row.total_current || 0) > 3000) {
+    recommendedAction = 'Start DfC attach discovery';
+    conversationAngle = `Open with current ${workload} usage and validate whether Defender for Cloud is enabled.`;
+    actionReason = 'Little or no Defender for Cloud ACR against a meaningful Azure footprint.';
+  } else if (belowThreshold && (row.growth_gap || 0) > 0) {
+    recommendedAction = 'Prioritize attach expansion';
+    conversationAngle = `Lead with ${workload} growth and the Defender share gap to the selected threshold.`;
+    actionReason = 'Azure footprint is growing faster than Defender for Cloud attach.';
+  } else if (belowThreshold) {
+    recommendedAction = 'Expand Defender coverage';
+    conversationAngle = `Review Defender for Cloud coverage across ${workload} and adjacent services.`;
+    actionReason = 'Defender for Cloud share is below the selected threshold.';
+  } else if ((row.dfc_3m_delta || 0) < 0) {
+    recommendedAction = 'Review DfC decline';
+    conversationAngle = 'Validate whether Defender usage declined because of optimization, churn, or reporting timing.';
+    actionReason = 'Defender for Cloud ACR is declining over the 3-month window.';
+  }
+  return {belowThreshold, estimatedGap, estimatedAnnualOpportunity, recommendedAction, conversationAngle, actionReason};
+}
+
+function actionQueueRows() {
+  const priorityOrder = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+  return filteredOpportunityRows()
+    .map(row => ({...row, ...actionDetails(row)}))
+    .sort((a, b) =>
+      Number(b.belowThreshold) - Number(a.belowThreshold) ||
+      priorityOrder[a.opportunity] - priorityOrder[b.opportunity] ||
+      (b.estimatedGap || 0) - (a.estimatedGap || 0) ||
+      (b.growth_gap || 0) - (a.growth_gap || 0) ||
+      (b.total_monthly_current || b.total_current || 0) - (a.total_monthly_current || a.total_current || 0));
+}
+
+function visibleActionQueueRows() {
+  const rows = actionQueueRows();
+  const limit = document.getElementById('action-queue-limit')?.value || '10';
+  return limit === 'all' ? rows : rows.slice(0, parseInt(limit, 10));
+}
+
+function updateActionQueueMetrics() {
+  const rows = actionQueueRows();
+  const monthlyGap = rows.reduce((sum, r) => sum + (r.estimatedGap || 0), 0);
+  const annualOpportunity = rows.reduce((sum, r) => sum + (r.estimatedAnnualOpportunity || 0), 0);
+  const belowThreshold = rows.filter(r => r.belowThreshold).length;
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  const annualEl = document.getElementById('action-annual-opportunity');
+  const annualNoteEl = document.getElementById('action-annual-opportunity-note');
+  const monthlyEl = document.getElementById('action-monthly-gap');
+  const belowEl = document.getElementById('action-below-threshold');
+  const belowNoteEl = document.getElementById('action-below-threshold-note');
+  if (annualEl) annualEl.textContent = fmt.money2(annualOpportunity);
+  if (annualNoteEl) annualNoteEl.textContent = `annualized run-rate gap to ${thresholdLabel}`;
+  if (monthlyEl) monthlyEl.textContent = fmt.money2(monthlyGap);
+  if (belowEl) belowEl.textContent = belowThreshold.toLocaleString('en-US');
+  if (belowNoteEl) belowNoteEl.textContent = `below selected ${thresholdLabel} threshold`;
+}
+
+function renderActionQueue() {
+  ensureActionQueueShell();
+  const target = document.getElementById('action-queue');
+  if (!target) return;
+  updateActionQueueMetrics();
+  const rows = visibleActionQueueRows();
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty">No matching customer actions for the current filter.</div>';
+    return;
+  }
+  target.innerHTML = `
+    <div class="scroll-table" style="max-height:420px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Priority</th>
+            <th class="num">FYTD Total ACR</th>
+            <th class="num">Monthly Total ACR</th>
+            <th class="num">FYTD DfC ACR</th>
+            <th class="num">Monthly DfC ACR</th>
+            <th class="num">DfC %</th>
+            <th class="num">Est. gap to ${thresholdLabel}</th>
+            <th class="num">Annualized opportunity</th>
+            <th>Recommended action</th>
+            <th>Conversation angle</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr class="clickable" data-customer="${escapeHtml(r.customer)}">
+              <td><strong>${escapeHtml(r.customer)}</strong></td>
+              <td>${tagFor(r.opportunity)}</td>
+              <td class="num">${fmt.money2(r.total_fytd || 0)}</td>
+              <td class="num">${fmt.money2(r.total_monthly_current || r.total_current)}</td>
+              <td class="num">${fmt.money2(r.dfc_fytd || 0)}</td>
+              <td class="num">${fmt.money2(r.dfc_monthly_current || r.dfc_current)}</td>
+              <td class="num">${fmt.pctRaw(r.dfc_ratio)}</td>
+              <td class="num"><strong>${fmt.money2(r.estimatedGap)}</strong></td>
+              <td class="num"><strong>${fmt.money2(r.estimatedAnnualOpportunity)}</strong></td>
+              <td>${escapeHtml(r.recommendedAction)}<br><span style="font-size:12px;color:#605e5c;">${escapeHtml(r.actionReason)}</span></td>
+              <td>${escapeHtml(r.conversationAngle)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  document.querySelectorAll('#action-queue tr.clickable').forEach(tr =>
+    tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
+}
+
+function actionQueueText() {
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  return visibleActionQueueRows().map((r, index) =>
+    `${index + 1}. ${r.customer} | ${r.opportunity} | FYTD Total ACR ${fmt.money2(r.total_fytd || 0)} | Monthly Total ACR ${fmt.money2(r.total_monthly_current || r.total_current)} | FYTD DfC ACR ${fmt.money2(r.dfc_fytd || 0)} | Monthly DfC ACR ${fmt.money2(r.dfc_monthly_current || r.dfc_current)} | DfC ${fmt.pctRaw(r.dfc_ratio)} | Monthly gap to ${thresholdLabel}: ${fmt.money2(r.estimatedGap)} | Annualized opportunity: ${fmt.money2(r.estimatedAnnualOpportunity)} | ${r.recommendedAction} - ${r.conversationAngle}`
+  ).join('\n');
+}
+
+function setActionQueueStatus(message) {
+  const status = document.getElementById('action-queue-status');
+  if (status) status.textContent = message;
+}
+
+function copyActionQueue() {
+  const text = actionQueueText();
+  if (!text) {
+    setActionQueueStatus('Nothing to copy');
+    return;
+  }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => setActionQueueStatus('Copied'),
+      () => setActionQueueStatus('Copy failed')
+    );
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  setActionQueueStatus(copied ? 'Copied' : 'Copy failed');
+}
+
+const CSV_FORMULA_LEADERS = ['=', '+', '-', '@', '\t', '\r'];
+function csvCell(value) {
+  let s = String(value ?? '');
+  if (s.length && CSV_FORMULA_LEADERS.includes(s.charAt(0))) {
+    s = "'" + s;
+  }
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+function downloadActionQueueCsv() {
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  const rows = visibleActionQueueRows();
+  if (!rows.length) {
+    setActionQueueStatus('Nothing to download');
+    return;
+  }
+  const headers = ['Customer', 'Priority', 'FYTD Total ACR', 'Monthly Total ACR', 'FYTD Defender ACR', 'Monthly Defender ACR', 'Defender %', `Monthly gap to ${thresholdLabel}`, 'Annualized opportunity', 'Growth gap', 'Recommended action', 'Conversation angle', 'Reason'];
+  const lines = [
+    headers.map(csvCell).join(','),
+    ...rows.map(r => [
+      r.customer,
+      r.opportunity,
+      r.total_fytd || 0,
+      r.total_monthly_current || r.total_current,
+      r.dfc_fytd || 0,
+      r.dfc_monthly_current || r.dfc_current,
+      r.dfc_ratio,
+      r.estimatedGap,
+      r.estimatedAnnualOpportunity,
+      r.growth_gap,
+      r.recommendedAction,
+      r.conversationAngle,
+      r.actionReason
+    ].map(csvCell).join(','))
+  ];
+  const blob = new Blob([lines.join('\r\n')], {type: 'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `defender-action-queue-${thresholdLabel.replace('%', 'pct')}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setActionQueueStatus('CSV downloaded');
+}
+
+function quadrantChart(containerId, allPoints) {
+  const W = 900, H = 460;
+  const M = {top: 30, right: 30, bottom: 54, left: 78};
+  const innerW = W - M.left - M.right, innerH = H - M.top - M.bottom;
+  const points = allPoints.filter(p => p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y));
+  const positiveGaps = points.map(p => Math.max(0, p.x || 0));
+  const xMaxRaw = Math.max(...positiveGaps, 1);
+  const xMax = Math.max(1000, Math.ceil(xMaxRaw / 1000) * 1000);
+  const yMax = 20;
+  const xMin = 0, yMin = 0;
+  const xScale = v => M.left + ((Math.max(xMin, Math.min(xMax, v)) - xMin) / (xMax - xMin)) * innerW;
+  const yScale = v => M.top + innerH - ((Math.max(yMin, Math.min(yMax, v)) - yMin) / (yMax - yMin)) * innerH;
+  const sizes = points.map(p => p.size || 1);
+  const sMax = Math.max(...sizes, 1);
+  const sScale = s => 5 + Math.sqrt(s / sMax) * 24;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  const lowShareY = yScale(2);
+  const medShareY = yScale(5);
+  svg += `<rect x="${M.left}" y="${medShareY}" width="${innerW}" height="${H - M.bottom - medShareY}" fill="#fde7e9" opacity="0.45"/>`;
+  svg += `<rect x="${M.left}" y="${lowShareY}" width="${innerW}" height="${medShareY - lowShareY}" fill="#fff4ce" opacity="0.48"/>`;
+  svg += `<rect x="${M.left}" y="${M.top}" width="${innerW}" height="${lowShareY - M.top}" fill="#dff6dd" opacity="0.42"/>`;
+  const xTicks = [0, xMax * 0.25, xMax * 0.5, xMax * 0.75, xMax];
+  const yTicks = [0, 2, 5, 10, 15, 20];
+  xTicks.forEach(xv => {
+    svg += `<line x1="${xScale(xv)}" y1="${M.top}" x2="${xScale(xv)}" y2="${H - M.bottom}" stroke="#edebe9"/>`;
+    svg += `<text x="${xScale(xv)}" y="${H - M.bottom + 16}" text-anchor="middle" font-size="10" fill="#605e5c">$${Math.round(xv).toLocaleString('en-US')}</text>`;
+  });
+  yTicks.forEach(yv => {
+    svg += `<line x1="${M.left}" y1="${yScale(yv)}" x2="${W - M.right}" y2="${yScale(yv)}" stroke="#edebe9"/>`;
+    svg += `<text x="${M.left - 8}" y="${yScale(yv) + 3}" text-anchor="end" font-size="10" fill="#605e5c">${yv}%</text>`;
+  });
+  svg += `<line x1="${M.left}" y1="${yScale(2)}" x2="${W - M.right}" y2="${yScale(2)}" stroke="#a19f9d" stroke-dasharray="4 3"/>`;
+  svg += `<line x1="${M.left}" y1="${yScale(5)}" x2="${W - M.right}" y2="${yScale(5)}" stroke="#a19f9d" stroke-dasharray="4 3"/>`;
+  svg += `<text x="${M.left + innerW/2}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#323130" font-weight="600">3-month monthly ACR growth gap: Other Azure minus DfC</text>`;
+  svg += `<text x="18" y="${M.top + innerH/2}" text-anchor="middle" font-size="11" fill="#323130" font-weight="600" transform="rotate(-90 18 ${M.top + innerH/2})">DfC share of total ACR</text>`;
+  svg += `<text x="${W - M.right - 8}" y="${H - M.bottom - 8}" text-anchor="end" font-size="11" fill="#a4262c" font-weight="700">HIGH OPPORTUNITY: low DfC share + large growth gap</text>`;
+  svg += `<text x="${W - M.right - 8}" y="${M.top + 14}" text-anchor="end" font-size="11" fill="#107c10" font-weight="700">Healthier DfC penetration</text>`;
+  const colorMap = {High: '#d13438', Medium: '#ff8c00', Low: '#107c10', 'Too small': '#a19f9d'};
+  const opacityMap = {High: 0.82, Medium: 0.72, Low: 0.28, 'Too small': 0.20};
+  const oppRank = {High: 3, Medium: 2, Low: 1, 'Too small': 0};
+  const orderedPoints = points.slice().sort((a, b) => (oppRank[a.opportunity] || 0) - (oppRank[b.opportunity] || 0));
+  const labelCandidates = orderedPoints
+    .filter(p => (p.opportunity === 'High' || p.opportunity === 'Medium') && p.x > 0)
+    .sort((a, b) => (b.label_score || 0) - (a.label_score || 0))
+    .slice(0, 8);
+  const labeledSet = new Set(labelCandidates.map(p => p.label));
+  const drawnLabels = [];
+  orderedPoints.forEach(p => {
+    const isClippedX = p.x > xMax;
+    const isClippedY = p.y > yMax;
+    const cx = xScale(p.x), cy = yScale(p.y);
+    const r = sScale(p.size || 1);
+    const fill = colorMap[p.opportunity] || '#0078d4';
+    const op = opacityMap[p.opportunity] != null ? opacityMap[p.opportunity] : 0.65;
+    const stroke = (isClippedX || isClippedY) ? '#201f1e' : 'white';
+    const strokeWidth = (isClippedX || isClippedY) ? 2 : 1.5;
+    svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" opacity="${op}" stroke="${stroke}" stroke-width="${strokeWidth}" data-customer="${escapeHtml(p.label)}" data-x="${p.x}" data-y="${p.y}" data-size="${p.size}" data-opp="${p.opportunity}" data-other-delta="${p.other_delta}" data-dfc-delta="${p.dfc_delta}" style="cursor:pointer"/>`;
+    if (labeledSet.has(p.label)) {
+      const truncated = p.label.length > 22 ? p.label.slice(0, 22) + '...' : p.label;
+      const anchors = [
+        {x: cx + r + 4, y: cy - r - 2, align: 'start'},
+        {x: cx + r + 4, y: cy + r + 10, align: 'start'},
+        {x: cx - r - 4, y: cy - r - 2, align: 'end'},
+      ];
+      const labelW = truncated.length * 5.5, labelH = 12;
+      let chosen = null;
+      for (const a of anchors) {
+        const lx = a.align === 'end' ? a.x - labelW : a.x;
+        const ly = a.y - labelH;
+        const collides = drawnLabels.some(d => lx < d.x + d.w && lx + labelW > d.x && ly < d.y + d.h && ly + labelH > d.y);
+        if (!collides && lx >= M.left && lx + labelW <= W - M.right && ly >= M.top && ly + labelH <= H - M.bottom) {
+          chosen = a; drawnLabels.push({x: lx, y: ly, w: labelW, h: labelH}); break;
+        }
+      }
+      if (chosen) svg += `<text x="${chosen.x}" y="${chosen.y}" text-anchor="${chosen.align}" font-size="10" fill="#201f1e" font-weight="600" style="paint-order:stroke; stroke:#ffffff; stroke-width:3px; stroke-linejoin:round;">${escapeHtml(truncated)}</text>`;
+    }
+  });
+  svg += `</svg>`;
+  document.getElementById(containerId).innerHTML = svg;
+  const footEl = document.getElementById(containerId + '-foot');
+  if (footEl) footEl.innerHTML = 'This view uses absolute monthly ACR change, not percentage growth, to avoid misleading spikes from tiny Defender baselines. X = Other Azure 3M $ change minus DfC 3M $ change. Y is capped at 20% for readability.';
+  document.querySelectorAll(`#${containerId} circle`).forEach(c => {
+    c.addEventListener('mousemove', e => {
+      const html = `<b>${escapeHtml(c.getAttribute('data-customer'))}</b><br/>
+        Priority: ${c.getAttribute('data-opp')}<br/>
+        DfC share: ${parseFloat(c.getAttribute('data-y')).toFixed(1)}%<br/>
+        Growth gap: $${parseFloat(c.getAttribute('data-x')).toLocaleString('en-US',{maximumFractionDigits:0})}<br/>
+        Other Azure 3M delta: $${parseFloat(c.getAttribute('data-other-delta')).toLocaleString('en-US',{maximumFractionDigits:0})}<br/>
+        DfC 3M delta: $${parseFloat(c.getAttribute('data-dfc-delta')).toLocaleString('en-US',{maximumFractionDigits:0})}<br/>
+        Monthly Total ACR: $${parseFloat(c.getAttribute('data-size')).toLocaleString('en-US',{maximumFractionDigits:0})}`;
+      showTooltip(html, e.pageX, e.pageY);
+    });
+    c.addEventListener('mouseleave', hideTooltip);
+    c.addEventListener('click', () => selectCustomer(c.getAttribute('data-customer')));
+  });
+}
+
+function renderQuadrant() {
+  const filter = document.getElementById('quadrant-filter').value;
+  let pts = DATA.opportunity
+    .filter(r => r.opportunity !== 'Too small')
+    .filter(r => r.total_current > 0)
+    .map(r => {
+      const gap = Math.max(0, r.growth_gap || 0);
+      const share = r.dfc_ratio || 0;
+      const labelScore = gap * (1 + Math.max(0, 5 - Math.min(share, 5))) * Math.sqrt(Math.max(r.total_current || 0, 1));
+      return {
+        label: r.customer,
+        x: gap,
+        y: share,
+        size: r.total_monthly_current || r.total_current,
+        opportunity: r.opportunity,
+        other_delta: r.other_3m_delta || 0,
+        dfc_delta: r.dfc_3m_delta || 0,
+        label_score: labelScore
+      };
+    });
+  if (filter === 'High') pts = pts.filter(p => p.opportunity === 'High');
+  else if (filter === 'Medium') pts = pts.filter(p => p.opportunity === 'Medium');
+  else if (filter === 'HighMed') pts = pts.filter(p => p.opportunity === 'High' || p.opportunity === 'Medium');
+  quadrantChart('chart-quadrant', pts);
+}
+
+function renderOpportunityHeatmap() {
+  ensureDfcThresholdControl();
+  ensureActionQueueShell();
+  const filter = document.getElementById('quadrant-filter').value;
+  const thresholdLabel = fmtThreshold(dfcShareThreshold);
+  let rows = filteredOpportunityRows();
+  const belowThresholdCount = rows.filter(r => (r.dfc_ratio || 0) < dfcShareThreshold).length;
+  const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+  rows = rows
+    .slice()
+    .sort((a, b) =>
+      Number((b.dfc_ratio || 0) < dfcShareThreshold) - Number((a.dfc_ratio || 0) < dfcShareThreshold) ||
+      order[a.opportunity] - order[b.opportunity] ||
+      (b.growth_gap || 0) - (a.growth_gap || 0) ||
+      (b.total_monthly_current || b.total_current || 0) - (a.total_monthly_current || a.total_current || 0))
+    .slice(0, 35);
+  const maxGap = Math.max(...rows.map(r => Math.max(0, r.growth_gap || 0)), 1);
+  const maxTotal = Math.max(...rows.map(r => r.total_monthly_current || r.total_current || 0), 1);
+  const heat = (value, maxValue, color) => {
+    const intensity = Math.max(0.08, Math.min(0.85, (value || 0) / maxValue));
+    return `background: color-mix(in srgb, ${color} ${Math.round(intensity * 75)}%, white);`;
+  };
+  const shareStyle = value => {
+    if (value < Math.min(2, dfcShareThreshold)) return 'background:#fde7e9;color:#a4262c;font-weight:700;';
+    if (value < dfcShareThreshold) return 'background:#fff4ce;color:#8e562e;font-weight:700;';
+    return 'background:#dff6dd;color:#107c10;font-weight:700;';
+  };
+  const thresholdValueEl = document.getElementById('dfc-threshold-value');
+  if (thresholdValueEl) thresholdValueEl.textContent = thresholdLabel;
+  const thresholdCountEl = document.getElementById('dfc-threshold-count');
+  if (thresholdCountEl) thresholdCountEl.textContent = `${belowThresholdCount} below threshold`;
+  document.getElementById('chart-quadrant').innerHTML = `
+    <div class="scroll-table" style="max-height:620px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Priority</th>
+            <th class="num">FYTD Total ACR</th>
+            <th class="num">Monthly Total ACR</th>
+            <th class="num">FYTD DfC ACR</th>
+            <th class="num">Monthly DfC ACR</th>
+            <th class="num">DfC %</th>
+            <th class="num">Other 3M $</th>
+            <th class="num">DfC 3M $</th>
+            <th class="num">Gap</th>
+            <th>Signal</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr class="clickable" data-customer="${escapeHtml(r.customer)}">
+              <td><strong>${escapeHtml(r.customer)}</strong></td>
+              <td>${tagFor(r.opportunity)}</td>
+              <td class="num">${fmt.money2(r.total_fytd || 0)}</td>
+              <td class="num" style="${heat(r.total_monthly_current || r.total_current, maxTotal, '#0078d4')}">${fmt.money2(r.total_monthly_current || r.total_current)}</td>
+              <td class="num">${fmt.money2(r.dfc_fytd || 0)}</td>
+              <td class="num">${fmt.money2(r.dfc_monthly_current || r.dfc_current)}</td>
+              <td class="num" style="${shareStyle(r.dfc_ratio || 0)}">${fmt.pctRaw(r.dfc_ratio)}</td>
+              <td class="num ${fmt.pctClass(r.other_3m_delta)}">${fmt.money2(r.other_3m_delta || 0)}</td>
+              <td class="num ${fmt.pctClass(r.dfc_3m_delta)}">${fmt.money2(r.dfc_3m_delta || 0)}</td>
+              <td class="num" style="${heat(Math.max(0, r.growth_gap || 0), maxGap, '#d13438')}"><strong>${fmt.money2(r.growth_gap || 0)}</strong></td>
+              <td>${(r.dfc_ratio || 0) < dfcShareThreshold ? `Below selected ${thresholdLabel} threshold. ` : ''}${escapeHtml(r.notes)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  document.querySelectorAll('#chart-quadrant tr.clickable').forEach(tr =>
+    tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
+  const footEl = document.getElementById('chart-quadrant-foot');
+  if (footEl) footEl.innerHTML = `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 6% is the corporate Defender attach baseline (every customer should run at least 6% of total ACR on Defender workloads).`;
+  renderActionQueue();
+}
+
+function renderQuadrant() {
+  renderOpportunityHeatmap();
+}
+
+
+
+// ---- Priority grading explainer -------------------------------------------
+const PRIORITY_META = {
+  High:        { color: '#d13438', bg: '#fdf3f4', label: 'High priority' },
+  Medium:      { color: '#ff8c00', bg: '#fffaf0', label: 'Medium priority' },
+  Low:         { color: '#107c10', bg: '#f3f9ef', label: 'Low priority' },
+  'Too small': { color: '#605e5c', bg: '#f3f2f1', label: 'Too small to prioritize' },
+};
+
+// Threshold-aware rubric mirroring AcrModel.classifyOpportunity. The highest
+// tier whose conditions are met wins.
+function priorityGradingRules() {
+  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
+  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
+  return [
+    { tier: 'Too small', text: 'Total Azure ACR under $1,500 / month — sales priority is low regardless of Defender share.' },
+    { tier: 'High',   text: 'No Defender for Cloud spend at all (under $15 / month) while the customer spends over $3,000 / month on Azure — 0% against the ' + tl + ' attach baseline.' },
+    { tier: 'High',   text: 'Other Azure workloads grew over the last 3 months while Defender for Cloud is shrinking (declining more than 5%).' },
+    { tier: 'High',   text: 'Other Azure is growing, Defender is flat (under 2% growth) AND Defender is under 2% of total ACR.' },
+    { tier: 'High',   text: 'Break of trend: core workloads (Compute, Databases, Developer Tools, Integration, AI + Machine Learning, Containers) grew over 5% over 3 months, Defender did not keep pace (more than 5 points behind), and the customer is below the ' + tl + ' baseline.' },
+    { tier: 'Medium', text: 'Defender penetration under 1.5% of total ACR while other Azure is growing — undersold.' },
+    { tier: 'Medium', text: 'Defender for Cloud is growing more than 5 points slower than the rest of Azure.' },
+    { tier: 'Medium', text: 'Very low Defender penetration (under 0.5%) on a sizeable account (total ACR over $6,000 / month).' },
+    { tier: 'Medium', text: 'Break of trend on core workloads while already at or above the ' + tl + ' baseline.' },
+    { tier: 'Medium', text: 'Defender attach baseline: Defender share is below the ' + tl + ' corporate baseline — every customer should run at least ' + tl + ' of total ACR on Defender workloads.' },
+    { tier: 'Low',    text: 'None of the above triggers fire — Defender attach looks healthy for this customer at the current ' + tl + ' baseline.' },
+  ];
+}
+
+// Clickable, accessible replacement for the template's tagFor. Late-bound, so
+// every render path (tables, heatmap, action queue, drill-down) picks it up.
+tagFor = function (opp) {
+  const cls = opp === 'High' ? 'high' : opp === 'Medium' ? 'medium' : opp === 'Low' ? 'low' : 'small-tag';
+  const safe = escapeHtml(opp);
+  return '<span class="tag ' + cls + ' prio-badge" role="button" tabindex="0" ' +
+    'title="Why is the priority ' + safe + '? Click for the grading.">' +
+    safe + ' <span class="prio-badge-i" aria-hidden="true">&#9432;</span></span>';
+};
+
+let _prioOverlay = null;
+let _prioLastFocus = null;
+function _ensurePrioOverlay() {
+  if (_prioOverlay) return _prioOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.prio-badge{cursor:pointer;user-select:none}' +
+    '.prio-badge:hover{filter:brightness(.96);box-shadow:0 0 0 1px rgba(0,0,0,.15)}' +
+    '.prio-badge:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.prio-badge-i{font-size:11px;opacity:.7}' +
+    '.prio-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:4000;padding:40px 16px;overflow:auto}' +
+    '.prio-overlay[hidden]{display:none}' +
+    '.prio-dialog{position:relative;background:#fff;border-radius:10px;max-width:720px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.prio-close{position:absolute;top:8px;right:12px;border:none;background:transparent;font-size:26px;' +
+    'line-height:1;cursor:pointer;color:#605e5c}' +
+    '.prio-close:hover{color:#201f1e}' +
+    '#prio-body{padding:22px 26px 28px}' +
+    '.prio-head{padding:14px 16px;border-radius:6px;margin:6px 0 18px}' +
+    '.prio-head-tier{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}' +
+    '.prio-head h2{margin:4px 0 0;font-size:19px;color:#201f1e}' +
+    '.prio-section{margin-bottom:18px}' +
+    '.prio-section h3{font-size:14px;margin:0 0 8px;color:#201f1e}' +
+    '.prio-signals{margin:0;padding-left:18px}' +
+    '.prio-signals li{margin-bottom:6px;color:#323130}' +
+    '.prio-none{color:#107c10;margin:0}' +
+    '.prio-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}' +
+    '.prio-metric{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eef1f5;padding:5px 0;font-size:13px}' +
+    '.prio-metric .k{color:#605e5c}.prio-metric .v{font-weight:600;color:#201f1e;text-align:right}' +
+    '.prio-rubric-intro{font-size:12px;color:#605e5c;margin:0 0 8px}' +
+    '.prio-rubric{list-style:none;margin:0;padding:0}' +
+    '.prio-rule{display:flex;gap:10px;align-items:flex-start;padding:7px 8px;border-radius:6px;font-size:13px}' +
+    '.prio-rule.current{background:#f5f7fb}' +
+    '.prio-pill{flex:0 0 auto;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid}' +
+    '.prio-rule-text{color:#323130}' +
+    '@media(max-width:560px){.prio-metrics{grid-template-columns:1fr}}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'prio-explainer';
+  overlay.className = 'prio-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="prio-dialog" role="dialog" aria-modal="true" aria-labelledby="prio-title">' +
+    '<button class="prio-close" type="button" aria-label="Close">&times;</button>' +
+    '<div id="prio-body"></div></div>';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePriorityExplainer(); });
+  overlay.querySelector('.prio-close').addEventListener('click', closePriorityExplainer);
+  document.body.appendChild(overlay);
+  _prioOverlay = overlay;
+  return overlay;
+}
+
+function openPriorityExplainer(customer) {
+  if (!DATA || !Array.isArray(DATA.opportunity)) return;
+  const row = DATA.opportunity.find(r => r.customer === customer);
+  if (!row) return;
+  const overlay = _ensurePrioOverlay();
+  const meta = PRIORITY_META[row.opportunity] || PRIORITY_META.Low;
+  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
+  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
+
+  const signals = (row.notes && row.notes !== '-')
+    ? row.notes.split('; ').map(s => s.trim()).filter(Boolean) : [];
+  const signalsHtml = signals.length
+    ? '<ul class="prio-signals">' + signals.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ul>'
+    : '<p class="prio-none">No attach gaps detected at the current ' + escapeHtml(tl) +
+      ' baseline — Defender coverage looks healthy for this customer.</p>';
+
+  const catNames = (Array.isArray(row.growth_cat_names) && row.growth_cat_names.length)
+    ? row.growth_cat_names.join(', ') : '—';
+  const metrics = [
+    ['Total monthly ACR', fmt.money2(row.total_current)],
+    ['Defender for Cloud monthly ACR', fmt.money2(row.dfc_current)],
+    ['Defender share of total', fmt.pctRaw(row.dfc_ratio)],
+    ['Attach baseline', escapeHtml(tl)],
+    ['Defender 3-month trend', fmt.pct(row.dfc_3m)],
+    ['Other Azure 3-month trend', fmt.pct(row.other_3m)],
+    ['Core workloads 3-month trend', row.growth_cat_3m == null ? '—' : fmt.pct(row.growth_cat_3m)],
+    ['Growing core workloads', escapeHtml(catNames)],
+  ];
+  const metricsHtml = metrics.map(m =>
+    '<div class="prio-metric"><span class="k">' + m[0] + '</span><span class="v">' + m[1] + '</span></div>'
+  ).join('');
+
+  const rubricHtml = priorityGradingRules().map(rule => {
+    const rm = PRIORITY_META[rule.tier] || PRIORITY_META.Low;
+    const current = rule.tier === row.opportunity ? ' current' : '';
+    return '<li class="prio-rule' + current + '">' +
+      '<span class="prio-pill" style="background:' + rm.bg + ';color:' + rm.color + ';border-color:' + rm.color + ';">' +
+      escapeHtml(rule.tier) + '</span>' +
+      '<span class="prio-rule-text">' + escapeHtml(rule.text) + '</span></li>';
+  }).join('');
+
+  document.getElementById('prio-body').innerHTML =
+    '<div class="prio-head" style="border-left:6px solid ' + meta.color + ';background:' + meta.bg + ';">' +
+      '<div class="prio-head-tier" style="color:' + meta.color + ';">' + escapeHtml(meta.label) + '</div>' +
+      '<h2 id="prio-title">Why is ' + escapeHtml(customer) + ' rated &ldquo;' + escapeHtml(row.opportunity) + '&rdquo;?</h2>' +
+    '</div>' +
+    '<section class="prio-section"><h3>Signals for this customer</h3>' + signalsHtml + '</section>' +
+    '<section class="prio-section"><h3>Key numbers</h3><div class="prio-metrics">' + metricsHtml + '</div></section>' +
+    '<section class="prio-section"><h3>How priorities are graded</h3>' +
+      '<p class="prio-rubric-intro">The highest tier whose conditions are met wins. The tier this customer landed in is highlighted.</p>' +
+      '<ul class="prio-rubric">' + rubricHtml + '</ul></section>';
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.prio-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closePriorityExplainer() {
+  if (_prioOverlay) _prioOverlay.setAttribute('hidden', '');
+  // Restore focus to the badge that opened the modal so keyboard users are not stranded.
+  if (_prioLastFocus && typeof _prioLastFocus.focus === 'function') {
+    try { _prioLastFocus.focus(); } catch (_) {}
+  }
+  _prioLastFocus = null;
+}
+
+function _prioBadgeCustomer(el) {
+  const rowEl = el.closest('[data-customer]');
+  if (rowEl) return rowEl.getAttribute('data-customer');
+  const sel = document.getElementById('customer-select');
+  return (sel && sel.value) ? sel.value : null;
+}
+
+// Capture phase: intercept before the row's bubbling selectCustomer handler so
+// a badge click opens the explainer instead of navigating to the drill-down.
+document.addEventListener('click', function (e) {
+  const badge = e.target.closest ? e.target.closest('.prio-badge') : null;
+  if (!badge) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _prioLastFocus = badge;
+  const customer = _prioBadgeCustomer(badge);
+  if (customer) openPriorityExplainer(customer);
+}, true);
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { closePriorityExplainer(); return; }
+  const isBadge = e.target.classList && e.target.classList.contains('prio-badge');
+  if (isBadge && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    e.stopPropagation();
+    _prioLastFocus = e.target;
+    const customer = _prioBadgeCustomer(e.target);
+    if (customer) openPriorityExplainer(customer);
+  }
+}, true);
+
+
+
+// ---- Customer breakdown modal (Opportunity Matrix) ------------------------
+let _custOverlay = null;
+let _custLastFocus = null;
+let _custPrioWasOpenOnEscape = false;
+
+function _ensureCustOverlay() {
+  if (_custOverlay) return _custOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.cust-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:3900;padding:40px 16px;overflow:auto}' +
+    '.cust-overlay[hidden]{display:none}' +
+    '.cust-dialog{position:relative;background:#faf9f8;border-radius:10px;max-width:1040px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.cust-close{position:absolute;top:8px;right:14px;border:none;background:transparent;font-size:28px;' +
+    'line-height:1;cursor:pointer;color:#605e5c;z-index:1}' +
+    '.cust-close:hover{color:#201f1e}' +
+    '.cust-close:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.cust-body{padding:22px 26px 28px}' +
+    '.cust-body h2{margin:0 0 16px;font-size:20px;color:#201f1e;padding-right:32px}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cust-modal';
+  overlay.className = 'cust-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="cust-dialog" role="dialog" aria-modal="true" aria-labelledby="m-cust-title" data-customer="">' +
+    '<button class="cust-close" type="button" aria-label="Close">&times;</button>' +
+    '<div class="cust-body">' +
+      '<h2 id="m-cust-title"></h2>' +
+      '<div class="controls" style="margin-bottom:14px;"><span id="m-cust-priority"></span></div>' +
+      '<div class="cards" id="m-cust-cards"></div>' +
+      '<div class="note" id="m-cust-signal"></div>' +
+      '<div class="grid-2">' +
+        '<div class="chart-box">' +
+          '<div class="title">Defender for Cloud vs. other Azure workloads</div>' +
+          '<div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>' +
+          '<div class="svg-container" id="m-chart-cust-dfc"></div>' +
+          '<div class="legend">' +
+            '<span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>' +
+            '<span class="legend-item"><span class="legend-swatch" style="background:#605e5c"></span>Other Azure (Total - DfC)</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="chart-box">' +
+          '<div class="title">DfC penetration over time</div>' +
+          '<div class="sub">DfC as % of total ACR for this customer</div>' +
+          '<div class="svg-container" id="m-chart-cust-pct"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="chart-box">' +
+        '<div class="title">Product breakdown</div>' +
+        '<div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>' +
+        '<div id="m-cust-products"></div>' +
+      '</div>' +
+    '</div></div>';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCustomerModal(); });
+  overlay.querySelector('.cust-close').addEventListener('click', closeCustomerModal);
+
+  // SKU drill-down toggle scoped to the modal's product table (mirrors the
+  // drill-down panel listener but rooted at #m-cust-products).
+  const mprod = overlay.querySelector('#m-cust-products');
+  mprod.addEventListener('click', (e) => {
+    const head = e.target.closest('[data-sku-toggle]');
+    if (!head || !mprod.contains(head)) return;
+    const sid = head.getAttribute('data-sku-toggle');
+    const rows = mprod.querySelectorAll('.' + sid);
+    let target = null;
+    rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
+    const caret = head.querySelector('.sku-caret');
+    if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+  });
+
+  // Lightweight focus trap so keyboard users stay within the dialog.
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const nodes = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const focusable = Array.prototype.filter.call(nodes, el => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
+  document.body.appendChild(overlay);
+  _custOverlay = overlay;
+  return overlay;
+}
+
+function openCustomerModal(name) {
+  if (!DATA || !Array.isArray(DATA.opportunity) || !DATA.customer_data) return;
+  const opp = DATA.opportunity.find(r => r.customer === name);
+  const cd = DATA.customer_data[name];
+  if (!opp || !cd) return;
+  const overlay = _ensureCustOverlay();
+  // Stamp the customer on the dialog so the priority badge's data-customer
+  // lookup (el.closest('[data-customer]')) resolves inside the modal.
+  overlay.querySelector('.cust-dialog').setAttribute('data-customer', name);
+  const title = document.getElementById('m-cust-title');
+  if (title) title.textContent = name;
+  renderCustomerDetail(name, 'm-');
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.cust-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closeCustomerModal() {
+  if (_custOverlay) _custOverlay.setAttribute('hidden', '');
+  if (_custLastFocus && typeof _custLastFocus.focus === 'function') {
+    try { _custLastFocus.focus(); } catch (_) {}
+  }
+  _custLastFocus = null;
+}
+
+// Capture phase: intercept a customer click in the Opportunity Matrix (heatmap/
+// scatter + action queue) or the Overview top-customers chart before the
+// element's own selectCustomer handler so the breakdown opens in a modal instead of
+// navigating to the drill-down tab. Priority badges are skipped so the priority
+// explainer still wins.
+document.addEventListener('click', function (e) {
+  if (!e.target.closest) return;
+  if (e.target.closest('.prio-badge')) return;
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  if (!el) return;
+  const name = el.getAttribute('data-customer');
+  if (!name) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _custLastFocus = (typeof el.focus === 'function') ? el : null;
+  openCustomerModal(name);
+}, true);
+
+// Keyboard access for the same customer targets. SVG <rect>/<circle> bubbles and
+// table <tr> rows are not natively focusable, so a tabindex + button role +
+// aria-label is added after every render. MutationObservers scoped to the three
+// host containers re-apply this whenever their contents are re-rendered (tab
+// switch, data reload), and an initial pass covers anything already drawn.
+function _enhanceCustomerTargetsA11y() {
+  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (n.getAttribute('tabindex') === null) n.setAttribute('tabindex', '0');
+    // Bubbles/bars (SVG shapes) become buttons; table rows keep their row/cell
+    // semantics (a "button" role would hide the per-column data from AT) and are
+    // simply made focusable + labelled.
+    if (n.tagName !== 'TR' && !n.getAttribute('role')) n.setAttribute('role', 'button');
+    const nm = n.getAttribute('data-customer');
+    if (nm && !n.getAttribute('aria-label')) n.setAttribute('aria-label', 'Open breakdown for ' + nm);
+  }
+}
+['chart-quadrant', 'opp-tbody', 'chart-top-dfc', 'action-queue', 'all-tbody'].forEach(function (id) {
+  const host = document.getElementById(id);
+  if (!host || typeof MutationObserver !== 'function') return;
+  new MutationObserver(_enhanceCustomerTargetsA11y).observe(host, { childList: true, subtree: true });
+});
+_enhanceCustomerTargetsA11y();
+
+// Enter/Space on a focused customer target opens the modal (mirrors the click
+// interceptor). Priority badges keep their own keyboard handling, so they are
+// skipped here too.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+  if (!e.target.closest) return;
+  if (e.target.closest('.prio-badge')) return;
+  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  if (!el) return;
+  const name = el.getAttribute('data-customer');
+  if (!name) return;
+  e.stopPropagation();
+  e.preventDefault();
+  _custLastFocus = (typeof el.focus === 'function') ? el : null;
+  openCustomerModal(name);
+}, true);
+
+// Escape closes the customer modal. A window-capture sentinel (fires before any
+// document-capture handler) records whether the priority explainer was the
+// modal being dismissed by this same key press, so a stacked Escape does not
+// also close the customer modal underneath it.
+window.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    _custPrioWasOpenOnEscape = (typeof _prioOverlay !== 'undefined') && !!(_prioOverlay && !_prioOverlay.hasAttribute('hidden'));
+  }
+}, true);
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  if (!_custOverlay || _custOverlay.hasAttribute('hidden')) return;
+  if (_custPrioWasOpenOnEscape) { _custPrioWasOpenOnEscape = false; return; }
+  closeCustomerModal();
+}, true);
+
+
+
+// ---- Category breakdown modal (Overview product-mix donut) ----------------
+let _catOverlay = null;
+let _catLastFocus = null;
+
+function _ensureCatOverlay() {
+  if (_catOverlay) return _catOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.cat-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:flex-start;justify-content:center;z-index:3950;padding:48px 16px;overflow:auto}' +
+    '.cat-overlay[hidden]{display:none}' +
+    '.cat-dialog{position:relative;background:#faf9f8;border-radius:10px;max-width:560px;width:100%;' +
+    'box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.cat-close{position:absolute;top:8px;right:14px;border:none;background:transparent;font-size:28px;' +
+    'line-height:1;cursor:pointer;color:#605e5c;z-index:1}' +
+    '.cat-close:hover{color:#201f1e}' +
+    '.cat-close:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.cat-body{padding:22px 26px 26px}' +
+    '.cat-body h2{margin:0 0 4px;font-size:18px;color:#201f1e;padding-right:32px}' +
+    '.cat-body .cat-sub{margin:0 0 14px;font-size:12px;color:#605e5c}' +
+    '.cat-table{width:100%;border-collapse:collapse;font-size:13px}' +
+    '.cat-table th,.cat-table td{padding:6px 8px;text-align:left;border-bottom:1px solid #edebe9}' +
+    '.cat-table td.num,.cat-table th.num{text-align:right;font-variant-numeric:tabular-nums}' +
+    '.cat-empty{padding:18px 0;color:#a19f9d;font-size:13px}';
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cat-modal';
+  overlay.className = 'cat-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="cat-dialog" role="dialog" aria-modal="true" aria-labelledby="cat-title">' +
+    '<button class="cat-close" type="button" aria-label="Close">&times;</button>' +
+    '<div class="cat-body"><h2 id="cat-title"></h2>' +
+    '<p class="cat-sub" id="cat-sub"></p><div id="cat-content"></div></div></div>';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeCategoryModal(); });
+  overlay.querySelector('.cat-close').addEventListener('click', closeCategoryModal);
+  overlay.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const nodes = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const f = Array.prototype.filter.call(nodes, el => !el.disabled && el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  document.body.appendChild(overlay);
+  _catOverlay = overlay;
+  return overlay;
+}
+
+function openCategoryBreakdown(label) {
+  if (!label || typeof DATA === 'undefined' || !DATA) return;
+  const partial = (typeof DATA.partial_month_idx === 'number') ? DATA.partial_month_idx : -1;
+  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== partial); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };
+  const fmt = v => '$' + (Number(v) || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
+  let rows = [], sub = '';
+  if (label === 'Other services') {
+    rows = (Array.isArray(window._donutOtherCats) ? window._donutOtherCats : [])
+      .map(c => ({name: c.label, val: Number(c.value) || 0}))
+      .filter(r => r.val > 0).sort((a, b) => b.val - a.val);
+    sub = 'Categories grouped into the Other slice';
+  } else {
+    const skus = (DATA.product_skus && DATA.product_skus[label]) || null;
+    if (skus && skus.length) {
+      rows = skus.map(s => ({name: s.sku, val: avgOf(s.monthly)})).filter(r => r.val > 0).sort((a, b) => b.val - a.val);
+      sub = 'Services in this category';
+    } else {
+      sub = 'Service-level breakdown is not available for this data source';
+    }
+  }
+  const sum = rows.reduce((s, r) => s + r.val, 0);
+  const overlay = _ensureCatOverlay();
+  const titleEl = overlay.querySelector('#cat-title');
+  const subEl = overlay.querySelector('#cat-sub');
+  const contentEl = overlay.querySelector('#cat-content');
+  if (titleEl) titleEl.textContent = label;
+  if (subEl) subEl.textContent = sub + (sum > 0 ? ' \u00b7 ' + fmt(sum) + ' avg monthly ACR' : '');
+  if (contentEl) {
+    if (!rows.length) {
+      contentEl.innerHTML = '<div class="cat-empty">No service-level breakdown to display.</div>';
+    } else {
+      const body = rows.map(r => {
+        const pct = sum > 0 ? (r.val / sum * 100).toFixed(1) : '0.0';
+        return '<tr><td>' + escapeHtml(r.name) + '</td><td class="num">' + escapeHtml(fmt(r.val)) +
+          '</td><td class="num">' + pct + '%</td></tr>';
+      }).join('');
+      contentEl.innerHTML = '<table class="cat-table"><thead><tr><th>Service</th>' +
+        '<th class="num">Avg monthly ACR</th><th class="num">Share</th></tr></thead><tbody>' +
+        body + '</tbody></table>';
+    }
+  }
+  _catLastFocus = (document.activeElement && typeof document.activeElement.focus === 'function') ? document.activeElement : null;
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.cat-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function closeCategoryModal() {
+  if (_catOverlay) _catOverlay.setAttribute('hidden', '');
+  if (_catLastFocus && typeof _catLastFocus.focus === 'function') { try { _catLastFocus.focus(); } catch (_) {} }
+  _catLastFocus = null;
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  if (!_catOverlay || _catOverlay.hasAttribute('hidden')) return;
+  closeCategoryModal();
+}, true);
+
+
+function renderAll() {
+  if (!DATA.customers || DATA.customers.length === 0) return;
+  reclassifyOpportunities(dfcShareThreshold);
+  renderKpis();
+  renderDfcTrend();
+  const top15 = DATA.opportunity.filter(r => r.dfc_current > 0)
+    .sort((a, b) => b.dfc_current - a.dfc_current).slice(0, 15)
+    .map(r => ({label: r.customer, value: r.dfc_current, color: '#0078d4'}));
+  barChartHorizontal('chart-top-dfc', top15);
+  renderProductMix();
+  renderQuadrant();
+  renderOppTable();
+  renderAllTable();
+  populateCustomerSelect();
+  const firstHigh = DATA.opportunity.find(r => r.opportunity === 'High') || DATA.opportunity[0];
+  if (firstHigh) {
+    document.getElementById('customer-select').value = firstHigh.customer;
+    renderCustomerDetail(firstHigh.customer);
+  }
+}
+
+const ACR_CACHE_KEY = 'defenderattach:acr:v3';
+renderAll();
+document.addEventListener('DOMContentLoaded', function() {
+  // Restore from a previous tab-internal navigation if available.
+  try {
+    const cached = sessionStorage.getItem(ACR_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && parsed.customers && parsed.customers.length) {
+        DATA = parsed;
+        const splash = document.getElementById('splash');
+        if (splash) splash.hidden = true;
+        renderAll();
+        if (window.AppNav) AppNav.setSource(DATA.source_name || 'Restored from session');
+        setStatus('Restored "' + (DATA.source_name || 'previous file') + '" from this session.', 'success');
+      }
+    }
+  } catch (restoreErr) {
+    console.warn('Could not restore cached data:', restoreErr);
+    try { sessionStorage.removeItem(ACR_CACHE_KEY); } catch (_) {}
+  }
+  // Wire the shared nav's "Load other file" button to the existing
+  // import flow + clear the cache so the splash returns next reload.
+  if (window.AppNav && AppNav.onReload) {
+    AppNav.onReload(function(){
+      try { sessionStorage.removeItem(ACR_CACHE_KEY); } catch (_) {}
+      const btn = document.getElementById('import-btn');
+      if (btn) btn.click();
+    });
+  }
+});
+</script>
+<script>
+(function(){
+  var btn = document.getElementById('splash-import-btn');
+  var dz = document.getElementById('splash-dropzone');
+  var err = document.getElementById('splash-error');
+  var importBtn = document.getElementById('import-btn');
+  var fileInput = document.getElementById('file-input');
+  if (!importBtn || !fileInput) return;
+
+  function showError(msg){ if (err) err.textContent = msg || ''; }
+  function clickBrowse(){ showError(''); importBtn.click(); }
+
+  if (btn) btn.addEventListener('click', clickBrowse);
+
+  if (dz) {
+    dz.addEventListener('click', clickBrowse);
+    dz.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); clickBrowse(); }
+    });
+
+    ['dragenter','dragover'].forEach(function(evt){
+      dz.addEventListener(evt, function(e){
+        e.preventDefault(); e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        dz.classList.add('dragover');
+      });
+    });
+    ['dragleave','dragend'].forEach(function(evt){
+      dz.addEventListener(evt, function(e){
+        e.preventDefault(); e.stopPropagation();
+        dz.classList.remove('dragover');
+      });
+    });
+    dz.addEventListener('drop', function(e){
+      e.preventDefault(); e.stopPropagation();
+      dz.classList.remove('dragover');
+      showError('');
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      var file = files[0];
+      if (!/\.(xlsx|xls)$/i.test(file.name)) {
+        showError('Please drop a .xlsx or .xls file.');
+        return;
+      }
+      try {
+        var dt = new DataTransfer();
+        dt.items.add(file);
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (ex) {
+        showError('Could not read dropped file — use the Choose Excel file button instead.');
+      }
+    });
+  }
+
+  // Block accidental drops outside the dropzone (default browser behavior
+  // would navigate away from the dashboard).
+  window.addEventListener('dragover', function(e){ e.preventDefault(); });
+  window.addEventListener('drop', function(e){
+    var splash = document.getElementById('splash');
+    if (splash && !splash.hidden) e.preventDefault();
+  });
+})();
+</script>
+<script src="./js/acr-model.js"></script>
+<script src="./vendor/pptxgen.bundle.js"></script>
+<script src="./js/pptx-acr.js"></script>
+<script src="./js/app-nav.js"></script>
+<script>
+(function () {
+  const btn = document.getElementById('export-pptx-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    if (!window.PptxAcr || typeof window.PptxAcr.exportDeck !== 'function') {
+      setStatus('PowerPoint export module is not loaded.', 'error');
+      return;
+    }
+    if (!DATA || !Array.isArray(DATA.opportunity) || DATA.opportunity.length === 0) {
+      setStatus('Load an Excel export before exporting to PowerPoint.', 'error');
+      return;
+    }
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = 'Building deck…';
+    try {
+      const threshold = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
+      if (typeof reclassifyOpportunities === 'function') reclassifyOpportunities(threshold);
+      const sourceName = DATA.source_name || 'Imported workbook';
+      await window.PptxAcr.exportDeck(DATA, sourceName, threshold);
+      setStatus('PowerPoint deck downloaded.', 'success');
+    } catch (err) {
+      console.error('PPTX export failed', err);
+      setStatus('PowerPoint export failed: ' + (err && err.message ? err.message : err), 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
+  });
+})();
+</script>
+</body>
+</html>
