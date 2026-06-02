@@ -1262,13 +1262,6 @@ def _harden_heatmap(html: str) -> str:
         "original table notes cell",
         2,
     )
-    html = _replace_exact(
-        html,
-        "}${r.notes}</td>",
-        "}${escapeHtml(r.notes)}</td>",
-        "heatmap notes cell",
-        1,
-    )
     return html
 
 

@@ -1229,13 +1229,13 @@ function ensureActionQueueShell() {
   section.id = 'action-queue-section';
   section.innerHTML = `
     <div class="cards">
-      <div class="card high"><div class="label">Annualized DfC ACR Opportunity</div><div class="val" id="action-annual-opportunity">-</div><div class="delta" id="action-annual-opportunity-note">run-rate gap to threshold</div></div>
-      <div class="card medium"><div class="label">Monthly DfC ACR Gap</div><div class="val" id="action-monthly-gap">-</div><div class="delta">latest month basis</div></div>
-      <div class="card"><div class="label">Accounts Below Threshold</div><div class="val" id="action-below-threshold">-</div><div class="delta" id="action-below-threshold-note">visible opportunity rows</div></div>
+      <div class="card high"><div class="label">Annualized DfC Attach Opportunity</div><div class="val" id="action-annual-opportunity">-</div><div class="delta" id="action-annual-opportunity-note">per-service attach gap, annualized</div></div>
+      <div class="card medium"><div class="label">Monthly DfC Attach Gap</div><div class="val" id="action-monthly-gap">-</div><div class="delta" id="action-monthly-gap-note">per-service attach gap, latest month</div></div>
+      <div class="card"><div class="label">Accounts With Attach Gaps</div><div class="val" id="action-below-threshold">-</div><div class="delta" id="action-below-threshold-note">accounts with a per-service gap</div></div>
     </div>
     <div class="chart-box" id="action-queue-card">
       <div class="title">Sales action queue</div>
-      <div class="sub">Prioritized follow-up list based on the selected Defender share threshold. Estimated gap is directional sizing only.</div>
+      <div class="sub">Prioritized follow-up list. Each account is ranked by its largest per-service Defender attach gap (the workloads they buy but don't protect).</div>
       <div class="controls">
         <label>Rows
           <select id="action-queue-limit">
@@ -1256,16 +1256,125 @@ function ensureActionQueueShell() {
   document.getElementById('download-action-queue').addEventListener('click', downloadActionQueueCsv);
 }
 
+function hasServiceAttachData() {
+  return !!(DATA.service_attach && Array.isArray(DATA.service_attach.dossiers) && DATA.service_attach.dossiers.length);
+}
+
+let __slDossierMap = null;
+function slDossierMap() {
+  if (__slDossierMap) return __slDossierMap;
+  const m = new Map();
+  const dossiers = (DATA.service_attach && DATA.service_attach.dossiers) || [];
+  dossiers.forEach(d => {
+    if (!d || !d.customer) return;
+    m.set(d.customer, d);
+    const norm = '~' + String(d.customer).trim().toLowerCase();
+    if (!m.has(norm)) m.set(norm, d);
+  });
+  __slDossierMap = m;
+  return m;
+}
+
+const SL_RANK_LABEL = {0: 'High', 1: 'Medium', 2: 'Low'};
+
+function slAttach(customer) {
+  if (!hasServiceAttachData()) return null;
+  const m = slDossierMap();
+  let d = m.get(customer);
+  if (!d && customer != null) d = m.get('~' + String(customer).trim().toLowerCase());
+  if (!d) return null;
+  const opps = Array.isArray(d.opportunities) ? d.opportunities : [];
+  const dollarOpps = opps.filter(o => (o.gapDollars || 0) > 0);
+  let topGapOpp = null;
+  if (dollarOpps.length) {
+    topGapOpp = dollarOpps.slice().sort((a, b) =>
+      (b.gapDollars || 0) - (a.gapDollars || 0) ||
+      ((a.priorityRank == null ? 9 : a.priorityRank) - (b.priorityRank == null ? 9 : b.priorityRank)))[0];
+  } else if (opps.length) {
+    topGapOpp = opps.slice().sort((a, b) =>
+      ((a.priorityRank == null ? 9 : a.priorityRank) - (b.priorityRank == null ? 9 : b.priorityRank)))[0];
+  }
+  let priorityRank = 9;
+  opps.forEach(o => {
+    const r = (o.priorityRank == null ? 9 : o.priorityRank);
+    if (r < priorityRank) priorityRank = r;
+  });
+  const gapMonthly = d.totalGapDollars || 0;
+  return {
+    dossier: d,
+    gapMonthly,
+    gapAnnual: gapMonthly * 12,
+    topGapOpp,
+    topServiceLabel: topGapOpp ? topGapOpp.planLabel : null,
+    topServiceGap: topGapOpp ? (topGapOpp.gapDollars || 0) : 0,
+    topServiceOpener: topGapOpp ? topGapOpp.opener : null,
+    signal: topGapOpp ? topGapOpp.signal : null,
+    priority: SL_RANK_LABEL[priorityRank] || 'Low',
+    priorityRank: priorityRank === 9 ? 3 : priorityRank,
+    uncoveredEligibleCount: d.uncoveredEligibleCount || 0,
+    hasGap: (gapMonthly > 0) || ((d.uncoveredEligibleCount || 0) > 0)
+  };
+}
+
+function rowPriorityTag(row) {
+  const sl = slAttach(row.customer);
+  return sl ? sl.priority : row.opportunity;
+}
+
 function filteredOpportunityRows() {
   const filter = document.getElementById('quadrant-filter').value;
-  let rows = DATA.opportunity.filter(r => r.opportunity !== 'Too small');
-  if (filter === 'High') rows = rows.filter(r => r.opportunity === 'High');
-  else if (filter === 'Medium') rows = rows.filter(r => r.opportunity === 'Medium');
-  else if (filter === 'HighMed') rows = rows.filter(r => r.opportunity === 'High' || r.opportunity === 'Medium');
+  const slMode = hasServiceAttachData();
+  let rows;
+  if (slMode) {
+    rows = DATA.opportunity.filter(r => {
+      const sl = slAttach(r.customer);
+      return sl ? sl.hasGap : r.opportunity !== 'Too small';
+    });
+  } else {
+    rows = DATA.opportunity.filter(r => r.opportunity !== 'Too small');
+  }
+  if (filter === 'High') rows = rows.filter(r => rowPriorityTag(r) === 'High');
+  else if (filter === 'Medium') rows = rows.filter(r => rowPriorityTag(r) === 'Medium');
+  else if (filter === 'HighMed') rows = rows.filter(r => rowPriorityTag(r) === 'High' || rowPriorityTag(r) === 'Medium');
   return rows;
 }
 
 function actionDetails(row) {
+  const sl = slAttach(row.customer);
+  if (sl) {
+    const planLabel = sl.topServiceLabel || 'eligible Defender plans';
+    let recommendedAction;
+    let conversationAngle;
+    let actionReason;
+    if (sl.topServiceGap > 0) {
+      recommendedAction = `Pitch ${planLabel}`;
+      conversationAngle = sl.topServiceOpener || `${row.customer} is buying workloads protected by ${planLabel} but isn't attaching it — roughly a ${fmt.money2(sl.topServiceGap)}/mo gap.`;
+      actionReason = `Largest per-service attach gap: ${planLabel} at ${fmt.money2(sl.topServiceGap)}/mo.`;
+    } else if (sl.uncoveredEligibleCount > 0) {
+      recommendedAction = `Enable ${planLabel}`;
+      conversationAngle = sl.topServiceOpener || `${row.customer} runs eligible workloads with no matching Defender plan turned on.`;
+      actionReason = `${sl.uncoveredEligibleCount} eligible workload${sl.uncoveredEligibleCount === 1 ? '' : 's'} with no Defender coverage.`;
+    } else {
+      recommendedAction = 'Maintain Defender coverage';
+      conversationAngle = `Defender attach is on track across ${row.customer}'s eligible workloads.`;
+      actionReason = 'No measurable per-service attach gap.';
+    }
+    return {
+      belowThreshold: sl.hasGap,
+      estimatedGap: sl.gapMonthly,
+      estimatedAnnualOpportunity: sl.gapAnnual,
+      recommendedAction,
+      conversationAngle,
+      actionReason,
+      perServicePriority: sl.priority,
+      priorityRank: sl.priorityRank,
+      topServiceLabel: sl.topServiceLabel,
+      topServiceGap: sl.topServiceGap,
+      signal: sl.signal,
+      hasGap: sl.hasGap,
+      sl: true
+    };
+  }
   const belowThreshold = (row.dfc_ratio || 0) < dfcShareThreshold;
   const estimatedGap = Math.max(0, (row.total_monthly_current || row.total_current || 0) * (dfcShareThreshold / 100) - (row.dfc_monthly_current || row.dfc_current || 0));
   const estimatedAnnualOpportunity = estimatedGap * 12;
@@ -1291,16 +1400,30 @@ function actionDetails(row) {
     conversationAngle = 'Validate whether Defender usage declined because of optimization, churn, or reporting timing.';
     actionReason = 'Defender for Cloud ACR is declining over the 3-month window.';
   }
-  return {belowThreshold, estimatedGap, estimatedAnnualOpportunity, recommendedAction, conversationAngle, actionReason};
+  const legacyRank = ({High: 0, Medium: 1, Low: 2, 'Too small': 3})[row.opportunity];
+  return {
+    belowThreshold,
+    estimatedGap,
+    estimatedAnnualOpportunity,
+    recommendedAction,
+    conversationAngle,
+    actionReason,
+    perServicePriority: row.opportunity,
+    priorityRank: legacyRank == null ? 3 : legacyRank,
+    topServiceLabel: null,
+    topServiceGap: 0,
+    signal: null,
+    hasGap: belowThreshold,
+    sl: false
+  };
 }
 
 function actionQueueRows() {
-  const priorityOrder = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
   return filteredOpportunityRows()
     .map(row => ({...row, ...actionDetails(row)}))
     .sort((a, b) =>
-      Number(b.belowThreshold) - Number(a.belowThreshold) ||
-      priorityOrder[a.opportunity] - priorityOrder[b.opportunity] ||
+      Number(b.hasGap) - Number(a.hasGap) ||
+      (a.priorityRank - b.priorityRank) ||
       (b.estimatedGap || 0) - (a.estimatedGap || 0) ||
       (b.growth_gap || 0) - (a.growth_gap || 0) ||
       (b.total_monthly_current || b.total_current || 0) - (a.total_monthly_current || a.total_current || 0));
@@ -1314,20 +1437,23 @@ function visibleActionQueueRows() {
 
 function updateActionQueueMetrics() {
   const rows = actionQueueRows();
+  const slMode = hasServiceAttachData();
   const monthlyGap = rows.reduce((sum, r) => sum + (r.estimatedGap || 0), 0);
   const annualOpportunity = rows.reduce((sum, r) => sum + (r.estimatedAnnualOpportunity || 0), 0);
-  const belowThreshold = rows.filter(r => r.belowThreshold).length;
+  const accountsWithGap = rows.filter(r => r.hasGap).length;
   const thresholdLabel = fmtThreshold(dfcShareThreshold);
   const annualEl = document.getElementById('action-annual-opportunity');
   const annualNoteEl = document.getElementById('action-annual-opportunity-note');
   const monthlyEl = document.getElementById('action-monthly-gap');
+  const monthlyNoteEl = document.getElementById('action-monthly-gap-note');
   const belowEl = document.getElementById('action-below-threshold');
   const belowNoteEl = document.getElementById('action-below-threshold-note');
   if (annualEl) annualEl.textContent = fmt.money2(annualOpportunity);
-  if (annualNoteEl) annualNoteEl.textContent = `annualized run-rate gap to ${thresholdLabel}`;
+  if (annualNoteEl) annualNoteEl.textContent = slMode ? 'per-service attach gap, annualized' : `annualized run-rate gap to ${thresholdLabel}`;
   if (monthlyEl) monthlyEl.textContent = fmt.money2(monthlyGap);
-  if (belowEl) belowEl.textContent = belowThreshold.toLocaleString('en-US');
-  if (belowNoteEl) belowNoteEl.textContent = `below selected ${thresholdLabel} threshold`;
+  if (monthlyNoteEl) monthlyNoteEl.textContent = slMode ? 'per-service attach gap, latest month' : `monthly gap to ${thresholdLabel}`;
+  if (belowEl) belowEl.textContent = accountsWithGap.toLocaleString('en-US');
+  if (belowNoteEl) belowNoteEl.textContent = slMode ? 'accounts with a per-service gap' : `below selected ${thresholdLabel} threshold`;
 }
 
 function renderActionQueue() {
@@ -1348,13 +1474,11 @@ function renderActionQueue() {
           <tr>
             <th>Customer</th>
             <th>Priority</th>
-            <th class="num">FYTD Total ACR</th>
             <th class="num">Monthly Total ACR</th>
-            <th class="num">FYTD DfC ACR</th>
-            <th class="num">Monthly DfC ACR</th>
             <th class="num">DfC %</th>
-            <th class="num">Est. gap to ${thresholdLabel}</th>
-            <th class="num">Annualized opportunity</th>
+            <th>Top gap service</th>
+            <th class="num">Attach gap / mo</th>
+            <th class="num">Annualized attach opportunity</th>
             <th>Recommended action</th>
             <th>Conversation angle</th>
           </tr>
@@ -1363,12 +1487,10 @@ function renderActionQueue() {
           ${rows.map(r => `
             <tr class="clickable" data-customer="${escapeHtml(r.customer)}">
               <td><strong>${escapeHtml(r.customer)}</strong></td>
-              <td>${tagFor(r.opportunity)}</td>
-              <td class="num">${fmt.money2(r.total_fytd || 0)}</td>
+              <td>${tagFor(r.perServicePriority)}</td>
               <td class="num">${fmt.money2(r.total_monthly_current || r.total_current)}</td>
-              <td class="num">${fmt.money2(r.dfc_fytd || 0)}</td>
-              <td class="num">${fmt.money2(r.dfc_monthly_current || r.dfc_current)}</td>
               <td class="num">${fmt.pctRaw(r.dfc_ratio)}</td>
+              <td>${r.topServiceLabel ? `${escapeHtml(r.topServiceLabel)}${r.topServiceGap > 0 ? ` <span style="font-size:12px;color:#605e5c;">(${fmt.money2(r.topServiceGap)}/mo)</span>` : ''}` : '<span style="color:#a19f9d;">—</span>'}</td>
               <td class="num"><strong>${fmt.money2(r.estimatedGap)}</strong></td>
               <td class="num"><strong>${fmt.money2(r.estimatedAnnualOpportunity)}</strong></td>
               <td>${escapeHtml(r.recommendedAction)}<br><span style="font-size:12px;color:#605e5c;">${escapeHtml(r.actionReason)}</span></td>
@@ -1383,10 +1505,10 @@ function renderActionQueue() {
 }
 
 function actionQueueText() {
-  const thresholdLabel = fmtThreshold(dfcShareThreshold);
-  return visibleActionQueueRows().map((r, index) =>
-    `${index + 1}. ${r.customer} | ${r.opportunity} | FYTD Total ACR ${fmt.money2(r.total_fytd || 0)} | Monthly Total ACR ${fmt.money2(r.total_monthly_current || r.total_current)} | FYTD DfC ACR ${fmt.money2(r.dfc_fytd || 0)} | Monthly DfC ACR ${fmt.money2(r.dfc_monthly_current || r.dfc_current)} | DfC ${fmt.pctRaw(r.dfc_ratio)} | Monthly gap to ${thresholdLabel}: ${fmt.money2(r.estimatedGap)} | Annualized opportunity: ${fmt.money2(r.estimatedAnnualOpportunity)} | ${r.recommendedAction} - ${r.conversationAngle}`
-  ).join('\n');
+  return visibleActionQueueRows().map((r, index) => {
+    const topService = r.topServiceLabel ? `${r.topServiceLabel}${r.topServiceGap > 0 ? ` (${fmt.money2(r.topServiceGap)}/mo)` : ''}` : 'n/a';
+    return `${index + 1}. ${r.customer} | ${r.perServicePriority} | Monthly Total ACR ${fmt.money2(r.total_monthly_current || r.total_current)} | DfC ${fmt.pctRaw(r.dfc_ratio)} | Top gap service: ${topService} | Attach gap/mo ${fmt.money2(r.estimatedGap)} | Annualized attach opportunity ${fmt.money2(r.estimatedAnnualOpportunity)} | ${r.recommendedAction} - ${r.conversationAngle}`;
+  }).join('\n');
 }
 
 function setActionQueueStatus(message) {
@@ -1429,20 +1551,19 @@ function downloadActionQueueCsv() {
     setActionQueueStatus('Nothing to download');
     return;
   }
-  const headers = ['Customer', 'Priority', 'FYTD Total ACR', 'Monthly Total ACR', 'FYTD Defender ACR', 'Monthly Defender ACR', 'Defender %', `Monthly gap to ${thresholdLabel}`, 'Annualized opportunity', 'Growth gap', 'Recommended action', 'Conversation angle', 'Reason'];
+  const headers = ['Customer', 'Priority', 'Monthly Total ACR', 'Defender %', 'Top gap service', 'Top gap service $/mo', 'Attach gap / mo', 'Annualized attach opportunity', 'Signal', 'Recommended action', 'Conversation angle', 'Reason'];
   const lines = [
     headers.map(csvCell).join(','),
     ...rows.map(r => [
       r.customer,
-      r.opportunity,
-      r.total_fytd || 0,
+      r.perServicePriority,
       r.total_monthly_current || r.total_current,
-      r.dfc_fytd || 0,
-      r.dfc_monthly_current || r.dfc_current,
       r.dfc_ratio,
+      r.topServiceLabel || '',
+      r.topServiceGap || 0,
       r.estimatedGap,
       r.estimatedAnnualOpportunity,
-      r.growth_gap,
+      r.signal || '',
       r.recommendedAction,
       r.conversationAngle,
       r.actionReason
@@ -1588,18 +1709,26 @@ function renderOpportunityHeatmap() {
   ensureActionQueueShell();
   const filter = document.getElementById('quadrant-filter').value;
   const thresholdLabel = fmtThreshold(dfcShareThreshold);
-  let rows = filteredOpportunityRows();
-  const belowThresholdCount = rows.filter(r => (r.dfc_ratio || 0) < dfcShareThreshold).length;
-  const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+  const slMode = hasServiceAttachData();
+  let rows = filteredOpportunityRows().map(r => ({...r, ...actionDetails(r)}));
+  const gapCount = rows.filter(r => slMode ? r.hasGap : (r.dfc_ratio || 0) < dfcShareThreshold).length;
   rows = rows
     .slice()
-    .sort((a, b) =>
-      Number((b.dfc_ratio || 0) < dfcShareThreshold) - Number((a.dfc_ratio || 0) < dfcShareThreshold) ||
-      order[a.opportunity] - order[b.opportunity] ||
-      (b.growth_gap || 0) - (a.growth_gap || 0) ||
-      (b.total_monthly_current || b.total_current || 0) - (a.total_monthly_current || a.total_current || 0))
+    .sort((a, b) => {
+      if (slMode) {
+        return Number(b.hasGap) - Number(a.hasGap) ||
+          (a.priorityRank - b.priorityRank) ||
+          (b.estimatedGap || 0) - (a.estimatedGap || 0) ||
+          (b.total_monthly_current || b.total_current || 0) - (a.total_monthly_current || a.total_current || 0);
+      }
+      const order = {High: 0, Medium: 1, Low: 2, 'Too small': 3};
+      return Number((b.dfc_ratio || 0) < dfcShareThreshold) - Number((a.dfc_ratio || 0) < dfcShareThreshold) ||
+        order[a.opportunity] - order[b.opportunity] ||
+        (b.growth_gap || 0) - (a.growth_gap || 0) ||
+        (b.total_monthly_current || b.total_current || 0) - (a.total_monthly_current || a.total_current || 0);
+    })
     .slice(0, 35);
-  const maxGap = Math.max(...rows.map(r => Math.max(0, r.growth_gap || 0)), 1);
+  const maxGap = Math.max(...rows.map(r => Math.max(0, slMode ? (r.estimatedGap || 0) : (r.growth_gap || 0))), 1);
   const maxTotal = Math.max(...rows.map(r => r.total_monthly_current || r.total_current || 0), 1);
   const heat = (value, maxValue, color) => {
     const intensity = Math.max(0.08, Math.min(0.85, (value || 0) / maxValue));
@@ -1613,7 +1742,7 @@ function renderOpportunityHeatmap() {
   const thresholdValueEl = document.getElementById('dfc-threshold-value');
   if (thresholdValueEl) thresholdValueEl.textContent = thresholdLabel;
   const thresholdCountEl = document.getElementById('dfc-threshold-count');
-  if (thresholdCountEl) thresholdCountEl.textContent = `${belowThresholdCount} below threshold`;
+  if (thresholdCountEl) thresholdCountEl.textContent = slMode ? `${gapCount} with attach gaps` : `${gapCount} below threshold`;
   document.getElementById('chart-quadrant').innerHTML = `
     <div class="scroll-table" style="max-height:620px;">
       <table>
@@ -1621,14 +1750,11 @@ function renderOpportunityHeatmap() {
           <tr>
             <th>Customer</th>
             <th>Priority</th>
-            <th class="num">FYTD Total ACR</th>
             <th class="num">Monthly Total ACR</th>
-            <th class="num">FYTD DfC ACR</th>
-            <th class="num">Monthly DfC ACR</th>
             <th class="num">DfC %</th>
-            <th class="num">Other 3M $</th>
-            <th class="num">DfC 3M $</th>
-            <th class="num">Gap</th>
+            <th>Top gap service</th>
+            <th class="num">Attach gap / mo</th>
+            <th class="num">Annualized attach opp.</th>
             <th>Signal</th>
           </tr>
         </thead>
@@ -1636,16 +1762,13 @@ function renderOpportunityHeatmap() {
           ${rows.map(r => `
             <tr class="clickable" data-customer="${r.customer.replace(/"/g, '&quot;')}">
               <td><strong>${r.customer}</strong></td>
-              <td>${tagFor(r.opportunity)}</td>
-              <td class="num">${fmt.money2(r.total_fytd || 0)}</td>
+              <td>${tagFor(r.perServicePriority)}</td>
               <td class="num" style="${heat(r.total_monthly_current || r.total_current, maxTotal, '#0078d4')}">${fmt.money2(r.total_monthly_current || r.total_current)}</td>
-              <td class="num">${fmt.money2(r.dfc_fytd || 0)}</td>
-              <td class="num">${fmt.money2(r.dfc_monthly_current || r.dfc_current)}</td>
               <td class="num" style="${shareStyle(r.dfc_ratio || 0)}">${fmt.pctRaw(r.dfc_ratio)}</td>
-              <td class="num ${fmt.pctClass(r.other_3m_delta)}">${fmt.money2(r.other_3m_delta || 0)}</td>
-              <td class="num ${fmt.pctClass(r.dfc_3m_delta)}">${fmt.money2(r.dfc_3m_delta || 0)}</td>
-              <td class="num" style="${heat(Math.max(0, r.growth_gap || 0), maxGap, '#d13438')}"><strong>${fmt.money2(r.growth_gap || 0)}</strong></td>
-              <td>${(r.dfc_ratio || 0) < dfcShareThreshold ? `Below selected ${thresholdLabel} threshold. ` : ''}${r.notes}</td>
+              <td>${r.topServiceLabel ? `${escapeHtml(r.topServiceLabel)}${r.topServiceGap > 0 ? ` <span style="font-size:12px;color:#605e5c;">(${fmt.money2(r.topServiceGap)}/mo)</span>` : ''}` : '<span style="color:#a19f9d;">—</span>'}</td>
+              <td class="num" style="${heat(Math.max(0, r.estimatedGap || 0), maxGap, '#d13438')}"><strong>${fmt.money2(r.estimatedGap || 0)}</strong></td>
+              <td class="num"><strong>${fmt.money2(r.estimatedAnnualOpportunity || 0)}</strong></td>
+              <td>${escapeHtml(r.actionReason)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -1654,7 +1777,11 @@ function renderOpportunityHeatmap() {
   document.querySelectorAll('#chart-quadrant tr.clickable').forEach(tr =>
     tr.addEventListener('click', () => selectCustomer(tr.getAttribute('data-customer'))));
   const footEl = document.getElementById('chart-quadrant-foot');
-  if (footEl) footEl.innerHTML = `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 6% is the corporate Defender attach baseline (every customer should run at least 6% of total ACR on Defender workloads).`;
+  if (footEl) {
+    footEl.innerHTML = slMode
+      ? `Ranked by per-service Defender attach gap — the workloads each account buys but doesn't protect with the matching Defender plan. Top gap service shows the single largest monthly gap; attach gap and annualized opportunity sum every eligible service for that account. Total ACR and DfC % are shown for context only.`
+      : `Ranked heatmap. Rows below the selected ${thresholdLabel} Defender share threshold are lifted and highlighted; priority still also considers total ACR, growth gap, and Defender momentum. Default 6% is the corporate Defender attach baseline (every customer should run at least 6% of total ACR on Defender workloads).`;
+  }
   renderActionQueue();
 }
 

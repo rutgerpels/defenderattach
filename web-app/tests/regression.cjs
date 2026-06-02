@@ -62,13 +62,14 @@ console.log('\nweb-app/index.html (generated)');
     assert(/window\.PptxAcr\.exportDeck\(DATA, sourceName, threshold\)/.test(src),
       'export handler must call PptxAcr.exportDeck with source + threshold');
   });
-  test('renderOpportunityHeatmap escapes customer + notes', () => {
+  test('renderOpportunityHeatmap escapes customer + derived fields', () => {
     const start = src.indexOf('function renderOpportunityHeatmap()');
     assert(start >= 0, 'renderOpportunityHeatmap function must exist in generated HTML');
     // Inspect the next ~6 KB — comfortably covers the function body.
     const body = src.slice(start, start + 6000);
     assert(/\$\{escapeHtml\(r\.customer\)\}/.test(body), 'customer must be escaped in heatmap');
-    assert(/\$\{escapeHtml\(r\.notes\)\}/.test(body), 'notes must be escaped in heatmap');
+    assert(/\$\{escapeHtml\(r\.topServiceLabel\)\}/.test(body), 'top gap service label must be escaped in heatmap');
+    assert(/\$\{escapeHtml\(r\.actionReason\)\}/.test(body), 'signal/reason must be escaped in heatmap');
     assert(!/\$\{r\.customer\}/.test(body), 'no raw r.customer interpolation in heatmap');
     assert(!/\$\{r\.notes\}/.test(body), 'no raw r.notes interpolation in heatmap');
   });
