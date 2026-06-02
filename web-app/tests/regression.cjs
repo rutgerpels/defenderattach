@@ -821,16 +821,16 @@ console.log('\nweb-app/index.html (attach baseline + reclassification)');
     assert(/if \(typeof reclassifyOpportunities === 'function'\) reclassifyOpportunities\(threshold\);/.test(src), 'export must reclassify before building the deck');
     assert(!/: 8;\n.*const sourceName = DATA\.source_name/.test(src), 'stale 8% export fallback must be gone');
   });
-  test('priority badges are clickable and open a grading explainer', () => {
+  test('priority badges are clickable and open a service evidence card', () => {
     assert(/tagFor = function \(opp\) \{/.test(src), 'tagFor reassigned to clickable badge');
     assert(/class="tag ' \+ cls \+ ' prio-badge"/.test(src), 'badge carries the prio-badge hook + role');
     assert(/function openPriorityExplainer\(customer\)/.test(src), 'explainer open function present');
-    assert(/function priorityGradingRules\(\)/.test(src), 'grading rubric helper present');
   });
-  test('explainer parses per-customer signals and is threshold-aware', () => {
-    assert(/row\.notes\.split\('; '\)/.test(src), 'signals derived from row.notes');
-    assert(/attach baseline: Defender share is below the ' \+ tl/.test(src), 'baseline rule text uses the live threshold label');
-    assert(/escapeHtml\(customer\)/.test(src), 'customer name escaped in explainer title');
+  test('explainer avoids legacy corporate attach-rate grading', () => {
+    assert(/function _prioDossier\(customer\)/.test(src), 'service dossier lookup present');
+    assert(/Why ' \+ escapeHtml\(customer\) \+ ' is a ' \+ escapeHtml\(ratingTier\) \+ ' service attach opportunity/.test(src),
+      'customer name escaped in service-opportunity title');
+    assert(!/function priorityGradingRules\(\)/.test(src), 'corporate grading helper removed');
   });
   test('badge clicks are intercepted in capture phase (no drill-down navigation)', () => {
     assert(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?e\.target\.closest\('\.prio-badge'\)[\s\S]*?e\.stopPropagation\(\);[\s\S]*?\}, true\);/.test(src),
@@ -976,15 +976,19 @@ console.log('\nweb-app/index.html (per-service Defender attach)');
     assert(/const monthlyGap = d\.totalGapDollars \|\| 0/.test(src), 'monthly gap sourced from totalGapDollars');
     assert(/const annualGap = monthlyGap \* 12/.test(src), 'annual gap is monthly x12');
   });
-  test('priority modal leads with per-service evidence, demotes corp numbers', () => {
+  test('priority modal is simplified around service-level attach evidence', () => {
     assert(/function _prioServiceEvidence\(customer\)/.test(src), '_prioServiceEvidence helper defined');
-    assert(/What\\'s driving this rating/.test(src), 'modal lead section heading present');
+    assert(/Service-level summary/.test(src), 'modal service summary present');
+    assert(/Top service attach gaps/.test(src), 'modal top service gaps present');
+    assert(/Why this is a priority/.test(src), 'modal concise priority bullets present');
+    assert(/Suggested seller conversation/.test(src), 'modal seller prompt present');
+    assert(/Eligible Azure workload ACR \/ mo/.test(src), 'eligible workload KPI present');
+    assert(/Mapped Defender ACR \/ mo/.test(src), 'mapped Defender KPI present');
     assert(/const svcEvidenceHtml = _prioServiceEvidence\(customer\)/.test(src),
       'modal computes per-service evidence');
-    assert(/Corporate context/.test(src), 'corp numbers demoted under Corporate context');
-    // Per-service evidence must be rendered before the corporate context section.
-    assert(src.indexOf('svcEvidenceHtml +') < src.indexOf('>Corporate context<'),
-      'per-service evidence rendered ahead of corporate context');
+    assert(!/Corporate context/.test(src), 'corp context removed from modal');
+    assert(!/How the corporate attach rating is graded/.test(src), 'corporate grading rubric removed from modal');
+    assert(!/Defender share of total/.test(src), 'corp attach-rate metric removed from modal');
     assert(/escapeHtml\(o\.planLabel\)/.test(src), 'service labels escaped in modal evidence');
   });
 }

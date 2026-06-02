@@ -184,7 +184,6 @@ def build_html() -> str:
     _assert_contains(html, "const DEFAULT_DFC_SHARE_THRESHOLD = 6;", "default 6% attach baseline")
     _assert_contains(html, "attach baseline", "attach baseline footer copy")
     _assert_contains(html, "function openPriorityExplainer(", "priority explainer modal")
-    _assert_contains(html, "function priorityGradingRules()", "priority grading rubric")
     _assert_contains(html, 'class="tag \' + cls + \' prio-badge"', "clickable priority badge")
     _assert_contains(html, "e.target.closest('.prio-badge')", "capture-phase badge click handler")
 
@@ -227,7 +226,8 @@ def build_html() -> str:
     _assert_absent(html, "function _saGapChart(", "removed service attach SVG gap chart helper")
     _assert_absent(html, "Workload vs Defender ACR by service", "removed service attach chart title")
     _assert_contains(html, "function _prioServiceEvidence(", "priority modal per-service evidence")
-    _assert_contains(html, "What\\'s driving this rating", "priority modal lead section")
+    _assert_contains(html, "Service-level summary", "priority modal service summary")
+    _assert_contains(html, "Suggested seller conversation", "priority modal seller prompt")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
     _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
@@ -1334,26 +1334,6 @@ const PRIORITY_META = {
   'Too small': { color: '#605e5c', bg: '#f3f2f1', label: 'Too small to prioritize' },
 };
 
-// Threshold-aware rubric mirroring AcrModel.classifyOpportunity. The highest
-// tier whose conditions are met wins.
-function priorityGradingRules() {
-  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
-  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
-  return [
-    { tier: 'Too small', text: 'Total Azure ACR under $1,500 / month — sales priority is low regardless of Defender share.' },
-    { tier: 'High',   text: 'No Defender for Cloud spend at all (under $15 / month) while the customer spends over $3,000 / month on Azure — 0% against the ' + tl + ' attach baseline.' },
-    { tier: 'High',   text: 'Other Azure workloads grew over the last 3 months while Defender for Cloud is shrinking (declining more than 5%).' },
-    { tier: 'High',   text: 'Other Azure is growing, Defender is flat (under 2% growth) AND Defender is under 2% of total ACR.' },
-    { tier: 'High',   text: 'Break of trend: core workloads (Compute, Databases, Developer Tools, Integration, AI + Machine Learning, Containers) grew over 5% over 3 months, Defender did not keep pace (more than 5 points behind), and the customer is below the ' + tl + ' baseline.' },
-    { tier: 'Medium', text: 'Defender penetration under 1.5% of total ACR while other Azure is growing — undersold.' },
-    { tier: 'Medium', text: 'Defender for Cloud is growing more than 5 points slower than the rest of Azure.' },
-    { tier: 'Medium', text: 'Very low Defender penetration (under 0.5%) on a sizeable account (total ACR over $6,000 / month).' },
-    { tier: 'Medium', text: 'Break of trend on core workloads while already at or above the ' + tl + ' baseline.' },
-    { tier: 'Medium', text: 'Defender attach baseline: Defender share is below the ' + tl + ' corporate baseline — every customer should run at least ' + tl + ' of total ACR on Defender workloads.' },
-    { tier: 'Low',    text: 'None of the above triggers fire — Defender attach looks healthy for this customer at the current ' + tl + ' baseline.' },
-  ];
-}
-
 // Clickable, accessible replacement for the template's tagFor. Late-bound, so
 // every render path (tables, heatmap, action queue, drill-down) picks it up.
 tagFor = function (opp) {
@@ -1386,6 +1366,7 @@ function _ensurePrioOverlay() {
     '.prio-head{padding:14px 16px;border-radius:6px;margin:6px 0 18px}' +
     '.prio-head-tier{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}' +
     '.prio-head h2{margin:4px 0 0;font-size:19px;color:#201f1e}' +
+    '.prio-head p{margin:6px 0 0;font-size:13px;color:#605e5c;line-height:1.4}' +
     '.prio-section{margin-bottom:18px}' +
     '.prio-section h3{font-size:14px;margin:0 0 8px;color:#201f1e}' +
     '.prio-signals{margin:0;padding-left:18px}' +
@@ -1395,6 +1376,9 @@ function _ensurePrioOverlay() {
     '.prio-gap-banner .big{font-size:22px;font-weight:700;color:#5c2d91}' +
     '.prio-gap-banner .lbl{font-size:12px;color:#605e5c}' +
     '.prio-gap-banner .sub{font-size:12px;color:#605e5c;flex:1 1 200px}' +
+    '.prio-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 14px}' +
+    '.prio-kpi{border:1px solid #eef1f5;border-radius:8px;padding:10px;background:#fff}' +
+    '.prio-kpi .big{font-size:19px;font-weight:700;color:#201f1e}.prio-kpi .lbl{font-size:11px;color:#605e5c;margin-top:3px}' +
     '.prio-svc-list{display:flex;flex-direction:column;gap:8px}' +
     '.prio-svc-row{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid #eef1f5;border-radius:6px;padding:8px 10px;flex-wrap:wrap}' +
     '.prio-svc-row .svc{font-weight:600;color:#201f1e}' +
@@ -1409,7 +1393,9 @@ function _ensurePrioOverlay() {
     '.prio-rule.current{background:#f5f7fb}' +
     '.prio-pill{flex:0 0 auto;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid}' +
     '.prio-rule-text{color:#323130}' +
-    '@media(max-width:560px){.prio-metrics{grid-template-columns:1fr}}';
+    '.prio-talktrack{border-left:3px solid #0078d4;background:#f3f9fd;border-radius:6px;padding:10px 12px;color:#323130;font-size:13px;line-height:1.45}' +
+    '@media(max-width:720px){.prio-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}' +
+    '@media(max-width:560px){.prio-metrics,.prio-kpis{grid-template-columns:1fr}}';
   document.head.appendChild(style);
 
   const overlay = document.createElement('div');
@@ -1427,50 +1413,73 @@ function _ensurePrioOverlay() {
   return overlay;
 }
 
-// Per-service evidence for the priority modal: leads with the concrete
-// "you buy X but don't protect X" gaps plus the $ opportunity, so a High rating
-// is justified by service-level facts rather than the corp total-vs-DfC ratio.
-// Returns '' when no SL2/SL4 dossier exists (e.g. legacy imports), in which case
-// the modal falls back to the corporate framing only.
-function _prioServiceEvidence(customer) {
+function _prioDossier(customer) {
   const sa = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach : null;
-  if (!sa || !Array.isArray(sa.dossiers)) return '';
-  const d = sa.dossiers.find(function (x) { return x.customer === customer; });
+  if (!sa || !Array.isArray(sa.dossiers)) return null;
+  return sa.dossiers.find(function (x) { return x.customer === customer; }) || null;
+}
+
+function _prioSignalLabel(o) {
+  if (!o || !o.hasDollarGap) return 'Needs validation';
+  if ((o.defenderActual || 0) <= 0) return 'No attach';
+  return 'Under-attached';
+}
+
+// Per-service evidence for the priority modal: leads with the concrete
+// "you buy X but don't protect X" gaps plus the $ opportunity, so the rating
+// is justified by service-level facts rather than the corp total-vs-DfC ratio.
+function _prioServiceEvidence(customer) {
+  const d = _prioDossier(customer);
   if (!d) return '';
   const opps = (Array.isArray(d.opportunities) ? d.opportunities.slice() : []).sort(function (a, b) {
     return ((a.priorityRank == null ? 9 : a.priorityRank) - (b.priorityRank == null ? 9 : b.priorityRank)) ||
       ((b.blendedScore || 0) - (a.blendedScore || 0));
   });
   if (!opps.length) {
-    return '<section class="prio-section"><h3>What\'s driving this rating</h3>' +
+    return '<section class="prio-section"><h3>Service-level evidence</h3>' +
       '<p class="prio-none">No specific per-service Defender gaps \u2014 this customer protects the Azure services they run. ' +
-      'The rating reflects overall Defender attach versus the corporate baseline (see Corporate context below).</p></section>';
+      'Use the customer breakdown for supporting service details.</p></section>';
   }
   const monthly = d.totalGapDollars || 0;
   const annual = monthly * 12;
   const covSignals = opps.filter(function (o) { return !o.hasDollarGap; }).length;
-  const banner =
-    '<div class="prio-gap-banner">' +
-      '<div><div class="big">' + fmt.money(monthly) + '</div><div class="lbl">Total ACR gap per month</div></div>' +
-      '<div><div class="big">' + fmt.money(annual) + '</div><div class="lbl">Total ACR gap per year</div></div>' +
-      '<div class="sub">Close these per-service Defender gaps to capture the estimated ACR above' +
-        (covSignals > 0 ? ' \u00b7 plus ' + covSignals + ' usage-priced service' + (covSignals === 1 ? '' : 's') + ' with coverage gaps (upside not yet quantified)' : '') +
-      '.</div>' +
+  const measurable = opps.filter(function (o) { return o.hasDollarGap && (o.gapDollars || 0) > 0; }).length;
+  const kpis =
+    '<div class="prio-kpis">' +
+      '<div class="prio-kpi"><div class="big">' + fmt.money(d.eligibleWorkloadAcr || 0) + '</div><div class="lbl">Eligible Azure workload ACR / mo</div></div>' +
+      '<div class="prio-kpi"><div class="big">' + fmt.money(d.dfcAcr || 0) + '</div><div class="lbl">Mapped Defender ACR / mo</div></div>' +
+      '<div class="prio-kpi"><div class="big">' + fmt.money(monthly) + '</div><div class="lbl">Estimated service gap / mo' + (annual > 0 ? ' \u00b7 ' + fmt.money(annual) + '/yr' : '') + '</div></div>' +
+      '<div class="prio-kpi"><div class="big">' + opps.length + '</div><div class="lbl">Services to discuss</div></div>' +
     '</div>';
   const rows = opps.slice(0, 6).map(function (o) {
     const pr = (o.priority || '').toLowerCase();
     const prClass = pr === 'high' ? 'high' : (pr === 'medium' ? 'medium' : 'low');
-    const gapStr = o.hasDollarGap ? fmt.money(o.gapDollars) + ' / mo gap' : 'coverage signal';
+    const gapStr = o.hasDollarGap ? fmt.money(o.gapDollars) + ' / mo gap' : 'needs validation';
     return '<div class="prio-svc-row">' +
       '<div><span class="tag ' + prClass + '">' + escapeHtml(o.priority || '') + '</span> ' +
         '<span class="svc">' + escapeHtml(o.planLabel) + '</span>' +
-        '<div class="nums">Workload ' + fmt.money(o.workloadAcr) + ' / mo (' + fmt.pct(o.workloadGrowth) + ' 3M) \u2192 Defender ' + fmt.money(o.defenderActual) + ' / mo</div>' +
+        '<div class="nums">' + escapeHtml(_prioSignalLabel(o)) + ' \u00b7 Azure service ' + fmt.money(o.workloadAcr) + ' / mo (' + fmt.pct(o.workloadGrowth) + ' 3M) \u2192 Defender ' + fmt.money(o.defenderActual) + ' / mo</div>' +
       '</div>' +
       '<div class="gapv">' + escapeHtml(gapStr) + '</div>' +
     '</div>';
   }).join('');
-  return '<section class="prio-section"><h3>What\'s driving this rating</h3>' + banner +
-    '<div class="prio-svc-list">' + rows + '</div></section>';
+  const bullets = opps.slice(0, 4).map(function (o) {
+    const signal = _prioSignalLabel(o).toLowerCase();
+    const gap = o.hasDollarGap && (o.gapDollars || 0) > 0 ? ' with an estimated ' + fmt.money(o.gapDollars) + '/mo gap' : ' and should be validated for active coverage';
+    return '<li>' + escapeHtml(o.planLabel) + ': ' + escapeHtml(signal) + ' on ' + fmt.money(o.workloadAcr) + '/mo Azure service consumption' + escapeHtml(gap) + '.</li>';
+  }).join('');
+  const lead = opps[0];
+  const leadWorkload = lead ? escapeHtml(lead.workloadLabel || lead.planLabel) : 'priority services';
+  const talkTrack = '<section class="prio-section"><h3>Suggested seller conversation</h3>' +
+    '<div class="prio-talktrack">&ldquo;We noticed material Azure consumption in ' + leadWorkload +
+    ', but Defender consumption does not appear to match that usage. Can we review whether these workloads are already protected and where Defender-for-X attach makes sense?&rdquo;</div></section>';
+  return '<section class="prio-section"><h3>Service-level summary</h3>' + kpis +
+    '<p class="prio-rubric-intro">' + measurable + ' quantified gap' + (measurable === 1 ? '' : 's') +
+      (covSignals > 0 ? ' plus ' + covSignals + ' usage-priced service' + (covSignals === 1 ? '' : 's') + ' where coverage should be validated.' : '.') +
+    '</p></section>' +
+    '<section class="prio-section"><h3>Top service attach gaps</h3><div class="prio-svc-list">' + rows + '</div></section>' +
+    '<section class="prio-section"><h3>Why this is a priority</h3><ul class="prio-signals">' + bullets + '</ul></section>' +
+    talkTrack;
 }
 
 function openPriorityExplainer(customer) {
@@ -1485,58 +1494,19 @@ function openPriorityExplainer(customer) {
   const sl = (typeof slAttach === 'function') ? slAttach(customer) : null;
   const ratingTier = sl ? sl.priority : row.opportunity;
   const meta = PRIORITY_META[ratingTier] || PRIORITY_META.Low;
-  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
-  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
-
-  const signals = (row.notes && row.notes !== '-')
-    ? row.notes.split('; ').map(s => s.trim()).filter(Boolean) : [];
-  const signalsHtml = signals.length
-    ? '<ul class="prio-signals">' + signals.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ul>'
-    : '<p class="prio-none">No attach gaps detected at the current ' + escapeHtml(tl) +
-      ' baseline — Defender coverage looks healthy for this customer.</p>';
-
-  const catNames = (Array.isArray(row.growth_cat_names) && row.growth_cat_names.length)
-    ? row.growth_cat_names.join(', ') : '—';
-  const metrics = [
-    ['Total monthly ACR', fmt.money2(row.total_current)],
-    ['Defender for Cloud monthly ACR', fmt.money2(row.dfc_current)],
-    ['Defender share of total', fmt.pctRaw(row.dfc_ratio)],
-    ['Attach baseline', escapeHtml(tl)],
-    ['Defender 3-month trend', fmt.pct(row.dfc_3m)],
-    ['Other Azure 3-month trend', fmt.pct(row.other_3m)],
-    ['Core workloads 3-month trend', row.growth_cat_3m == null ? '—' : fmt.pct(row.growth_cat_3m)],
-    ['Growing core workloads', escapeHtml(catNames)],
-  ];
-  const metricsHtml = metrics.map(m =>
-    '<div class="prio-metric"><span class="k">' + m[0] + '</span><span class="v">' + m[1] + '</span></div>'
-  ).join('');
-
-  const rubricHtml = priorityGradingRules().map(rule => {
-    const rm = PRIORITY_META[rule.tier] || PRIORITY_META.Low;
-    const current = rule.tier === row.opportunity ? ' current' : '';
-    return '<li class="prio-rule' + current + '">' +
-      '<span class="prio-pill" style="background:' + rm.bg + ';color:' + rm.color + ';border-color:' + rm.color + ';">' +
-      escapeHtml(rule.tier) + '</span>' +
-      '<span class="prio-rule-text">' + escapeHtml(rule.text) + '</span></li>';
-  }).join('');
-
+  const dossier = _prioDossier(customer);
   const svcEvidenceHtml = _prioServiceEvidence(customer);
+  const headline = dossier
+    ? escapeHtml(customer) + ' has material Azure service consumption with low or missing matching Defender-for-X consumption.'
+    : 'Use this explanation to review why the customer is prioritized.';
 
   document.getElementById('prio-body').innerHTML =
     '<div class="prio-head" style="border-left:6px solid ' + meta.color + ';background:' + meta.bg + ';">' +
       '<div class="prio-head-tier" style="color:' + meta.color + ';">' + escapeHtml(meta.label) + '</div>' +
-      '<h2 id="prio-title">Why is ' + escapeHtml(customer) + ' rated &ldquo;' + escapeHtml(ratingTier) + '&rdquo;?</h2>' +
+      '<h2 id="prio-title">Why ' + escapeHtml(customer) + ' is a ' + escapeHtml(ratingTier) + ' service attach opportunity</h2>' +
+      '<p>' + headline + '</p>' +
     '</div>' +
-    svcEvidenceHtml +
-    '<section class="prio-section"><h3>Corporate context</h3>' +
-      '<p class="prio-rubric-intro">Overall Defender attach signals behind the corporate rating.</p>' +
-      signalsHtml +
-      '<div class="prio-metrics" style="margin-top:10px;">' + metricsHtml + '</div></section>' +
-    '<section class="prio-section"><h3>' + (sl ? 'How the corporate attach rating is graded' : 'How priorities are graded') + '</h3>' +
-      '<p class="prio-rubric-intro">' + (sl
-        ? 'The headline above reflects this customer\u2019s top per-service Defender gap. The corporate attach rating below (&ldquo;' + escapeHtml(row.opportunity) + '&rdquo;) is a separate, blended signal \u2014 the highest tier whose conditions are met wins.'
-        : 'The highest tier whose conditions are met wins. The tier this customer landed in is highlighted.') + '</p>' +
-      '<ul class="prio-rubric">' + rubricHtml + '</ul></section>';
+    (svcEvidenceHtml || '<section class="prio-section"><h3>Priority notes</h3><p class="prio-rubric-intro">' + escapeHtml(row.notes || 'No service-level dossier is available for this import.') + '</p></section>');
   overlay.removeAttribute('hidden');
   const closeBtn = overlay.querySelector('.prio-close');
   if (closeBtn) closeBtn.focus();
