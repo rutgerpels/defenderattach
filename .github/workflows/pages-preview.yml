@@ -1,0 +1,164 @@
+name: Publish GitHub Pages PR preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+    paths:
+      - "web-app/**"
+      - "scripts/build_static_webapp.py"
+      - "src/defender_acr_dashboard/static_dashboard.py"
+      - "docs/defender_for_cloud_dashboard (2).html"
+      - "requirements.txt"
+      - ".github/workflows/pages-preview.yml"
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to publish under previews/pr-<number>"
+        required: true
+      ref:
+        description: "Branch, tag, or SHA to publish"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-preview-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  publish-preview:
+    name: Publish PR preview
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.action != 'closed' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out preview source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Set up Node 20
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Verify generated web app and run regressions
+        run: |
+          set -euo pipefail
+          python scripts/build_static_webapp.py --check
+          node web-app/tests/regression.cjs
+
+      - name: Stage preview site
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          rsync -a --exclude='tests' web-app/ _site/
+
+      - name: Publish preview to gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+
+          preview_path="previews/pr-${PR_NUMBER}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          remote_url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "${remote_url}"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages --depth=1
+            git worktree add _pages origin/gh-pages
+          else
+            git worktree add --detach _pages
+            git -C _pages checkout --orphan gh-pages
+            git -C _pages rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          rm -rf "_pages/${preview_path}"
+          mkdir -p "_pages/${preview_path}"
+          rsync -a --delete _site/ "_pages/${preview_path}/"
+          touch _pages/.nojekyll
+
+          git -C _pages add -A
+          if git -C _pages diff --cached --quiet; then
+            echo "No GitHub Pages preview changes to publish."
+          else
+            git -C _pages commit -m "Deploy preview for PR ${PR_NUMBER}"
+            git -C _pages push origin HEAD:gh-pages
+          fi
+
+          preview_url="${SITE_URL}/${preview_path}/"
+          echo "Preview URL: ${preview_url}" >> "${GITHUB_STEP_SUMMARY}"
+
+  cleanup-preview:
+    name: Remove closed PR preview
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Delete preview from gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          preview_path="previews/pr-${PR_NUMBER}"
+
+          if ! git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            echo "No gh-pages branch exists; nothing to clean up."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          remote_url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "${remote_url}"
+
+          git fetch origin gh-pages --depth=1
+          git worktree add _pages origin/gh-pages
+
+          if [ ! -d "_pages/${preview_path}" ]; then
+            echo "Preview ${preview_path} does not exist; nothing to clean up."
+            exit 0
+          fi
+
+          rm -rf "_pages/${preview_path}"
+          git -C _pages add -A
+
+          if git -C _pages diff --cached --quiet; then
+            echo "No preview cleanup changes to publish."
+          else
+            git -C _pages commit -m "Remove preview for PR ${PR_NUMBER}"
+            git -C _pages push origin HEAD:gh-pages
+          fi
