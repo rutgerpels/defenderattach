@@ -83,6 +83,13 @@ def build_html() -> str:
     html = _opportunity_map_labels(html)
     html = _inject_opportunity_map(html)
 
+    html = _replace_once(
+        html,
+        "  barChartHorizontal('chart-top-dfc', top15);\n",
+        "  barChartHorizontal('chart-top-dfc', top15);\n  slDecorateOverview();\n",
+        "renderAll chart-top-dfc anchor (Overview decorator wire-up)",
+    )
+
     html = html.replace(
         "<title>Defender for Cloud — Opportunity Dashboard</title>",
         "<title>Defender for Cloud — ACR Opportunity Dashboard</title>",
@@ -235,6 +242,7 @@ def build_html() -> str:
     _assert_contains(html, 'id="splash-dropzone"', "splash dropzone")
     _assert_contains(html, "splash.hidden = true", "splash hide-on-load")
     _assert_contains(html, "if (!DATA.customers || DATA.customers.length === 0) return;", "renderAll empty-state guard")
+    _assert_contains(html, "  __slDossierMap = null;\n  reclassifyOpportunities(dfcShareThreshold);", "renderAll dossier-cache reset (stale-data guard)")
     _assert_contains(html, "ACR_CACHE_KEY = 'defenderattach:acr:v3'", "session-storage persistence (v3 cache key)")
     _assert_contains(html, "sessionStorage.setItem(ACR_CACHE_KEY", "persistence write on import")
     _assert_contains(html, "const colorFor = (label, rank) =>", "validated donut colour helper")
@@ -279,6 +287,11 @@ def build_html() -> str:
     _assert_contains(html, "function _ensureCatOverlay(", "category modal overlay builder")
     _assert_contains(html, "DATA.product_skus", "category modal sources SKU leaves")
     _assert_absent(html, ": TRACK_PRODUCTS)\n    .filter(p => src[p]);", "donut no longer reuses the 8-cap track_products taxonomy")
+
+    _assert_contains(html, "function slDecorateOverview()", "Overview attach decorator function")
+    _assert_contains(html, "function slPlanBars(", "Overview plan-gap bars helper")
+    _assert_contains(html, "function slSetChartText(", "Overview runtime chart-text helper")
+    _assert_contains(html, "  slDecorateOverview();\n", "renderAll Overview decorator wiring")
 
     return html
 
@@ -1301,6 +1314,7 @@ def _threshold_priority(html: str) -> str:
         "  renderKpis();",
         "function renderAll() {\n"
         "  if (!DATA.customers || DATA.customers.length === 0) return;\n"
+        "  __slDossierMap = null;\n"
         "  reclassifyOpportunities(dfcShareThreshold);\n"
         "  renderKpis();",
         "renderAll baseline reclassify",

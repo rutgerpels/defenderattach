@@ -1742,5 +1742,150 @@ function renderQuadrant() {
   renderOpportunityHeatmap();
 }
 
+// ---- Overview decoration (service-level attach narrative) ----------------
+// In SL mode the legacy corp-penetration Overview is rewritten in place to the
+// per-service attach story. Guarded so non-SL data renders byte-identically.
+function slSetChartText(containerId, title, sub) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const box = el.closest('.chart-box');
+  if (!box) return;
+  if (title != null) {
+    const t = box.querySelector('.title');
+    if (t) t.textContent = title;
+  }
+  if (sub != null) {
+    const s = box.querySelector('.sub');
+    if (s) s.textContent = sub;
+  }
+}
+
+function slPlanBars(containerId, rows) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = '<div style="padding:24px;color:#605e5c;font-size:13px;">No quantified per-service attach gaps in this book.</div>';
+    return;
+  }
+  const maxV = Math.max.apply(null, rows.map(r => r.value).concat([1]));
+  el.innerHTML = rows.map(r => {
+    const w = Math.max(2, (r.value / maxV) * 100);
+    return '<div style="display:flex;align-items:center;gap:10px;margin:7px 0;font-size:12px;">'
+      + '<div style="flex:0 0 210px;text-align:right;color:#323130;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(r.label) + '">' + escapeHtml(r.label) + '</div>'
+      + '<div style="flex:1;background:#f3f2f1;border-radius:3px;"><div style="width:' + w + '%;height:16px;background:#d83b01;border-radius:3px;"></div></div>'
+      + '<div style="flex:0 0 92px;color:#605e5c;font-weight:600;">' + fmt.money(r.value) + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function slDecorateOverview() {
+  if (!hasServiceAttachData()) return;
+  const sa = DATA.service_attach || {};
+  const dossiers = (Array.isArray(sa.dossiers) ? sa.dossiers : [])
+    .filter(d => d && typeof d === 'object' && typeof d.customer === 'string');
+
+  const totalGap = sa.totalGapDollars || 0;
+  const annual = totalGap * 12;
+
+  let accountsWithGap = 0;
+  let highCount = 0;
+  dossiers.forEach(d => {
+    const sl = slAttach(d.customer);
+    if (!sl) return;
+    if (sl.hasGap) accountsWithGap++;
+    if (sl.priority === 'High') highCount++;
+  });
+
+  // Aggregate dollar gaps by Defender plan -> biggest gap service + chart 1.
+  const byPlan = new Map();
+  dossiers.forEach(d => {
+    (Array.isArray(d.opportunities) ? d.opportunities : []).forEach(o => {
+      const g = (o && o.gapDollars) || 0;
+      if (g > 0 && o.planLabel) byPlan.set(o.planLabel, (byPlan.get(o.planLabel) || 0) + g);
+    });
+  });
+  let topPlan = null;
+  let topPlanGap = 0;
+  byPlan.forEach((v, k) => { if (v > topPlanGap) { topPlanGap = v; topPlan = k; } });
+
+  const attachRatio = (sa.bookAttachRatio != null) ? sa.bookAttachRatio : null;
+
+  const setCard = (valId, label, value, delta) => {
+    const valEl = document.getElementById(valId);
+    if (!valEl) return null;
+    valEl.textContent = value;
+    const card = valEl.closest('.card');
+    if (!card) return null;
+    if (label != null) {
+      const labelEl = card.querySelector('.label');
+      if (labelEl) labelEl.textContent = label;
+    }
+    if (delta != null) {
+      const deltaEl = card.querySelector('.delta');
+      if (deltaEl) deltaEl.textContent = delta;
+    }
+    return card;
+  };
+
+  setCard('kpi-high', 'Total attach gap / mo', fmt.money(totalGap), 'unprotected eligible workload spend');
+  setCard('kpi-med', 'Annualized opportunity', fmt.money(annual), 'if every per-service gap is closed');
+  setCard('kpi-low', 'Accounts with a gap', String(accountsWithGap), 'of ' + dossiers.length + ' accounts in the book');
+  setCard('kpi-small', 'High-priority accounts', String(highCount), 'work these first');
+
+  const attachCard = setCard('kpi-dfc-acr', null,
+    attachRatio == null ? '\u2013' : (attachRatio * 100).toFixed(1) + '%', null);
+  if (attachCard) {
+    const labelEl = attachCard.querySelector('.label');
+    if (labelEl) {
+      const tip = 'Book attach rate = total Defender for Cloud spend divided by the Azure workload spend that is eligible for a matching Defender plan. It excludes non-Azure spend (e.g. Power BI, GitHub) so it is not diluted by workloads Defender cannot protect.';
+      labelEl.innerHTML = 'Book attach rate '
+        + '<span class="prio-badge-i" tabindex="0" role="img" aria-label="What is book attach rate?" style="cursor:help;" title="'
+        + escapeHtml(tip) + '">&#9432;</span>';
+    }
+    const deltaEl = document.getElementById('kpi-dfc-mom');
+    if (deltaEl) deltaEl.textContent = 'Defender \u00f7 eligible workload ACR';
+  }
+
+  setCard('kpi-dfc-pct', 'Biggest gap service',
+    topPlan ? fmt.money(topPlanGap) : '\u2013',
+    topPlan ? topPlan + ' / mo across the book' : 'no quantified service gap');
+
+  const note = document.querySelector('#panel-overview .note');
+  if (note) {
+    note.innerHTML = '<strong>How to read this:</strong> Each account buys Azure workloads '
+      + '(containers, SQL, App Service, storage, and more) without the matching Defender for Cloud plan switched on. '
+      + 'The cards size the total monthly and annualized attach gap across the book, how many accounts are affected, '
+      + 'and which Defender service carries the largest gap. Use the <em>Opportunity Matrix</em> to work the ranked list '
+      + 'and a customer breakdown for the per-service talk track. To refresh, click <em>Import new Excel</em> and pick your latest export.';
+  }
+
+  // Chart 1: attach gap by Defender service (non-clickable plan bars).
+  const planRows = Array.from(byPlan.entries())
+    .map(([label, value]) => ({label: label, value: value}))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 12);
+  slPlanBars('chart-dfc-trend', planRows);
+  slSetChartText('chart-dfc-trend', 'Attach gap by Defender service', 'Monthly $ gap aggregated across all accounts');
+
+  // Chart: top 15 accounts by attach gap (clickable -> drill-down).
+  const topEl = document.getElementById('chart-top-dfc');
+  if (topEl) {
+    const accRows = dossiers
+      .map(d => ({label: d.customer, value: d.totalGapDollars || 0}))
+      .filter(r => r.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 15);
+    if (accRows.length) {
+      barChartHorizontal('chart-top-dfc', accRows);
+    } else {
+      topEl.innerHTML = '<div style="padding:24px;color:#605e5c;font-size:13px;">No quantified attach gaps to rank yet.</div>';
+    }
+    slSetChartText('chart-top-dfc', 'Top 15 accounts by attach gap', 'Monthly $ attach gap \u00b7 click a bar to drill down');
+  }
+
+  // Product mix chart: reword subtitle only.
+  slSetChartText('chart-product-mix', null, 'Where the Azure spend sits \u2014 the workloads that should carry Defender attach');
+}
+
 '''
     return template.replace("function renderAll() {", script + "\nfunction renderAll() {", 1)
