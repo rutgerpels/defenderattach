@@ -949,6 +949,17 @@ console.log('\nweb-app/index.html (per-service Defender attach)');
     assert(/const tierLegend = opps\.length/.test(src), 'tier-definition legend present');
     assert(/workload growing faster than Defender attach/.test(src), 'High tier defined in legend');
   });
+  test('service attach opportunities table includes search filtering', () => {
+    assert(/id="action-queue-search"/.test(src), 'search input is rendered with action queue controls');
+    assert(/Search service attach opportunities/.test(src), 'search input has an accessible label');
+    assert(/document\.getElementById\('action-queue-search'\)\.addEventListener\('input', renderOpportunityHeatmap\)/.test(src),
+      'search input re-renders the table on input');
+    assert(/const term = \(document\.getElementById\('action-queue-search'\)\?\.value \|\| ''\)\.trim\(\)\.toLowerCase\(\)/.test(src),
+      'action queue rows read the normalized search term');
+    assert(/row\.topServiceLabel[\s\S]*row\.conversationAngle/.test(src),
+      'search matches service, action, reason, and conversation fields');
+    assert(/No opportunities match the current filters\./.test(src), 'empty search state is rendered');
+  });
   test('per-service attach renders narrative sentence + all-plans scorecard (no SVG chart)', () => {
     assert(/function _saSentence\(customer, c\)/.test(src), '_saSentence helper defined');
     assert(/function _saScorecard\(d\)/.test(src), '_saScorecard helper defined');

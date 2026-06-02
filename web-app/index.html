@@ -1570,6 +1570,9 @@ function ensureMergedQueueControls() {
   wrap.style.gap = '8px';
   wrap.style.flexWrap = 'wrap';
   wrap.innerHTML = `
+    <label for="action-queue-search">Search
+      <input id="action-queue-search" type="search" placeholder="Customer, service, action..." aria-label="Search service attach opportunities" style="min-width:260px;">
+    </label>
     <label>Rows
       <select id="action-queue-limit">
         <option value="10">Top 10</option>
@@ -1581,6 +1584,7 @@ function ensureMergedQueueControls() {
     <button class="import-btn" id="download-action-queue" type="button">Download CSV</button>
     <span id="action-queue-status" style="font-size:12px;color:#605e5c;"></span>`;
   filter.parentElement.appendChild(wrap);
+  document.getElementById('action-queue-search').addEventListener('input', renderOpportunityHeatmap);
   document.getElementById('action-queue-limit').addEventListener('change', renderOpportunityHeatmap);
   document.getElementById('copy-action-queue').addEventListener('click', copyActionQueue);
   document.getElementById('download-action-queue').addEventListener('click', downloadActionQueueCsv);
@@ -1752,8 +1756,20 @@ function actionDetails(row) {
 }
 
 function actionQueueRows() {
+  const term = (document.getElementById('action-queue-search')?.value || '').trim().toLowerCase();
   return filteredOpportunityRows()
     .map(row => ({...row, ...actionDetails(row)}))
+    .filter(row => {
+      if (!term) return true;
+      return [
+        row.customer,
+        row.perServicePriority,
+        row.topServiceLabel,
+        row.recommendedAction,
+        row.actionReason,
+        row.conversationAngle,
+      ].some(value => String(value ?? '').toLowerCase().includes(term));
+    })
     .sort((a, b) =>
       Number(b.hasGap) - Number(a.hasGap) ||
       (a.priorityRank - b.priorityRank) ||
@@ -2023,6 +2039,8 @@ function renderOpportunityHeatmap() {
   if (thresholdValueEl) thresholdValueEl.textContent = thresholdLabel;
   const thresholdCountEl = document.getElementById('dfc-threshold-count');
   if (thresholdCountEl) thresholdCountEl.textContent = slMode ? `${gapCount} with attach gaps` : `${gapCount} below threshold`;
+  const emptyRow = rows.length ? '' :
+    '<tr><td colspan="9" style="padding:24px;text-align:center;color:#605e5c;">No opportunities match the current filters.</td></tr>';
   document.getElementById('chart-quadrant').innerHTML = `
     <div class="scroll-table" style="max-height:620px;">
       <table>
@@ -2052,7 +2070,7 @@ function renderOpportunityHeatmap() {
               <td>${escapeHtml(r.recommendedAction)}<br><span style="font-size:12px;color:#605e5c;">${escapeHtml(r.actionReason)}</span></td>
               <td>${escapeHtml(r.conversationAngle)}</td>
             </tr>
-          `).join('')}
+          `).join('')}${emptyRow}
         </tbody>
       </table>
     </div>`;

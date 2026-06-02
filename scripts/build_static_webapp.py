@@ -171,6 +171,8 @@ def build_html() -> str:
     _assert_contains(html, 'id="export-pptx-btn"', "export PPT button")
     _assert_contains(html, "PptxAcr.exportDeck", "export PPT handler")
     _assert_contains(html, "function renderOpportunityHeatmap()", "heatmap function")
+    _assert_contains(html, 'id="action-queue-search"', "service opportunity search input")
+    _assert_contains(html, "No opportunities match the current filters.", "service opportunity search empty state")
     _assert_contains(html, "${escapeHtml(r.customer)}", "escaped customer in heatmap")
     _assert_contains(html, "${escapeHtml(d.label", "escaped label in bar chart")
     _assert_contains(html, "${escapeHtml(p.label)}", "escaped label in quadrant chart")
