@@ -158,6 +158,8 @@
       cohortMinSample: 5,
       momentumWindow: 3,
       momentumCap: 1.0,
+      priorityMomentumEps: 0.02,
+      priorityCoverageMedium: 0.5,
     };
   }
 

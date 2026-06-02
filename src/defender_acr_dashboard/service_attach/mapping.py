@@ -214,6 +214,14 @@ class AttachConfig:
     momentum_cap: float = 1.0
     """Growth is clipped to +/- this value to tame zero-base explosions."""
 
+    priority_momentum_eps: float = 0.02
+    """Minimum ``momentum_raw`` (workload minus Defender growth) for an
+    opportunity to count as growth-divergent when assigning a priority tier."""
+
+    priority_coverage_medium: float = 0.5
+    """Coverage (fraction of benchmark) below which an ``expand`` opportunity is
+    treated as a Medium-priority under-coverage gap."""
+
     def ratio_for(self, plan_label: str) -> float:
         return self.plan_target_ratios.get(plan_label, self.target_ratio)
 

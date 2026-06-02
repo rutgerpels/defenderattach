@@ -131,6 +131,38 @@
     return ratios;
   }
 
+  function classifyPriority(opp, config) {
+    const eps = config.priorityMomentumEps != null ? config.priorityMomentumEps : 0.02;
+    const covMed = config.priorityCoverageMedium != null ? config.priorityCoverageMedium : 0.5;
+    const growing = opp.workloadGrowth > 0;
+    const divergent = opp.defenderZeroWithWorkloadGrowth || opp.momentumRaw > eps;
+    const severeCoverage = opp.signal === SIGNAL_ATTACH ||
+      (opp.coveragePct != null && opp.coveragePct < covMed);
+
+    if (growing && divergent) {
+      const reason = opp.defenderZeroWithWorkloadGrowth
+        ? 'Workload growing with little or no Defender spend'
+        : 'Workload growth is outpacing Defender attach';
+      return { priority: 'High', priorityReason: reason, priorityRank: 0 };
+    }
+    if (severeCoverage) {
+      let reason;
+      if (opp.signal === SIGNAL_ATTACH) {
+        reason = opp.hasDollarGap
+          ? 'Active workload with no Defender coverage'
+          : 'Defender not detected for an active workload';
+      } else {
+        reason = 'Defender spend well below the benchmark attach ratio';
+      }
+      return { priority: 'Medium', priorityReason: reason, priorityRank: 1 };
+    }
+    return {
+      priority: 'Low',
+      priorityReason: 'Defender roughly tracking the benchmark; minor top-up',
+      priorityRank: 2,
+    };
+  }
+
   function buildOpportunity(plan, frame, months, config, benchmarkRatio) {
     const workloadSeries = seriesFor(frame, months, plan.workloadSl2, null, LEVEL_SERVICE_TOTAL);
     const workloadAcr = last(workloadSeries);
@@ -181,7 +213,7 @@
 
     const sizeValue = hasDollarGap ? gapDollars : workloadAcr;
 
-    return {
+    const opp = {
       planLabel: plan.planLabel,
       confidence: plan.confidence,
       pricingDriver: plan.pricingDriver,
@@ -207,6 +239,11 @@
       blendedScore: 0.0,
       opener: '',
     };
+    const tier = classifyPriority(opp, config);
+    opp.priority = tier.priority;
+    opp.priorityReason = tier.priorityReason;
+    opp.priorityRank = tier.priorityRank;
+    return opp;
   }
 
   function fmtInt(value) {

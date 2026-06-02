@@ -939,12 +939,20 @@ console.log('\nweb-app/index.html (per-service Defender attach)');
     assert(/escapeHtml\(String\(saErr\)\)/.test(src), 'engine error escaped');
     assert(!/\$\{o\.opener\}/.test(src), 'no raw opener interpolation');
   });
-  test('per-service attach respects dollar-gap eligibility + ranks by score', () => {
+  test('per-service attach respects dollar-gap eligibility + ranks by priority then score', () => {
     assert(/o\.hasDollarGap[\s\S]*?\/ mo gap/.test(src), 'dollar gap shown only when hasDollarGap');
     assert(/usage-priced/.test(src), 'usage-priced plans shown as coverage signal');
-    assert(/\.sort\(function \(a, b\) \{ return \(b\.blendedScore \|\| 0\) - \(a\.blendedScore \|\| 0\); \}\)/.test(src),
-      'opportunities ranked by blended score descending');
-    assert(/o\.defenderZeroWithWorkloadGrowth/.test(src), 'zero-defender-with-growth flag surfaced');
+    assert(/a\.priorityRank == null \? 9 : a\.priorityRank/.test(src),
+      'opportunities ranked by priorityRank first');
+    assert(/\(b\.blendedScore \|\| 0\) - \(a\.blendedScore \|\| 0\)/.test(src),
+      'blended score is the tie-breaker within a priority tier');
+  });
+  test('per-service attach surfaces High/Medium/Low priority tiers', () => {
+    assert(/const prTag = o\.priority/.test(src), 'priority tag built per opportunity');
+    assert(/escapeHtml\(o\.priority\) \+ ' priority/.test(src), 'priority label rendered and escaped');
+    assert(/escapeHtml\(o\.priorityReason\)/.test(src), 'priority reason rendered and escaped');
+    assert(/const tierLegend = opps\.length/.test(src), 'tier-definition legend present');
+    assert(/workload growing faster than Defender attach/.test(src), 'High tier defined in legend');
   });
 }
 

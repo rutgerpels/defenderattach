@@ -1875,7 +1875,10 @@ function renderServiceAttach(idp, name) {
     '</div>';
 
   const opps = Array.isArray(d.opportunities)
-    ? d.opportunities.slice().sort(function (a, b) { return (b.blendedScore || 0) - (a.blendedScore || 0); })
+    ? d.opportunities.slice().sort(function (a, b) {
+        return ((a.priorityRank == null ? 9 : a.priorityRank) - (b.priorityRank == null ? 9 : b.priorityRank)) ||
+          ((b.blendedScore || 0) - (a.blendedScore || 0));
+      })
     : [];
   let oppHtml;
   if (!opps.length) {
@@ -1884,23 +1887,29 @@ function renderServiceAttach(idp, name) {
   } else {
     oppHtml = opps.map(function (o) {
       const isAttach = o.signal === 'attach';
+      const pr = (o.priority || '').toLowerCase();
+      const prClass = pr === 'high' ? 'high' : (pr === 'medium' ? 'medium' : 'low');
+      const prTag = o.priority
+        ? '<span class="tag ' + prClass + '">' + escapeHtml(o.priority) + ' priority</span>'
+        : '';
       const badge = isAttach
         ? '<span class="tag high">Not protected</span>'
         : '<span class="tag medium">Under-protected</span>';
-      const flag = o.defenderZeroWithWorkloadGrowth
-        ? ' <span class="tag high">workload growing, $0 Defender</span>'
-        : '';
       const gapStr = o.hasDollarGap
         ? fmt.money(o.gapDollars) + ' / mo gap'
         : 'usage-priced \u00b7 coverage signal';
       const cov = (o.hasDollarGap && o.coveragePct != null)
         ? ' \u00b7 ' + (o.coveragePct * 100).toFixed(0) + '% of benchmark'
         : '';
+      const reason = o.priorityReason
+        ? '<div style="font-size:11px;color:#605e5c;margin-top:4px;">Why: ' + escapeHtml(o.priorityReason) + '</div>'
+        : '';
       return '<div class="product-row" style="display:block;padding:12px 14px;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
-          '<div><strong>' + escapeHtml(o.planLabel) + '</strong> ' + badge + flag + '</div>' +
+          '<div><strong>' + escapeHtml(o.planLabel) + '</strong> ' + prTag + ' ' + badge + '</div>' +
           '<div style="font-weight:600;white-space:nowrap;">' + gapStr + '</div>' +
         '</div>' +
+        reason +
         '<div class="note" style="margin:8px 0 0;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">' +
           escapeHtml(o.opener) + '</div>' +
         '<div style="font-size:12px;color:#605e5c;margin-top:8px;">' +
@@ -1910,6 +1919,14 @@ function renderServiceAttach(idp, name) {
       '</div>';
     }).join('');
   }
+
+  const tierLegend = opps.length
+    ? '<div style="font-size:11px;color:#605e5c;margin-top:10px;line-height:1.6;">' +
+        '<span class="tag high">High</span> workload growing faster than Defender attach \u00b7 ' +
+        '<span class="tag medium">Medium</span> active workload materially under-protected \u00b7 ' +
+        '<span class="tag low">Low</span> roughly tracking the benchmark \u2014 minor top-up' +
+      '</div>'
+    : '';
 
   const found = Array.isArray(d.foundational) ? d.foundational : [];
   let foundHtml = '';
@@ -1942,6 +1959,7 @@ function renderServiceAttach(idp, name) {
       kpis +
       reconHtml +
       '<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">' + oppHtml + '</div>' +
+      tierLegend +
       foundHtml +
     '</div>';
 }

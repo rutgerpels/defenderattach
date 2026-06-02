@@ -76,6 +76,10 @@ class Opportunity:
     blended_score: float = 0.0
     opener: str = ""
 
+    priority: str = ""
+    priority_reason: str = ""
+    priority_rank: int = 2
+
 
 @dataclass
 class FoundationalCoverage:
@@ -290,7 +294,7 @@ def _build_opportunity(
         # workload footprint at risk, not a fabricated dollar gap.
         size_value = workload_acr
 
-    return Opportunity(
+    opp = Opportunity(
         plan_label=plan.plan_label,
         confidence=plan.confidence,
         pricing_driver=plan.pricing_driver,
@@ -312,6 +316,43 @@ def _build_opportunity(
         defender_zero_with_workload_growth=zero_with_growth,
         size_value=size_value,
     )
+    opp.priority, opp.priority_reason, opp.priority_rank = _classify_priority(opp, config)
+    return opp
+
+
+def _classify_priority(opp: Opportunity, config: AttachConfig) -> tuple:
+    """Assign a High/Medium/Low tier mirroring ``classifyPriority`` in sl-engine.js.
+
+    High = workload growing while Defender is not keeping pace (momentum
+    divergence). Medium = material current under-attachment / under-coverage.
+    Low = roughly tracking the benchmark.
+    """
+    eps = config.priority_momentum_eps
+    cov_med = config.priority_coverage_medium
+    growing = opp.workload_growth > 0
+    divergent = opp.defender_zero_with_workload_growth or opp.momentum_raw > eps
+    severe_coverage = opp.signal == SIGNAL_ATTACH or (
+        opp.coverage_pct is not None and opp.coverage_pct < cov_med
+    )
+
+    if growing and divergent:
+        reason = (
+            "Workload growing with little or no Defender spend"
+            if opp.defender_zero_with_workload_growth
+            else "Workload growth is outpacing Defender attach"
+        )
+        return "High", reason, 0
+    if severe_coverage:
+        if opp.signal == SIGNAL_ATTACH:
+            reason = (
+                "Active workload with no Defender coverage"
+                if opp.has_dollar_gap
+                else "Defender not detected for an active workload"
+            )
+        else:
+            reason = "Defender spend well below the benchmark attach ratio"
+        return "Medium", reason, 1
+    return "Low", "Defender roughly tracking the benchmark; minor top-up", 2
 
 
 def _opener(customer: str, opp: Opportunity) -> str:
