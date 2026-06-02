@@ -1299,9 +1299,15 @@ function renderServiceAttach(idp, name) {
       const badge = isAttach
         ? '<span class="tag high">Not protected</span>'
         : '<span class="tag medium">Under-protected</span>';
+      const covTip = 'This Defender plan is billed by usage \u2014 per resource, machine, or transaction \u2014 not as a share of spend. '
+        + 'So we flag the unprotected workload but do not guess a dollar gap, which would be too speculative. '
+        + 'Confirm the resource count with the customer to size the real upside.';
       const gapStr = o.hasDollarGap
         ? fmt.money(o.gapDollars) + ' / mo gap'
-        : 'usage-priced \u00b7 coverage signal';
+        : 'usage-priced \u00b7 coverage signal '
+          + '<span class="prio-badge-i" tabindex="0" role="img" '
+          + 'aria-label="What does usage-priced coverage signal mean?" '
+          + 'style="cursor:help;" title="' + covTip + '">&#9432;</span>';
       const cov = (o.hasDollarGap && o.coveragePct != null)
         ? ' \u00b7 ' + (o.coveragePct * 100).toFixed(0) + '% of benchmark'
         : '';
