@@ -5,6 +5,7 @@ Run with:  streamlit run streamlit_app.py
 
 from __future__ import annotations
 
+import hashlib
 import sys
 import tempfile
 from pathlib import Path
@@ -20,7 +21,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from defender_acr_dashboard.service_attach.engine import BookModel, build_model  # noqa: E402
-from defender_acr_dashboard.service_attach.mapping import AttachConfig  # noqa: E402
+from defender_acr_dashboard.service_attach.mapping import (  # noqa: E402
+    AttachConfig,
+    DEFENDER_SL2,
+)
 from defender_acr_dashboard.service_attach.parser import (  # noqa: E402
     LEVEL_LEAF,
     ParsedData,
@@ -36,13 +40,13 @@ st.set_page_config(
 
 
 @st.cache_data(show_spinner="Parsing workbook…")
-def _parse_cached(path: str, _mtime: float) -> ParsedData:
+def _parse_cached(path: str, sig: str) -> ParsedData:
     return parse_sl2_sl4(path)
 
 
 @st.cache_data(show_spinner="Scoring book…")
-def _build_cached(path: str, _mtime: float, cfg_key: tuple) -> BookModel:
-    parsed = _parse_cached(path, _mtime)
+def _build_cached(path: str, sig: str, cfg_key: tuple) -> BookModel:
+    parsed = _parse_cached(path, sig)
     config = AttachConfig(
         target_ratio=cfg_key[0],
         weight_gap=cfg_key[1],
@@ -75,19 +79,30 @@ st.sidebar.caption("Service-level (SL2/SL4) attach motion")
 
 uploaded = st.sidebar.file_uploader("Upload SL2/SL4 workbook (.xlsx)", type=["xlsx"])
 
+using_uploaded = False
+source_label = ""
 if uploaded is not None:
-    tmp = Path(tempfile.gettempdir()) / f"defender_attach_{uploaded.name}"
-    tmp.write_bytes(uploaded.getbuffer())
+    try:
+        raw = uploaded.getbuffer()
+        sig = hashlib.md5(raw).hexdigest()  # content-based key so re-uploads bust the cache
+        tmp = Path(tempfile.gettempdir()) / f"defender_attach_{sig}.xlsx"
+        tmp.write_bytes(raw)
+    except Exception as exc:  # noqa: BLE001
+        st.sidebar.error(f"❌ Could not read the uploaded file: {exc}")
+        st.stop()
     data_path = tmp
-    mtime = float(len(uploaded.getbuffer()))
+    using_uploaded = True
+    source_label = uploaded.name
 elif DEFAULT_FILE.exists():
     data_path = DEFAULT_FILE
-    mtime = DEFAULT_FILE.stat().st_mtime
+    stat = DEFAULT_FILE.stat()
+    sig = f"{stat.st_mtime_ns}:{stat.st_size}"
+    source_label = DEFAULT_FILE.name
     st.sidebar.caption(f"Using bundled file: {DEFAULT_FILE.name}")
 else:
-    st.error(
-        "No workbook found. Upload an SL2/SL4 .xlsx file, or place one at "
-        f"`{DEFAULT_FILE}`."
+    st.info(
+        "👋 Upload an SL2/SL4 `.xlsx` workbook in the sidebar to begin "
+        f"(or place one at `{DEFAULT_FILE}`)."
     )
     st.stop()
 
@@ -116,15 +131,67 @@ w_breadth = st.sidebar.slider("Breadth weight", 0.0, 1.0, 0.2, 0.05)
 cfg_key = (
     target_ratio, w_gap, w_mom, w_breadth, min_denom, attach_threshold, use_cohort,
 )
-model = _build_cached(str(data_path), mtime, cfg_key)
-parsed = _parse_cached(str(data_path), mtime)
+
+# --- Parse + score with explicit, user-facing error handling ---------------- #
+try:
+    parsed = _parse_cached(str(data_path), sig)
+    model = _build_cached(str(data_path), sig, cfg_key)
+except Exception as exc:  # noqa: BLE001
+    st.error(
+        f"❌ Could not read **{source_label}**.\n\n"
+        "This usually means the file isn't the expected SL2/SL4 pivot export. "
+        "Make sure it's an `.xlsx` with a sheet named **Export**, a two-row header "
+        "(row 1 = FiscalMonth groups like `FY26-Jul`, row 2 = measures including "
+        "`$ ACR`), and the dimension columns `TPAccountName`, `ServiceLevel2`, "
+        "`ServiceLevel4`."
+    )
+    with st.expander("Technical details"):
+        st.exception(exc)
+    st.stop()
+
+# --- Validate that the workbook actually matches the expected schema -------- #
+problems: list[str] = []
+if not parsed.months:
+    problems.append(
+        "No monthly **`$ ACR`** columns were detected. Expected a two-row header "
+        "where row 1 holds FiscalMonth groups (e.g. `FY26-Jul`) and row 2 holds "
+        "`$ ACR`."
+    )
+if parsed.frame.empty or (parsed.frame["level"] == LEVEL_LEAF).sum() == 0:
+    problems.append("No service-level (SL4) rows were found in the workbook.")
+if not parsed.frame.empty and not (parsed.frame["sl2"] == DEFENDER_SL2).any():
+    problems.append(
+        f"No **{DEFENDER_SL2}** rows were found — Defender attach gaps cannot be "
+        "computed without them."
+    )
+if model.total_eligible_workload_acr <= 0:
+    problems.append(
+        "No mapped Azure workload spend was detected, so there is nothing to "
+        "measure attach against."
+    )
+
+if problems:
+    st.error(
+        f"⚠️ **{source_label}** loaded, but it doesn't look like the expected "
+        "SL2/SL4 export:\n\n"
+        + "\n".join(f"- {p}" for p in problems)
+    )
+    st.stop()
+
+# --- Success feedback -------------------------------------------------------- #
+if using_uploaded:
+    st.sidebar.success(
+        f"✅ Loaded **{source_label}**\n\n"
+        f"{len(model.dossiers)} customers · {len(model.months)} months"
+    )
 
 recon_ok = all(i.rel_diff <= 0.01 for i in model.reconciliation)
 
 st.title("Defender for Cloud — Service-Level Attach")
+_src_note = "uploaded" if using_uploaded else "bundled"
 st.caption(
     f"{len(model.dossiers)} customers · {len(model.months)} months · "
-    f"latest {model.latest_month} · source {model.source_name}"
+    f"latest {model.latest_month} · source {model.source_name} ({_src_note})"
 )
 if not recon_ok:
     st.warning(
