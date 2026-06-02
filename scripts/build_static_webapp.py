@@ -210,6 +210,13 @@ def build_html() -> str:
     _assert_contains(html, "escapeHtml(o.opener)", "escaped attach opener (XSS)")
     _assert_contains(html, "escapeHtml(o.planLabel)", "escaped attach plan label (XSS)")
     _assert_contains(html, "escapeHtml(f.planLabel)", "escaped foundational plan label (XSS)")
+    # New per-service visual + $ opportunity surfaces.
+    _assert_contains(html, "function _saGapChart(", "service attach gap chart helper")
+    _assert_contains(html, "sa-gapchart", "service attach gap chart container")
+    _assert_contains(html, "Workload vs Defender ACR by service", "service attach chart title")
+    _assert_contains(html, "ACR / year on the table", "service attach $ opportunity banner")
+    _assert_contains(html, "function _prioServiceEvidence(", "priority modal per-service evidence")
+    _assert_contains(html, "What\\'s driving this rating", "priority modal lead section")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
     _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
@@ -1385,6 +1392,15 @@ function _ensurePrioOverlay() {
     '.prio-signals{margin:0;padding-left:18px}' +
     '.prio-signals li{margin-bottom:6px;color:#323130}' +
     '.prio-none{color:#107c10;margin:0}' +
+    '.prio-gap-banner{display:flex;flex-wrap:wrap;gap:16px;align-items:baseline;background:#fbf6ff;border:1px solid #e3d3f5;border-radius:8px;padding:12px 14px;margin:0 0 12px}' +
+    '.prio-gap-banner .big{font-size:22px;font-weight:700;color:#5c2d91}' +
+    '.prio-gap-banner .lbl{font-size:12px;color:#605e5c}' +
+    '.prio-gap-banner .sub{font-size:12px;color:#605e5c;flex:1 1 200px}' +
+    '.prio-svc-list{display:flex;flex-direction:column;gap:8px}' +
+    '.prio-svc-row{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid #eef1f5;border-radius:6px;padding:8px 10px;flex-wrap:wrap}' +
+    '.prio-svc-row .svc{font-weight:600;color:#201f1e}' +
+    '.prio-svc-row .nums{font-size:12px;color:#605e5c;margin-top:3px}' +
+    '.prio-svc-row .gapv{font-weight:600;white-space:nowrap;font-size:13px}' +
     '.prio-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}' +
     '.prio-metric{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eef1f5;padding:5px 0;font-size:13px}' +
     '.prio-metric .k{color:#605e5c}.prio-metric .v{font-weight:600;color:#201f1e;text-align:right}' +
@@ -1410,6 +1426,52 @@ function _ensurePrioOverlay() {
   document.body.appendChild(overlay);
   _prioOverlay = overlay;
   return overlay;
+}
+
+// Per-service evidence for the priority modal: leads with the concrete
+// "you buy X but don't protect X" gaps plus the $ opportunity, so a High rating
+// is justified by service-level facts rather than the corp total-vs-DfC ratio.
+// Returns '' when no SL2/SL4 dossier exists (e.g. legacy imports), in which case
+// the modal falls back to the corporate framing only.
+function _prioServiceEvidence(customer) {
+  const sa = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach : null;
+  if (!sa || !Array.isArray(sa.dossiers)) return '';
+  const d = sa.dossiers.find(function (x) { return x.customer === customer; });
+  if (!d) return '';
+  const opps = (Array.isArray(d.opportunities) ? d.opportunities.slice() : []).sort(function (a, b) {
+    return ((a.priorityRank == null ? 9 : a.priorityRank) - (b.priorityRank == null ? 9 : b.priorityRank)) ||
+      ((b.blendedScore || 0) - (a.blendedScore || 0));
+  });
+  if (!opps.length) {
+    return '<section class="prio-section"><h3>What\'s driving this rating</h3>' +
+      '<p class="prio-none">No specific per-service Defender gaps \u2014 this customer protects the Azure services they run. ' +
+      'The rating reflects overall Defender attach versus the corporate baseline (see Corporate context below).</p></section>';
+  }
+  const monthly = d.totalGapDollars || 0;
+  const annual = monthly * 12;
+  const covSignals = opps.filter(function (o) { return !o.hasDollarGap; }).length;
+  const banner =
+    '<div class="prio-gap-banner">' +
+      '<div><div class="big">' + fmt.money(monthly) + '</div><div class="lbl">ACR / month on the table</div></div>' +
+      '<div><div class="big">' + fmt.money(annual) + '</div><div class="lbl">ACR / year on the table</div></div>' +
+      '<div class="sub">Close these per-service Defender gaps to capture the estimated ACR above' +
+        (covSignals > 0 ? ' \u00b7 plus ' + covSignals + ' usage-priced service' + (covSignals === 1 ? '' : 's') + ' with coverage gaps (upside not yet quantified)' : '') +
+      '.</div>' +
+    '</div>';
+  const rows = opps.slice(0, 6).map(function (o) {
+    const pr = (o.priority || '').toLowerCase();
+    const prClass = pr === 'high' ? 'high' : (pr === 'medium' ? 'medium' : 'low');
+    const gapStr = o.hasDollarGap ? fmt.money(o.gapDollars) + ' / mo gap' : 'coverage signal';
+    return '<div class="prio-svc-row">' +
+      '<div><span class="tag ' + prClass + '">' + escapeHtml(o.priority || '') + '</span> ' +
+        '<span class="svc">' + escapeHtml(o.planLabel) + '</span>' +
+        '<div class="nums">Workload ' + fmt.money(o.workloadAcr) + ' / mo (' + fmt.pct(o.workloadGrowth) + ' 3M) \u2192 Defender ' + fmt.money(o.defenderActual) + ' / mo</div>' +
+      '</div>' +
+      '<div class="gapv">' + escapeHtml(gapStr) + '</div>' +
+    '</div>';
+  }).join('');
+  return '<section class="prio-section"><h3>What\'s driving this rating</h3>' + banner +
+    '<div class="prio-svc-list">' + rows + '</div></section>';
 }
 
 function openPriorityExplainer(customer) {
@@ -1453,13 +1515,18 @@ function openPriorityExplainer(customer) {
       '<span class="prio-rule-text">' + escapeHtml(rule.text) + '</span></li>';
   }).join('');
 
+  const svcEvidenceHtml = _prioServiceEvidence(customer);
+
   document.getElementById('prio-body').innerHTML =
     '<div class="prio-head" style="border-left:6px solid ' + meta.color + ';background:' + meta.bg + ';">' +
       '<div class="prio-head-tier" style="color:' + meta.color + ';">' + escapeHtml(meta.label) + '</div>' +
       '<h2 id="prio-title">Why is ' + escapeHtml(customer) + ' rated &ldquo;' + escapeHtml(row.opportunity) + '&rdquo;?</h2>' +
     '</div>' +
-    '<section class="prio-section"><h3>Signals for this customer</h3>' + signalsHtml + '</section>' +
-    '<section class="prio-section"><h3>Key numbers</h3><div class="prio-metrics">' + metricsHtml + '</div></section>' +
+    svcEvidenceHtml +
+    '<section class="prio-section"><h3>Corporate context</h3>' +
+      '<p class="prio-rubric-intro">Overall Defender attach signals behind the corporate rating.</p>' +
+      signalsHtml +
+      '<div class="prio-metrics" style="margin-top:10px;">' + metricsHtml + '</div></section>' +
     '<section class="prio-section"><h3>How priorities are graded</h3>' +
       '<p class="prio-rubric-intro">The highest tier whose conditions are met wins. The tier this customer landed in is highlighted.</p>' +
       '<ul class="prio-rubric">' + rubricHtml + '</ul></section>';
@@ -1842,6 +1909,52 @@ function _saPct1(v) {
   return (v == null || isNaN(v)) ? '\u2013' : (v * 100).toFixed(1) + '%';
 }
 
+// Dependency-free SVG: per service, a Workload ACR bar over a Defender ACR bar
+// (bars scaled per-row so the coverage gap is legible regardless of size), with
+// a dashed benchmark marker for dollar-gap plans. Makes "you buy X but don't
+// protect X" visible at a glance for execs.
+function _saGapChart(containerId, opps) {
+  const host = document.getElementById(containerId);
+  if (!host) return;
+  const rows = (opps || []).slice(0, 8);
+  if (!rows.length) { host.innerHTML = ''; return; }
+  const W = 760, rowH = 50;
+  const M = { top: 10, right: 96, bottom: 6, left: 196 };
+  const H = M.top + M.bottom + rows.length * rowH;
+  const innerW = W - M.left - M.right;
+  const COL_W = '#0078d4', COL_D = '#107c10', COL_B = '#ff8c00';
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+  rows.forEach(function (o, i) {
+    const maxV = Math.max(o.workloadAcr || 0, o.defenderActual || 0, o.expected || 0, 1);
+    const sc = function (v) { return Math.max(0, ((v || 0) / maxV) * innerW); };
+    const yTop = M.top + i * rowH;
+    const nm = o.planLabel.length > 26 ? o.planLabel.slice(0, 26) + '\u2026' : o.planLabel;
+    svg += '<text x="' + (M.left - 10) + '" y="' + (yTop + 18) + '" text-anchor="end" font-size="12" font-weight="600" fill="#323130">' + escapeHtml(nm) + '</text>';
+    const wY = yTop + 6, dY = yTop + 26, bh = 14;
+    const wW = sc(o.workloadAcr);
+    svg += '<rect x="' + M.left + '" y="' + wY + '" width="' + wW + '" height="' + bh + '" rx="2" fill="' + COL_W + '" data-k="Workload" data-l="' + escapeHtml(o.planLabel) + '" data-v="' + (o.workloadAcr || 0) + '"/>';
+    svg += '<text x="' + (M.left + wW + 6) + '" y="' + (wY + 11) + '" font-size="10" fill="#605e5c">' + fmt.money(o.workloadAcr) + '</text>';
+    let dW = sc(o.defenderActual);
+    if (o.defenderActual > 0 && dW < 2) dW = 2;
+    const covTxt = (o.hasDollarGap && o.coveragePct != null) ? ' \u00b7 ' + (o.coveragePct * 100).toFixed(0) + '%' : '';
+    svg += '<rect x="' + M.left + '" y="' + dY + '" width="' + dW + '" height="' + bh + '" rx="2" fill="' + COL_D + '" data-k="Defender" data-l="' + escapeHtml(o.planLabel) + '" data-v="' + (o.defenderActual || 0) + '"/>';
+    svg += '<text x="' + (M.left + dW + 6) + '" y="' + (dY + 11) + '" font-size="10" fill="#605e5c">' + fmt.money(o.defenderActual) + covTxt + '</text>';
+    if (o.hasDollarGap && o.expected > 0) {
+      const bx = M.left + sc(o.expected);
+      svg += '<line x1="' + bx + '" y1="' + (wY - 2) + '" x2="' + bx + '" y2="' + (dY + bh + 2) + '" stroke="' + COL_B + '" stroke-width="2" stroke-dasharray="3,2"/>';
+    }
+  });
+  svg += '</svg>';
+  host.innerHTML = svg;
+  host.querySelectorAll('rect').forEach(function (r) {
+    r.addEventListener('mousemove', function (e) {
+      showTooltip('<b>' + escapeHtml(r.getAttribute('data-l')) + '</b><br/>' + escapeHtml(r.getAttribute('data-k')) +
+        ': $' + parseFloat(r.getAttribute('data-v')).toLocaleString('en-US', { maximumFractionDigits: 2 }), e.pageX, e.pageY);
+    });
+    r.addEventListener('mouseleave', hideTooltip);
+  });
+}
+
 function renderServiceAttach(idp, name) {
   idp = idp || '';
   const host = document.getElementById(idp + 'cust-attach');
@@ -1952,16 +2065,52 @@ function renderServiceAttach(idp, name) {
       'Heads-up: provided totals did not fully reconcile against summed service rows for this customer \u2014 treat figures as directional.</div>';
   }
 
+  // Headline "money on the table": quantified monthly gap (sum of dollar-gap plans)
+  // annualized x12, plus a count of usage-priced coverage-signal services as
+  // separate unquantified upside (never fabricate a $ for those).
+  const monthlyGap = d.totalGapDollars || 0;
+  const annualGap = monthlyGap * 12;
+  const covSignals = opps.filter(function (o) { return !o.hasDollarGap; }).length;
+  const gapBanner = (monthlyGap > 0 || covSignals > 0)
+    ? '<div style="margin-top:12px;border:1px solid #e3d3f5;background:#fbf6ff;border-radius:8px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;">' +
+        '<div><div style="font-size:24px;font-weight:700;color:#5c2d91;">' + fmt.money(monthlyGap) + '</div>' +
+          '<div style="font-size:12px;color:#605e5c;">ACR / month on the table</div></div>' +
+        '<div><div style="font-size:24px;font-weight:700;color:#5c2d91;">' + fmt.money(annualGap) + '</div>' +
+          '<div style="font-size:12px;color:#605e5c;">ACR / year on the table</div></div>' +
+        '<div style="flex:1 1 220px;font-size:12px;color:#605e5c;">Estimated additional Defender for Cloud ACR if these per-service gaps are closed to benchmark.' +
+          (covSignals > 0 ? ' Plus ' + covSignals + ' usage-priced service' + (covSignals === 1 ? '' : 's') + ' with coverage gaps (upside not yet quantified).' : '') +
+        '</div>' +
+      '</div>'
+    : '';
+
+  // Inline-SVG comparison: Workload ACR vs Defender ACR per service.
+  const chartLegend =
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#605e5c;margin:6px 0 0;">' +
+      '<span><span style="display:inline-block;width:10px;height:10px;background:#0078d4;border-radius:2px;vertical-align:middle;"></span> Workload ACR</span>' +
+      '<span><span style="display:inline-block;width:10px;height:10px;background:#107c10;border-radius:2px;vertical-align:middle;"></span> Defender ACR</span>' +
+      '<span><span style="display:inline-block;width:14px;height:0;border-top:2px dashed #ff8c00;vertical-align:middle;"></span> Benchmark target</span>' +
+      '<span>Bars scaled per service</span>' +
+    '</div>';
+  const chartBox = opps.length
+    ? '<div style="margin-top:14px;font-size:13px;color:#323130;font-weight:600;">Workload vs Defender ACR by service</div>' +
+      '<div style="font-size:11px;color:#605e5c;margin-bottom:4px;">The bigger the gap between the blue (workload) and green (Defender) bars, the more spend is running unprotected.</div>' +
+      '<div id="' + idp + 'sa-gapchart"></div>' + chartLegend
+    : '';
+
   host.innerHTML =
     '<div class="chart-box" style="margin-top:18px;">' +
       '<div class="title">Per-Service Defender Attach</div>' +
       '<div class="sub">Where this customer buys an Azure service but is not protecting it with the matching Defender plan. Ranked by opportunity score.</div>' +
       kpis +
+      gapBanner +
       reconHtml +
+      chartBox +
       '<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">' + oppHtml + '</div>' +
       tierLegend +
       foundHtml +
     '</div>';
+
+  _saGapChart(idp + 'sa-gapchart', opps);
 }
 
 '''

@@ -954,6 +954,32 @@ console.log('\nweb-app/index.html (per-service Defender attach)');
     assert(/const tierLegend = opps\.length/.test(src), 'tier-definition legend present');
     assert(/workload growing faster than Defender attach/.test(src), 'High tier defined in legend');
   });
+  test('per-service attach renders the Workload-vs-Defender SVG comparison chart', () => {
+    assert(/function _saGapChart\(containerId, opps\)/.test(src), '_saGapChart helper defined');
+    assert(/id="' \+ idp \+ 'sa-gapchart"/.test(src), 'gap chart container mounted with idp prefix');
+    assert(/_saGapChart\(idp \+ 'sa-gapchart', opps\);/.test(src), 'gap chart invoked after innerHTML set');
+    assert(/Workload vs Defender ACR by service/.test(src), 'chart title present');
+    assert(/<svg viewBox=/.test(src) && /data-k="Workload"/.test(src) && /data-k="Defender"/.test(src),
+      'paired workload/defender bars emitted as inline SVG');
+    assert(/showTooltip\(/.test(src) && /hideTooltip/.test(src), 'chart wires tooltip handlers');
+  });
+  test('per-service attach shows the $ opportunity (money on the table) banner', () => {
+    assert(/ACR \/ month on the table/.test(src), 'monthly opportunity headline present');
+    assert(/ACR \/ year on the table/.test(src), 'annualized opportunity headline present');
+    assert(/const monthlyGap = d\.totalGapDollars \|\| 0/.test(src), 'monthly gap sourced from totalGapDollars');
+    assert(/const annualGap = monthlyGap \* 12/.test(src), 'annual gap is monthly x12');
+  });
+  test('priority modal leads with per-service evidence, demotes corp numbers', () => {
+    assert(/function _prioServiceEvidence\(customer\)/.test(src), '_prioServiceEvidence helper defined');
+    assert(/What\\'s driving this rating/.test(src), 'modal lead section heading present');
+    assert(/const svcEvidenceHtml = _prioServiceEvidence\(customer\)/.test(src),
+      'modal computes per-service evidence');
+    assert(/Corporate context/.test(src), 'corp numbers demoted under Corporate context');
+    // Per-service evidence must be rendered before the corporate context section.
+    assert(src.indexOf('svcEvidenceHtml +') < src.indexOf('>Corporate context<'),
+      'per-service evidence rendered ahead of corporate context');
+    assert(/escapeHtml\(o\.planLabel\)/.test(src), 'service labels escaped in modal evidence');
+  });
 }
 
 // ---- service-level (SL2/SL4) attach: pipeline parity + privacy guards ----
