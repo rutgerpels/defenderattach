@@ -41,6 +41,7 @@ from defender_acr_dashboard.static_dashboard import (  # noqa: E402
     _inject_opportunity_map,
     _monthly_acr_labels,
     _opportunity_map_labels,
+    _split_opportunity_pages,
 )
 
 TEMPLATE_PATH = REPO_ROOT / "docs" / "defender_for_cloud_dashboard (2).html"
@@ -81,6 +82,7 @@ def build_html() -> str:
 
     html = _monthly_acr_labels(template)
     html = _opportunity_map_labels(html)
+    html = _split_opportunity_pages(html)
     html = _inject_opportunity_map(html)
 
     html = _replace_once(
@@ -173,6 +175,12 @@ def build_html() -> str:
     _assert_contains(html, "function renderOpportunityHeatmap()", "heatmap function")
     _assert_contains(html, 'id="action-queue-search"', "service opportunity search input")
     _assert_contains(html, "No opportunities match the current filters.", "service opportunity search empty state")
+    _assert_contains(html, "section.id = 'divergence-stories-section';", "divergence stories section")
+    _assert_contains(html, 'id="divergence-search"', "divergence stories search input")
+    _assert_contains(html, "No Defender coverage drift detected in this workbook yet.", "divergence stories empty state")
+    _assert_contains(html, "function renderDivergenceStories()", "divergence stories renderer")
+    _assert_contains(html, 'data-tab="divergence">Defender Coverage Drift', "divergence stories tab")
+    _assert_contains(html, 'id="panel-divergence"', "divergence stories panel")
     _assert_contains(html, "${escapeHtml(r.customer)}", "escaped customer in heatmap")
     _assert_contains(html, "${escapeHtml(d.label", "escaped label in bar chart")
     _assert_contains(html, "${escapeHtml(p.label)}", "escaped label in quadrant chart")
@@ -191,6 +199,15 @@ def build_html() -> str:
 
     # Customer breakdown modal (opens from the Opportunity Matrix instead of navigating).
     _assert_contains(html, "function renderCustomerDetail(name, idp)", "renderCustomerDetail idp refactor")
+    _assert_contains(html, "function renderCustomerSalesStories(idp, name)", "customer sales stories renderer")
+    _assert_contains(html, "function customerDivergenceStories(name)", "customer divergence story selector")
+    _assert_contains(html, 'id="cust-sales-stories"', "inline customer sales stories anchor")
+    _assert_contains(html, 'id="m-cust-sales-stories"', "modal customer sales stories anchor")
+    _assert_contains(html, "renderCustomerSalesStories(idp, name);", "customer sales stories render call")
+    _assert_contains(html, "data-customer-stories-copy", "customer sales stories copy action")
+    _assert_contains(html, "No sales stories detected for this customer yet.", "customer sales stories empty state")
+    _assert_contains(html, "escapeHtml(headline)", "escaped sales story headline")
+    _assert_contains(html, "escapeHtml(action)", "escaped sales story action")
     _assert_contains(html, "function openCustomerModal(", "customer modal opener")
     _assert_contains(html, "function _ensureCustOverlay(", "customer modal overlay factory")
     _assert_contains(html, 'id="m-cust-title"', "customer modal title node")
@@ -1619,6 +1636,12 @@ def _inject_customer_modal(html: str) -> str:
     )
     html = _replace_once(
         html,
+        "renderCustomerSalesStories('', name);",
+        "renderCustomerSalesStories(idp, name);",
+        "customer sales stories id prefix",
+    )
+    html = _replace_once(
+        html,
         "const ph = document.getElementById('cust-products');",
         "const ph = document.getElementById(idp + 'cust-products');",
         "cust-products id prefix",
@@ -1659,6 +1682,7 @@ function _ensureCustOverlay() {
       '<div class="controls" style="margin-bottom:14px;"><span id="m-cust-priority"></span></div>' +
       '<div class="cards" id="m-cust-cards"></div>' +
       '<div class="note" id="m-cust-signal"></div>' +
+      '<div id="m-cust-sales-stories"></div>' +
       '<div class="chart-box">' +
         '<div class="title">Product breakdown</div>' +
         '<div class="sub">Azure service categories ranked by current monthly ACR. Click a category to reveal the Service Level 4 details from the workbook.</div>' +

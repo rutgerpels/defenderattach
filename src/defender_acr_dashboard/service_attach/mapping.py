@@ -222,6 +222,32 @@ class AttachConfig:
     """Coverage (fraction of benchmark) below which an ``expand`` opportunity is
     treated as a Medium-priority under-coverage gap."""
 
+    divergence_story_min_workload_acr: float = 1_000.0
+    """Minimum latest workload ACR required before emitting a trend story."""
+
+    divergence_story_min_start_workload_acr: float = 1_000.0
+    """Minimum prior-window workload ACR for non-new trend stories.
+
+    This suppresses growth/regression narratives that are only large because the
+    denominator was tiny or zero. New-workload stories use
+    ``divergence_story_new_workload_max_start_acr`` instead.
+    """
+
+    divergence_story_new_workload_max_start_acr: float = 100.0
+    """Maximum prior-window workload ACR for a new-workload/no-Defender story."""
+
+    divergence_story_min_workload_growth: float = 0.10
+    """Minimum workload growth for a growth-divergence story."""
+
+    divergence_story_material_lag: float = 0.15
+    """Minimum workload-minus-Defender growth spread for material lag."""
+
+    divergence_story_flat_defender_growth: float = 0.02
+    """Maximum Defender growth treated as flat while workload is growing."""
+
+    divergence_story_defender_regression: float = -0.05
+    """Defender growth at or below this value is treated as a regression."""
+
     def ratio_for(self, plan_label: str) -> float:
         return self.plan_target_ratios.get(plan_label, self.target_ratio)
 
