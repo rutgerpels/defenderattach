@@ -43,6 +43,41 @@
     };
   }
 
+  function storyDict(story) {
+    const result = {
+      customer: story.customer,
+      plan_label: story.planLabel,
+      workload_sl2_categories: (story.workloadSl2Categories || []).slice(),
+      workload_categories: (story.workloadSl2Categories || []).slice(),
+      story_type: story.storyType,
+      severity: story.severity,
+      confidence: story.confidence,
+      pricing_driver: story.pricingDriver,
+      latest_workload_acr: safe(story.latestWorkloadAcr),
+      latest_defender_acr: safe(story.latestDefenderAcr),
+      compared_months: (story.comparedMonths || []).slice(),
+      workload_start_value: safe(story.workloadStartValue),
+      workload_end_value: safe(story.workloadEndValue),
+      defender_start_value: safe(story.defenderStartValue),
+      defender_end_value: safe(story.defenderEndValue),
+      workload_delta: safe(story.workloadDelta),
+      defender_delta: safe(story.defenderDelta),
+      workload_pct_change: safe(story.workloadPctChange),
+      defender_pct_change: safe(story.defenderPctChange),
+      momentum_spread: safe(story.momentumSpread),
+      has_dollar_gap: story.hasDollarGap,
+      gap_dollars: safe(story.gapDollars),
+      headline: story.headline,
+      evidence_bullets: (story.evidenceBullets || []).slice(),
+      recommended_action: story.recommendedAction,
+      caveat: story.caveatText,
+      caveat_text: story.caveatText,
+    };
+    if (story.talkTrack !== null && story.talkTrack !== undefined) result.talk_track = story.talkTrack;
+    if (story.summary !== null && story.summary !== undefined) result.summary = story.summary;
+    return result;
+  }
+
   function sortedOpps(opportunities) {
     // Stable sort by blended_score descending (mirrors Python sorted(reverse=True)).
     return opportunities
@@ -68,6 +103,7 @@
       },
       reconciliation_ok: d.reconciliationOk,
       opportunities: sortedOpps(d.opportunities).map(oppDict),
+      divergence_stories: (d.divergenceStories || []).map(storyDict),
       foundational: d.foundational.map((f) => ({
         plan_label: f.planLabel, actual: safe(f.actual), present: f.present,
       })),
@@ -93,6 +129,7 @@
         total_eligible_workload_acr: safe(model.totalEligibleWorkloadAcr),
         total_dfc_acr: safe(model.totalDfcAcr),
         total_gap_dollars: safe(model.totalGapDollars),
+        divergence_story_count: (model.divergenceStories || []).length,
         reconciliation_ok: reconciliationOk(model.reconciliation),
         cohort_ratios: cohort,
         config: {
@@ -103,8 +140,16 @@
           min_denominator: model.config.minDenominator,
           attach_threshold: model.config.attachThreshold,
           use_cohort_median: model.config.useCohortMedian,
+          divergence_story_min_workload_acr: model.config.divergenceStoryMinWorkloadAcr,
+          divergence_story_min_start_workload_acr: model.config.divergenceStoryMinStartWorkloadAcr,
+          divergence_story_new_workload_max_start_acr: model.config.divergenceStoryNewWorkloadMaxStartAcr,
+          divergence_story_min_workload_growth: model.config.divergenceStoryMinWorkloadGrowth,
+          divergence_story_material_lag: model.config.divergenceStoryMaterialLag,
+          divergence_story_flat_defender_growth: model.config.divergenceStoryFlatDefenderGrowth,
+          divergence_story_defender_regression: model.config.divergenceStoryDefenderRegression,
         },
       },
+      divergence_stories: (model.divergenceStories || []).map(storyDict),
       customers: model.dossiers.map(customerDict),
     };
   }
@@ -192,6 +237,10 @@ Rules:
         const tag = o.hasDollarGap ? '💲 gap' : '● coverage';
         lines.push(`- **${o.planLabel}** (${o.signal}, ${tag}): ${guardCell(o.opener)}`);
       }
+      for (const s of (d.divergenceStories || []).slice(0, 2)) {
+        lines.push(`- **Trend story — ${guardCell(s.planLabel)}** (${s.severity}): ${guardCell(s.headline)} `
+          + `${guardCell(s.recommendedAction)}`);
+      }
       lines.push('');
     }
 
@@ -200,6 +249,7 @@ Rules:
 
   const api = {
     safe,
+    storyDict,
     buildJson,
     buildJsonText,
     buildMarkdown,
