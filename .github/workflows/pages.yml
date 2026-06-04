@@ -1,51 +1,68 @@
-name: Deploy static web-app to GitHub Pages
+name: Publish static web app to GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
       - "web-app/**"
+      - "scripts/build_static_webapp.py"
+      - "src/defender_acr_dashboard/static_dashboard.py"
+      - "docs/defender_for_cloud_dashboard (2).html"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
-  group: pages
+  group: pages-production
   cancel-in-progress: false
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Configure Pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
-
       - name: Stage site (exclude tests)
         run: |
+          set -euo pipefail
           mkdir -p _site
           rsync -a --exclude='tests' web-app/ _site/
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
-        with:
-          path: _site
+      - name: Publish site root to gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5.0.0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          remote_url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "${remote_url}"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages --depth=1
+            git worktree add _pages origin/gh-pages
+          else
+            git worktree add --detach _pages
+            git -C _pages checkout --orphan gh-pages
+            git -C _pages rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          find _pages -mindepth 1 -maxdepth 1 ! -name ".git" ! -name "previews" -exec rm -rf {} +
+          rsync -a --delete --exclude='.git' --exclude='previews' _site/ _pages/
+          touch _pages/.nojekyll
+
+          git -C _pages add -A
+          if git -C _pages diff --cached --quiet; then
+            echo "No GitHub Pages production changes to publish."
+          else
+            git -C _pages commit -m "Deploy production GitHub Pages site"
+            git -C _pages push origin HEAD:gh-pages
+          fi

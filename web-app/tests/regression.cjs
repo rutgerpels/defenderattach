@@ -32,11 +32,12 @@ function makeSandbox() {
   return sb;
 }
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 function test(name, fn) {
   try { fn(); console.log('  PASS ' + name); pass++; }
   catch (e) { console.log('  FAIL ' + name + '\n      ' + (e.stack || e.message)); fail++; }
 }
+function skipTest(name, reason) { console.log('  SKIP ' + name + ' (' + reason + ')'); skip++; }
 function assert(cond, msg) { if (!cond) throw new Error('assertion failed: ' + msg); }
 function assertEqual(actual, expected, msg) {
   if (actual !== expected) throw new Error(`${msg || ''}\n      expected: ${JSON.stringify(expected)}\n      actual:   ${JSON.stringify(actual)}`);
@@ -61,13 +62,14 @@ console.log('\nweb-app/index.html (generated)');
     assert(/window\.PptxAcr\.exportDeck\(DATA, sourceName, threshold\)/.test(src),
       'export handler must call PptxAcr.exportDeck with source + threshold');
   });
-  test('renderOpportunityHeatmap escapes customer + notes', () => {
+  test('renderOpportunityHeatmap escapes customer + derived fields', () => {
     const start = src.indexOf('function renderOpportunityHeatmap()');
     assert(start >= 0, 'renderOpportunityHeatmap function must exist in generated HTML');
     // Inspect the next ~6 KB — comfortably covers the function body.
     const body = src.slice(start, start + 6000);
     assert(/\$\{escapeHtml\(r\.customer\)\}/.test(body), 'customer must be escaped in heatmap');
-    assert(/\$\{escapeHtml\(r\.notes\)\}/.test(body), 'notes must be escaped in heatmap');
+    assert(/\$\{escapeHtml\(r\.topServiceLabel\)\}/.test(body), 'top gap service label must be escaped in heatmap');
+    assert(/\$\{escapeHtml\(r\.actionReason\)\}/.test(body), 'signal/reason must be escaped in heatmap');
     assert(!/\$\{r\.customer\}/.test(body), 'no raw r.customer interpolation in heatmap');
     assert(!/\$\{r\.notes\}/.test(body), 'no raw r.notes interpolation in heatmap');
   });
@@ -286,6 +288,9 @@ console.log('\nacr-model.js');
 console.log('\nacr-model.js (new weekly format)');
 {
   const sb = makeSandbox();
+  loadInto(sb, 'js/sl-mapping.js');
+  loadInto(sb, 'js/sl-parser.js');
+  loadInto(sb, 'js/sl-engine.js');
   loadInto(sb, 'js/acr-model.js');
 
   // 3-row header: row0 fiscal-month band, row1 week-start (or 'Total'), row2 dims + '$ ACR'.
@@ -415,6 +420,48 @@ console.log('\nacr-model.js (new weekly format)');
     assert(threw, 'expected build to throw for a single-month export');
   });
 
+  test('builds an SL2/SL4 export into the corp dashboard contract (single source)', () => {
+    const rows = [
+      [null, null, null, 'FY26-Jul', null, null, null, null, 'FY26-Aug', null, null, null, null],
+      ['TPAccountName', 'ServiceLevel2', 'ServiceLevel4',
+       '$ ACR', '$ ACR MoM', '$ Average Daily ACR', '$ Avg Daily ACR MoM', '% Avg Daily ACR MoM',
+       '$ ACR', '$ ACR MoM', '$ Average Daily ACR', '$ Avg Daily ACR MoM', '% Avg Daily ACR MoM'],
+      ['Acme', 'Container Registry', 'Total',                  100, 0, 3, 0, 0, 120, 0, 4, 0, 0],
+      ['Acme', 'Container Registry', 'Basic Registry',          25, 0, 1, 0, 0,  20, 0, 1, 0, 0],
+      ['Acme', 'Container Registry', 'Premium Registry',        75, 0, 2, 0, 0, 100, 0, 3, 0, 0],
+      ['Acme', 'Microsoft Defender for Cloud', 'Total',          5, 0, 0, 0, 0,   6, 0, 0, 0, 0],
+      ['Acme', 'Microsoft Defender for Cloud', 'Container Registries', 5, 0, 0, 0, 0, 6, 0, 0, 0, 0],
+      ['Acme', 'Total', null,                                  105, 0, 3, 0, 0, 126, 0, 4, 0, 0],
+    ];
+    const d = sb.AcrModel.build(rows, 'sl2sl4.xlsx');
+    assertEqual(d.format, 'sl2sl4', 'SL2/SL4 import flagged as sl2sl4 format');
+    assertEqual(d.months.length, 2, 'two months parsed');
+    assertEqual(d.last_full_month, 'FY26-Aug', 'latest month treated as the full month');
+    assertEqual(d.partial_month_idx, -1, 'monthly data has no partial-month tail');
+    assert(d.products.includes('Defender for Cloud'), 'DfC normalised as a product');
+    assert(!d.products.includes('Total'), 'customer Total roll-up is not a product');
+    assert(!d.customers.includes('Total'), 'Total is not surfaced as a customer');
+    const cd = d.customer_data['Acme'];
+    for (let i = 0; i < d.months.length; i += 1) {
+      assert(Math.abs(cd.other_series[i] - (cd.total_series[i] - cd.dfc_series[i])) < 0.01,
+        'other = total − dfc holds');
+      assert(cd.other_series[i] >= -0.01, 'no negative non-Defender ACR');
+    }
+    assertEqual(d.opportunity.length, d.customers.length, 'one opportunity row per customer');
+    const container = cd.products.find(p => p.product === 'Container Registry');
+    assert(container && Array.isArray(container.skus), 'SL2 category exposes SL4 service details');
+    assertEqual(container.skus.length, 2, 'two active SL4 details attached');
+    assertEqual(container.skus[0].sku, 'Premium Registry', 'SL4 details sorted by current ACR');
+    assertEqual(container.skus[0].current, 100, 'SL4 current ACR preserved');
+    assertEqual(container.skus[1].series[0], 25, 'SL4 monthly series preserved');
+    const defender = cd.products.find(p => p.product === 'Defender for Cloud');
+    assert(defender && Array.isArray(defender.skus), 'DfC category exposes Defender plan details');
+    assertEqual(defender.skus[0].sku, 'Container Registries', 'Defender SL4 detail preserved');
+    assert(d.service_attach && Array.isArray(d.service_attach.dossiers),
+      'per-service attach model attached for drill-down');
+    assert(!d.service_attach_error, 'no service-attach build error');
+  });
+
   test('parses real Date week-start cells (not just ISO strings)', () => {
     const rows3 = [
       ...mkHeader(['FY26-Mar', 'FY26-Apr'], [[new Date(2026, 2, 1)], [new Date(2026, 3, 5)]]),
@@ -461,6 +508,11 @@ console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
   test('renders collapsible SKU rows with a toggle handler', () => {
     assert(/data-sku-toggle/.test(src), 'SKU toggle markup present');
     assert(/closest\('\[data-sku-toggle\]'\)/.test(src), 'delegated toggle handler present');
+    assert(/Service Level 4 detail/.test(src), 'SL4 detail copy present');
+    assert(/aria-expanded="false"/.test(src), 'category rows expose expanded state');
+    assert(/Click to show \$\{skus\.length\} service detail/.test(src), 'category rows explain drill-down');
+    assert(/addEventListener\('keydown'/.test(src), 'keyboard drill-down handler present');
+    assert(/\.product-row\[hidden\]\s*\{\s*display:\s*none;\s*\}/.test(src), 'hidden SKU rows are not overridden by grid display CSS');
   });
   test('KPI uses the last full month when the latest month is partial', () => {
     assert(/Math\.max\(0, DATA\.months\.length - 2\) : DATA\.months\.length - 1/.test(src), 'partial-month KPI guard');
@@ -490,21 +542,8 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
     assert(/labels = weekly \? DATA\.week_labels : DATA\.month_labels/.test(src), 'weekly x-axis labels wired');
     assert(!/lineChart\('chart-dfc-trend', \[\{label: 'Defender for Cloud', values: DATA\.dfc_total_monthly, color: '#0078d4'\}\]\);/.test(src), 'no stale month-only DfC trend call');
   });
-  test('customer drill-down charts auto-select weekly when available', () => {
-    assert(/const cWeekly = !!\(DATA\.weekly_enabled && Array\.isArray\(cd\.dfc_weekly\) && Array\.isArray\(cd\.other_weekly\) && Array\.isArray\(cd\.total_weekly\)\);/.test(src), 'customer weekly guard present');
-    assert(/const dfcSeries = cWeekly \? cd\.dfc_weekly : cd\.dfc_series;/.test(src), 'customer DfC series switched');
-    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'customer DfC chart relabelled');
-    assert(/lineChart\(idp \+ 'chart-cust-pct', .*\{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx, format: 'percent'\}\);/.test(src), 'customer % chart relabelled');
-  });
-  test('DfC penetration chart renders percent axis and tooltip', () => {
-    assert(/opts\.format === 'percent' \? yv\.toFixed\(yMax < 10 \? 1 : 0\) \+ '%'/.test(src), 'lineChart percent Y-axis branch present');
-    assert(/opts\.format === 'percent' \? parseFloat\(val\)\.toFixed\(2\) \+ '%'/.test(src), 'lineChart percent tooltip branch present');
-    // The dollar-based DfC trend chart must NOT inherit percent formatting.
-    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[[\s\S]*?\], \{labels: cLabels, partialIdx: cWeekly \? -1 : DATA\.partial_month_idx\}\);/.test(src), 'DfC dollar chart keeps dollar (no percent) opts');
-  });
   test('legacy monthly data still falls back without blank charts', () => {
     assert(/weekly \? DATA\.dfc_total_weekly : DATA\.dfc_total_monthly/.test(src), 'DfC monthly fallback retained');
-    assert(/cWeekly \? cd\.dfc_weekly : cd\.dfc_series/.test(src), 'customer monthly fallback retained');
   });
   test('partial-month marker is suppressed on weekly charts', () => {
     assert(/const partialIdx = \(opts\.partialIdx != null\) \? opts\.partialIdx : DATA\.partial_month_idx;/.test(src), 'lineChart honours opts.partialIdx');
@@ -512,15 +551,11 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
     assert(!/const isPartial = i === DATA\.partial_month_idx;/.test(src), 'no hard-coded monthly partial index');
     const passed = (src.match(/partialIdx: weekly \? -1 : DATA\.partial_month_idx/g) || []).length;
     assert(passed === 1, 'overview DfC chart passes weekly partialIdx (got ' + passed + ')');
-    const cPassed = (src.match(/partialIdx: cWeekly \? -1 : DATA\.partial_month_idx/g) || []).length;
-    assert(cPassed === 2, 'customer charts pass weekly partialIdx (got ' + cPassed + ')');
   });
   test('trend chart titles/subtitles no longer hard-code "monthly"', () => {
     assert(/Defender for Cloud — ACR across all customers/.test(src), 'DfC trend title neutral');
     assert(/ACR trend \(weekly where available\)/.test(src), 'DfC trend sub clarifies weekly');
     assert(/Product mix — share of ACR by service/.test(src), 'product mix donut title');
-    assert(/ACR trend — does DfC track with the rest of the footprint\?/.test(src), 'customer DfC sub neutral');
-    assert(/DfC as % of total ACR for this customer/.test(src), 'customer pct sub neutral');
     assert(!/Monthly ACR across all customers/.test(src), 'no stale DfC trend title');
     assert(!/monthly ACR trend by service/.test(src), 'no stale product trend title');
   });
@@ -786,16 +821,16 @@ console.log('\nweb-app/index.html (attach baseline + reclassification)');
     assert(/if \(typeof reclassifyOpportunities === 'function'\) reclassifyOpportunities\(threshold\);/.test(src), 'export must reclassify before building the deck');
     assert(!/: 8;\n.*const sourceName = DATA\.source_name/.test(src), 'stale 8% export fallback must be gone');
   });
-  test('priority badges are clickable and open a grading explainer', () => {
+  test('priority badges are clickable and open a service evidence card', () => {
     assert(/tagFor = function \(opp\) \{/.test(src), 'tagFor reassigned to clickable badge');
     assert(/class="tag ' \+ cls \+ ' prio-badge"/.test(src), 'badge carries the prio-badge hook + role');
     assert(/function openPriorityExplainer\(customer\)/.test(src), 'explainer open function present');
-    assert(/function priorityGradingRules\(\)/.test(src), 'grading rubric helper present');
   });
-  test('explainer parses per-customer signals and is threshold-aware', () => {
-    assert(/row\.notes\.split\('; '\)/.test(src), 'signals derived from row.notes');
-    assert(/attach baseline: Defender share is below the ' \+ tl/.test(src), 'baseline rule text uses the live threshold label');
-    assert(/escapeHtml\(customer\)/.test(src), 'customer name escaped in explainer title');
+  test('explainer avoids legacy corporate attach-rate grading', () => {
+    assert(/function _prioDossier\(customer\)/.test(src), 'service dossier lookup present');
+    assert(/Why ' \+ escapeHtml\(customer\) \+ ' is a ' \+ escapeHtml\(ratingTier\) \+ ' service attach opportunity/.test(src),
+      'customer name escaped in service-opportunity title');
+    assert(!/function priorityGradingRules\(\)/.test(src), 'corporate grading helper removed');
   });
   test('badge clicks are intercepted in capture phase (no drill-down navigation)', () => {
     assert(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?e\.target\.closest\('\.prio-badge'\)[\s\S]*?e\.stopPropagation\(\);[\s\S]*?\}, true\);/.test(src),
@@ -815,8 +850,6 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
     assert(/document\.getElementById\(idp \+ 'cust-priority'\)\.innerHTML = tagFor/.test(src), 'priority target is prefixed');
     assert(/const note = document\.getElementById\(idp \+ 'cust-signal'\);/.test(src), 'signal target is prefixed');
     assert(/const ph = document\.getElementById\(idp \+ 'cust-products'\);/.test(src), 'products target is prefixed');
-    assert(/lineChart\(idp \+ 'chart-cust-dfc', \[/.test(src), 'DfC chart target is prefixed');
-    assert(/lineChart\(idp \+ 'chart-cust-pct', /.test(src), 'pct chart target is prefixed');
   });
   test('drill-down signal note escapes Excel-derived notes (XSS)', () => {
     assert(/note\.innerHTML = `<strong>Signal:<\/strong> \$\{escapeHtml\(opp\.notes\)\}`;/.test(src), 'opp.notes must be escaped');
@@ -829,27 +862,25 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
     assert(/id="m-cust-title"/.test(src), 'modal title node present');
     assert(/id="m-cust-cards"/.test(src), 'modal cards node present');
     assert(/id="m-cust-signal"/.test(src), 'modal signal node present');
-    assert(/id="m-chart-cust-dfc"/.test(src), 'modal DfC chart container present');
-    assert(/id="m-chart-cust-pct"/.test(src), 'modal pct chart container present');
     assert(/id="m-cust-products"/.test(src), 'modal products node present');
     assert(/renderCustomerDetail\(name, 'm-'\);/.test(src), 'modal renders the breakdown with the m- prefix');
     assert(/if \(title\) title\.textContent = name;/.test(src), 'modal title set via textContent (safe)');
   });
   test('matrix customer clicks open the modal instead of navigating', () => {
-    assert(/e\.target\.closest\('#chart-quadrant \[data-customer\], #opp-tbody tr\[data-customer\], #chart-top-dfc \[data-customer\], #action-queue tr\[data-customer\], #all-tbody tr\[data-customer\]'\)/.test(src),
-      'interceptor targets heatmap + action-queue rows + overview top-customers chart + sales action queue + all-customers table');
+    assert(/e\.target\.closest\('#chart-quadrant \[data-customer\], #chart-top-dfc \[data-customer\], #action-queue tr\[data-customer\]'\)/.test(src),
+      'interceptor targets heatmap + overview top-customers chart + sales action queue');
     assert(/if \(e\.target\.closest\('\.prio-badge'\)\) return;/.test(src), 'priority badges are skipped (explainer wins)');
     assert(/openCustomerModal\(name\);/.test(src), 'interceptor opens the modal');
     assert(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?#chart-quadrant \[data-customer\][\s\S]*?e\.stopPropagation\(\);[\s\S]*?e\.preventDefault\(\);[\s\S]*?\}, true\);/.test(src),
       'capture-phase handler stops propagation + default (no selectCustomer navigation)');
   });
-  test('sales action queue + all-customers table rows open the modal', () => {
+  test('sales action queue rows open the modal', () => {
     assert(/#action-queue tr\[data-customer\]/.test(src),
       'sales action queue rows are in the modal interceptor selector');
-    assert(/#all-tbody tr\[data-customer\]/.test(src),
-      'all-customers table rows are in the modal interceptor selector');
-    assert(/\['chart-quadrant', 'opp-tbody', 'chart-top-dfc', 'action-queue', 'all-tbody'\]\.forEach/.test(src),
-      'a11y observers cover the two new table hosts');
+    assert(/\['chart-quadrant', 'chart-top-dfc', 'action-queue'\]\.forEach/.test(src),
+      'a11y observers cover the remaining customer-target hosts');
+    assert(!/#all-tbody tr\[data-customer\]/.test(src), 'removed all-customers table from modal interceptor selector');
+    assert(!/#opp-tbody tr\[data-customer\]/.test(src), 'removed opportunity table from modal interceptor selector');
   });
   test('overview top-customers chart opens the modal (not the drill-down tab)', () => {
     assert(/#chart-top-dfc \[data-customer\]/.test(src),
@@ -879,5 +910,204 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
   });
 }
 
-console.log(`\nResults: ${pass} passed, ${fail} failed`);
+// ---- generated index.html: per-service Defender attach (AE talk-track) ----
+console.log('\nweb-app/index.html (per-service Defender attach)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  test('per-service attach renderer is defined and mounted (inline + modal)', () => {
+    assert(/function renderServiceAttach\(idp, name\) \{/.test(src), 'renderServiceAttach defined');
+    assert(/<div id="cust-attach"><\/div>/.test(src), 'inline mount present');
+    assert(/<div id="m-cust-attach"><\/div>/.test(src), 'modal mount present');
+    assert(/renderServiceAttach\(idp, name\);/.test(src), 'renderer invoked from renderCustomerDetail');
+    assert(/const host = document\.getElementById\(idp \+ 'cust-attach'\);/.test(src), 'host target is id-prefix aware');
+  });
+  test('per-service attach hides gracefully without SL2/SL4 data', () => {
+    assert(/if \(!sa \|\| !Array\.isArray\(sa\.dossiers\)\) \{/.test(src), 'guards on missing service_attach');
+    assert(/host\.style\.display = 'none';/.test(src), 'hides host when no dossier');
+    assert(/DATA\.service_attach_error/.test(src), 'surfaces engine error when present');
+    assert(/sa\.dossiers\.find\(function \(x\) \{ return x\.customer === name; \}\)/.test(src), 'looks up dossier by customer');
+  });
+  test('per-service attach escapes all customer-derived strings (XSS)', () => {
+    assert(/escapeHtml\(o\.planLabel\)/.test(src), 'plan label escaped');
+    assert(/escapeHtml\(o\.opener\)/.test(src), 'AE opener escaped');
+    assert(/escapeHtml\(f\.planLabel\)/.test(src), 'foundational plan label escaped');
+    assert(/escapeHtml\(String\(saErr\)\)/.test(src), 'engine error escaped');
+    assert(!/\$\{o\.opener\}/.test(src), 'no raw opener interpolation');
+  });
+  test('per-service attach respects dollar-gap eligibility + ranks by priority then score', () => {
+    assert(/o\.hasDollarGap[\s\S]*?\/ mo gap/.test(src), 'dollar gap shown only when hasDollarGap');
+    assert(/usage-priced/.test(src), 'usage-priced plans shown as coverage signal');
+    assert(/a\.priorityRank == null \? 9 : a\.priorityRank/.test(src),
+      'opportunities ranked by priorityRank first');
+    assert(/\(b\.blendedScore \|\| 0\) - \(a\.blendedScore \|\| 0\)/.test(src),
+      'blended score is the tie-breaker within a priority tier');
+  });
+  test('per-service attach surfaces High/Medium/Low priority tiers', () => {
+    assert(/const prTag = o\.priority/.test(src), 'priority tag built per opportunity');
+    assert(/escapeHtml\(o\.priority\) \+ ' priority/.test(src), 'priority label rendered and escaped');
+    assert(/escapeHtml\(o\.priorityReason\)/.test(src), 'priority reason rendered and escaped');
+    assert(/const tierLegend = opps\.length/.test(src), 'tier-definition legend present');
+    assert(/workload growing faster than Defender attach/.test(src), 'High tier defined in legend');
+  });
+  test('service attach opportunities table includes search filtering', () => {
+    assert(/id="action-queue-search"/.test(src), 'search input is rendered with action queue controls');
+    assert(/Search service attach opportunities/.test(src), 'search input has an accessible label');
+    assert(/document\.getElementById\('action-queue-search'\)\.addEventListener\('input', renderOpportunityHeatmap\)/.test(src),
+      'search input re-renders the table on input');
+    assert(/const term = \(document\.getElementById\('action-queue-search'\)\?\.value \|\| ''\)\.trim\(\)\.toLowerCase\(\)/.test(src),
+      'action queue rows read the normalized search term');
+    assert(/row\.topServiceLabel[\s\S]*row\.conversationAngle/.test(src),
+      'search matches service, action, reason, and conversation fields');
+    assert(/No opportunities match the current filters\./.test(src), 'empty search state is rendered');
+  });
+  test('per-service attach renders narrative sentence + all-plans scorecard (no SVG chart)', () => {
+    assert(/function _saSentence\(customer, c\)/.test(src), '_saSentence helper defined');
+    assert(/function _saScorecard\(d\)/.test(src), '_saScorecard helper defined');
+    assert(/attach gap\./.test(src), 'narrative gap sentence phrasing present');
+    assert(/Defender coverage scorecard/.test(src), 'all-plans scorecard title present');
+    assert(/below_threshold: 0, on_track: 1, not_deployed: 2/.test(src),
+      'scorecard sorts below-threshold first');
+    assert(/const scorecard = _saScorecard\(d\);/.test(src), 'scorecard wired into renderer');
+    assert(!/function _saGapChart\(/.test(src), 'old SVG gap chart helper removed');
+    assert(!/Workload vs Defender ACR by service/.test(src), 'old chart title removed');
+  });
+  test('per-service attach folds scoring into click-to-expand scorecard accordions', () => {
+    assert(/function _saOppDetail\(o\)/.test(src), '_saOppDetail expanded-detail helper defined');
+    assert(/data-sa-toggle/.test(src), 'scorecard rows carry the accordion toggle hook');
+    assert(/class="sa-detail"/.test(src), 'hidden per-plan detail panel present');
+    assert(/window\.__saAccordionWired/.test(src), 'accordion handler wired once');
+    assert(/aria-expanded/.test(src), 'accordion rows expose aria-expanded state');
+    // The standalone opportunity cards must be gone (folded into the scorecard).
+    assert(!/let oppHtml;/.test(src), 'old standalone opportunity-card block removed');
+  });
+  test('per-service attach shows the Total ACR gap banner (no "on the table" wording)', () => {
+    assert(/Total ACR gap per month/.test(src), 'monthly gap headline present');
+    assert(/Total ACR gap per year/.test(src), 'annual gap headline present');
+    assert(!/on the table/.test(src), '"on the table" wording removed everywhere');
+    assert(/const monthlyGap = d\.totalGapDollars \|\| 0/.test(src), 'monthly gap sourced from totalGapDollars');
+    assert(/const annualGap = monthlyGap \* 12/.test(src), 'annual gap is monthly x12');
+  });
+  test('priority modal is simplified around service-level attach evidence', () => {
+    assert(/function _prioServiceEvidence\(customer\)/.test(src), '_prioServiceEvidence helper defined');
+    assert(/Service-level summary/.test(src), 'modal service summary present');
+    assert(/Top service attach gaps/.test(src), 'modal top service gaps present');
+    assert(/Why this is a priority/.test(src), 'modal concise priority bullets present');
+    assert(/Suggested seller conversation/.test(src), 'modal seller prompt present');
+    assert(/Eligible Azure workload ACR \/ mo/.test(src), 'eligible workload KPI present');
+    assert(/Mapped Defender ACR \/ mo/.test(src), 'mapped Defender KPI present');
+    assert(/const svcEvidenceHtml = _prioServiceEvidence\(customer\)/.test(src),
+      'modal computes per-service evidence');
+    assert(!/Corporate context/.test(src), 'corp context removed from modal');
+    assert(!/How the corporate attach rating is graded/.test(src), 'corporate grading rubric removed from modal');
+    assert(!/Defender share of total/.test(src), 'corp attach-rate metric removed from modal');
+    assert(/escapeHtml\(o\.planLabel\)/.test(src), 'service labels escaped in modal evidence');
+  });
+}
+
+// ---- service-level (SL2/SL4) attach: pipeline parity + privacy guards ----
+console.log('\nweb-app service-level attach (SL2/SL4)');
+{
+  const ROOT = path.resolve(WEBAPP, '..');
+  // SL/vendor modules are CommonJS-friendly; xlsx wants a window global.
+  global.window = global.window || global;
+  const XLSX = require(path.join(WEBAPP, 'vendor', 'xlsx.full.min.js'));
+  const SLParser = require(path.join(WEBAPP, 'js', 'sl-parser.js'));
+  const SLEngine = require(path.join(WEBAPP, 'js', 'sl-engine.js'));
+  const SLExport = require(path.join(WEBAPP, 'js', 'sl-export.js'));
+
+  const FIXTURE = path.join(ROOT, 'inputfolder', 'ACR Details SL2-SL4.xlsx');
+  const GOLDEN = path.join(WEBAPP, 'tests', 'sl-golden.json');
+
+  // The fixture (*.xlsx) and golden oracle (sl-golden.json) are derived from
+  // real customer data and are gitignored — they exist only on the developer's
+  // machine. Skip the parity check on a fresh clone rather than failing it.
+  if (!fs.existsSync(FIXTURE) || !fs.existsSync(GOLDEN)) {
+    skipTest('SL pipeline output matches Python golden oracle within tolerance',
+      'gitignored customer fixture/golden not present');
+  } else {
+  test('SL pipeline output matches Python golden oracle within tolerance', () => {
+    assert(fs.existsSync(FIXTURE), 'fixture ACR Details SL2-SL4.xlsx must exist');
+    assert(fs.existsSync(GOLDEN), 'sl-golden.json oracle must exist');
+    const buf = fs.readFileSync(FIXTURE);
+    const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
+    const sheet = wb.Sheets.Export || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, cellDates: true });
+    const parsed = SLParser.parseSl2Sl4(rows, 'ACR Details SL2-SL4.xlsx');
+    const model = SLEngine.buildModel(parsed, undefined);
+    const jsJson = SLExport.buildJson(model);
+    const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
+    jsJson.meta.generated_at = golden.meta.generated_at;
+
+    assertEqual(jsJson.customers.length, golden.customers.length, 'customer count must match golden');
+
+    function deepDiff(a, b, p, diffs, tol) {
+      if (diffs.length > 40) return;
+      if (typeof a === 'number' && typeof b === 'number') {
+        if (!Number.isFinite(a) || !Number.isFinite(b)) { if (a !== b) diffs.push(`${p}: ${a} != ${b}`); return; }
+        const t = p.includes('ratio') ? 1e-6 : tol;
+        if (Math.abs(a - b) > t) diffs.push(`${p}: ${a} != ${b} (Δ ${Math.abs(a - b)})`);
+        return;
+      }
+      if (Array.isArray(a) || Array.isArray(b)) {
+        if (!Array.isArray(a) || !Array.isArray(b)) { diffs.push(`${p}: array mismatch`); return; }
+        if (a.length !== b.length) diffs.push(`${p}: length ${a.length} != ${b.length}`);
+        const n = Math.min(a.length, b.length);
+        for (let i = 0; i < n; i += 1) deepDiff(a[i], b[i], `${p}[${i}]`, diffs, tol);
+        return;
+      }
+      if (a && b && typeof a === 'object' && typeof b === 'object') {
+        for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+          if (!(k in a)) { diffs.push(`${p}.${k}: missing in JS`); continue; }
+          if (!(k in b)) { diffs.push(`${p}.${k}: missing in golden`); continue; }
+          deepDiff(a[k], b[k], `${p}.${k}`, diffs, tol);
+        }
+        return;
+      }
+      if (a !== b) diffs.push(`${p}: ${JSON.stringify(a)} != ${JSON.stringify(b)}`);
+    }
+    const diffs = [];
+    deepDiff(jsJson, golden, '$', diffs, 0.011);
+    assert(diffs.length === 0, 'SL output diverged from golden:\n      ' + diffs.slice(0, 10).join('\n      '));
+  });
+  }
+
+  if (!fs.existsSync(FIXTURE)) {
+    skipTest('SL engine builds an all-plans catalog per dossier (golden-safe)',
+      'gitignored customer fixture not present');
+  } else {
+    test('SL engine builds an all-plans catalog per dossier (golden-safe)', () => {
+      const buf = fs.readFileSync(FIXTURE);
+      const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
+      const sheet = wb.Sheets.Export || wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, cellDates: true });
+      const parsed = SLParser.parseSl2Sl4(rows, 'ACR Details SL2-SL4.xlsx');
+      const model = SLEngine.buildModel(parsed, undefined);
+      const d = model.dossiers[0];
+      assert(Array.isArray(d.catalog) && d.catalog.length > 0, 'dossier exposes a catalog array');
+      const allowed = new Set(['below_threshold', 'on_track', 'not_deployed']);
+      for (const c of d.catalog) {
+        assert(allowed.has(c.status), `catalog status ${c.status} is from the allowed set`);
+        assert(typeof c.planLabel === 'string' && c.planLabel.length, 'catalog entry has a plan label');
+      }
+      const labels = d.catalog.map((c) => c.planLabel);
+      assert(new Set(labels).size === labels.length, 'catalog has one entry per plan');
+      const jsJson = SLExport.buildJson(model);
+      assert(jsJson.customers.every((c) => !('catalog' in c)), 'catalog is not serialized (parity preserved)');
+    });
+  }
+
+  test('SL app scripts make no network calls (client-side privacy guard)', () => {
+    const files = fs.readdirSync(path.join(WEBAPP, 'js'))
+      .filter((f) => f.startsWith('sl-') && f.endsWith('.js'));
+    assert(files.length >= 3, 'expected the reusable SL modules to be present');
+    for (const f of files) {
+      const src = fs.readFileSync(path.join(WEBAPP, 'js', f), 'utf8');
+      assert(!/https?:\/\//.test(src), `${f} must not reference any remote URL (keep data in-browser)`);
+      assert(!/\bfetch\s*\(/.test(src), `${f} must not call fetch() (no server round-trips)`);
+      assert(!/XMLHttpRequest/.test(src), `${f} must not use XMLHttpRequest`);
+    }
+  });
+}
+
+console.log(`\nResults: ${pass} passed, ${fail} failed${skip ? ', ' + skip + ' skipped' : ''}`);
 if (fail > 0) process.exit(1);

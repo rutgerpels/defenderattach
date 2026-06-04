@@ -83,6 +83,13 @@ def build_html() -> str:
     html = _opportunity_map_labels(html)
     html = _inject_opportunity_map(html)
 
+    html = _replace_once(
+        html,
+        "  barChartHorizontal('chart-top-dfc', top15);\n",
+        "  barChartHorizontal('chart-top-dfc', top15);\n  slDecorateOverview();\n",
+        "renderAll chart-top-dfc anchor (Overview decorator wire-up)",
+    )
+
     html = html.replace(
         "<title>Defender for Cloud — Opportunity Dashboard</title>",
         "<title>Defender for Cloud — ACR Opportunity Dashboard</title>",
@@ -140,11 +147,15 @@ def build_html() -> str:
     html = _threshold_priority(html)
     html = _inject_priority_explainer(html)
     html = _inject_customer_modal(html)
+    html = _inject_service_attach(html)
     html = _inject_category_modal(html)
     html = _harden_csvcell(html)
 
     closing_body = "</body>"
     extra_scripts = (
+        '<script src="./js/sl-mapping.js"></script>\n'
+        '<script src="./js/sl-parser.js"></script>\n'
+        '<script src="./js/sl-engine.js"></script>\n'
         '<script src="./js/acr-model.js"></script>\n'
         '<script src="./vendor/pptxgen.bundle.js"></script>\n'
         '<script src="./js/pptx-acr.js"></script>\n'
@@ -160,8 +171,9 @@ def build_html() -> str:
     _assert_contains(html, 'id="export-pptx-btn"', "export PPT button")
     _assert_contains(html, "PptxAcr.exportDeck", "export PPT handler")
     _assert_contains(html, "function renderOpportunityHeatmap()", "heatmap function")
+    _assert_contains(html, 'id="action-queue-search"', "service opportunity search input")
+    _assert_contains(html, "No opportunities match the current filters.", "service opportunity search empty state")
     _assert_contains(html, "${escapeHtml(r.customer)}", "escaped customer in heatmap")
-    _assert_contains(html, "${escapeHtml(r.notes)}", "escaped notes in heatmap")
     _assert_contains(html, "${escapeHtml(d.label", "escaped label in bar chart")
     _assert_contains(html, "${escapeHtml(p.label)}", "escaped label in quadrant chart")
     _assert_contains(html, "${escapeHtml(truncated)}", "escaped truncated label in quadrant chart")
@@ -174,7 +186,6 @@ def build_html() -> str:
     _assert_contains(html, "const DEFAULT_DFC_SHARE_THRESHOLD = 6;", "default 6% attach baseline")
     _assert_contains(html, "attach baseline", "attach baseline footer copy")
     _assert_contains(html, "function openPriorityExplainer(", "priority explainer modal")
-    _assert_contains(html, "function priorityGradingRules()", "priority grading rubric")
     _assert_contains(html, 'class="tag \' + cls + \' prio-badge"', "clickable priority badge")
     _assert_contains(html, "e.target.closest('.prio-badge')", "capture-phase badge click handler")
 
@@ -184,11 +195,7 @@ def build_html() -> str:
     _assert_contains(html, "function _ensureCustOverlay(", "customer modal overlay factory")
     _assert_contains(html, 'id="m-cust-title"', "customer modal title node")
     _assert_contains(html, 'id="m-cust-products"', "customer modal product table")
-    _assert_contains(html, 'id="m-chart-cust-dfc"', "customer modal dfc chart container")
-    _assert_contains(html, 'id="m-chart-cust-pct"', "customer modal pct chart container")
-    _assert_contains(html, "opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%'", "lineChart percent Y-axis label")
-    _assert_contains(html, "format: 'percent'});", "DfC penetration chart percent format")
-    _assert_contains(html, "#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]", "opportunity matrix click interceptor")
+    _assert_contains(html, "#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]", "opportunity matrix click interceptor")
     _assert_contains(html, "function _enhanceCustomerTargetsA11y()", "customer target a11y enhancer")
     _assert_contains(html, "n.setAttribute('tabindex', '0')", "customer targets made focusable")
     _assert_contains(html, "if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;", "customer target keydown activation")
@@ -197,16 +204,47 @@ def build_html() -> str:
     _assert_absent(html, "<strong>Signal:</strong> ${opp.notes}", "unescaped drill-down signal note")
     _assert_absent(html, "lineChart('chart-cust-dfc', [", "stale unprefixed cust dfc chart call")
     _assert_absent(html, "lineChart('chart-cust-pct', [", "stale unprefixed cust pct chart call")
+
+    # Per-service Defender attach (AE talk-track) drill-down.
+    _assert_contains(html, "function renderServiceAttach(idp, name)", "service attach renderer")
+    _assert_contains(html, 'id="cust-attach"', "inline service attach anchor")
+    _assert_contains(html, 'id="m-cust-attach"', "modal service attach anchor")
+    _assert_contains(html, "renderServiceAttach(idp, name);", "service attach render call")
+    _assert_contains(html, "escapeHtml(o.opener)", "escaped attach opener (XSS)")
+    _assert_contains(html, "escapeHtml(c.planLabel)", "escaped attach plan label (XSS)")
+    _assert_contains(html, "escapeHtml(f.planLabel)", "escaped foundational plan label (XSS)")
+    # New per-service narrative + all-plans scorecard surfaces.
+    _assert_contains(html, "function _saSentence(", "service attach narrative sentence helper")
+    _assert_contains(html, "function _saScorecard(", "service attach all-plans scorecard helper")
+    _assert_contains(html, "function _saOppDetail(", "service attach expanded opportunity detail helper")
+    _assert_contains(html, "data-sa-toggle", "service attach scorecard accordion toggle")
+    _assert_contains(html, 'class="sa-detail"', "service attach scorecard accordion panel")
+    _assert_contains(html, "window.__saAccordionWired", "service attach accordion delegated handler")
+    _assert_contains(html, "Defender coverage scorecard", "service attach scorecard title")
+    _assert_contains(html, "attach gap.", "service attach narrative gap phrasing")
+    _assert_contains(html, "Total ACR gap per month", "service attach $ opportunity banner (month)")
+    _assert_contains(html, "Total ACR gap per year", "service attach $ opportunity banner (year)")
+    _assert_absent(html, "on the table", "removed 'on the table' wording")
+    _assert_absent(html, "function _saGapChart(", "removed service attach SVG gap chart helper")
+    _assert_absent(html, "Workload vs Defender ACR by service", "removed service attach chart title")
+    _assert_contains(html, "function _prioServiceEvidence(", "priority modal per-service evidence")
+    _assert_contains(html, "Service-level summary", "priority modal service summary")
+    _assert_contains(html, "Suggested seller conversation", "priority modal seller prompt")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
     _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
+    _assert_contains(html, './js/sl-mapping.js', "sl-mapping.js script")
+    _assert_contains(html, './js/sl-parser.js', "sl-parser.js script")
+    _assert_contains(html, './js/sl-engine.js', "sl-engine.js script")
     _assert_contains(html, './js/pptx-acr.js', "pptx-acr.js script")
     _assert_contains(html, "#app-nav .app-menu", "app-nav inline CSS")
     _assert_contains(html, 'id="app-nav"', "app-nav placeholder")
     _assert_contains(html, 'id="splash"', "splash overlay")
     _assert_contains(html, 'id="splash-dropzone"', "splash dropzone")
+    _assert_contains(html, 'id="splash-progress"', "splash loading bar")
     _assert_contains(html, "splash.hidden = true", "splash hide-on-load")
     _assert_contains(html, "if (!DATA.customers || DATA.customers.length === 0) return;", "renderAll empty-state guard")
+    _assert_contains(html, "  __slDossierMap = null;\n  reclassifyOpportunities(dfcShareThreshold);", "renderAll dossier-cache reset (stale-data guard)")
     _assert_contains(html, "ACR_CACHE_KEY = 'defenderattach:acr:v3'", "session-storage persistence (v3 cache key)")
     _assert_contains(html, "sessionStorage.setItem(ACR_CACHE_KEY", "persistence write on import")
     _assert_contains(html, "const colorFor = (label, rank) =>", "validated donut colour helper")
@@ -222,7 +260,6 @@ def build_html() -> str:
 
     _assert_contains(html, "function renderDfcTrend()", "weekly-preferring DfC overview trend")
     _assert_contains(html, "const weekly = !!(DATA.weekly_enabled && DATA.dfc_total_weekly);", "weekly DfC series auto-selected")
-    _assert_contains(html, "cd.dfc_weekly", "weekly customer series wired into drill-down")
     _assert_absent(html, "lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values: DATA.dfc_total_monthly, color: '#0078d4'}]);", "stale month-only DfC overview trend call")
     _assert_absent(html, 'id="product-trend-grain"', "removed monthly/weekly granularity toggle")
     _assert_absent(html, 'id="cust-trend-grain"', "removed customer granularity toggle")
@@ -251,6 +288,11 @@ def build_html() -> str:
     _assert_contains(html, "function _ensureCatOverlay(", "category modal overlay builder")
     _assert_contains(html, "DATA.product_skus", "category modal sources SKU leaves")
     _assert_absent(html, ": TRACK_PRODUCTS)\n    .filter(p => src[p]);", "donut no longer reuses the 8-cap track_products taxonomy")
+
+    _assert_contains(html, "function slDecorateOverview()", "Overview attach decorator function")
+    _assert_contains(html, "function slPlanBars(", "Overview plan-gap bars helper")
+    _assert_contains(html, "function slSetChartText(", "Overview runtime chart-text helper")
+    _assert_contains(html, "  slDecorateOverview();\n", "renderAll Overview decorator wiring")
 
     return html
 
@@ -387,6 +429,19 @@ def _inject_splash(html: str) -> str:
         "#splash button:hover { background: #106ebe; }\n"
         "#splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a8886; }\n"
         "#splash .splash-error { margin-top: 12px; font-size: 13px; color: #a4262c; min-height: 18px; }\n"
+        "#splash .splash-progress {\n"
+        "  margin-top: 16px; height: 6px; border-radius: 999px;\n"
+        "  background: #e6e9ef; overflow: hidden; display: none;\n"
+        "}\n"
+        "#splash .splash-progress.active { display: block; }\n"
+        "#splash .splash-progress .bar {\n"
+        "  height: 100%; width: 0%; border-radius: 999px;\n"
+        "  background: linear-gradient(90deg, #0078d4, #4aa3e8);\n"
+        "  transition: width 0.28s ease;\n"
+        "}\n"
+        "#splash .splash-progress-label {\n"
+        "  margin-top: 8px; font-size: 12px; color: #605e5c; min-height: 16px;\n"
+        "}\n"
     )
     html = _replace_once(html, "</style>\n</head>", splash_css + "</style>\n</head>", "closing style/head tags (splash)")
 
@@ -402,6 +457,8 @@ def _inject_splash(html: str) -> str:
         '      <div class="dz-sub">or click to browse</div>\n'
         '    </div>\n'
         '    <button type="button" id="splash-import-btn">📂 Choose Excel file</button>\n'
+        '    <div class="splash-progress" id="splash-progress" role="progressbar" aria-label="Loading file" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="bar"></div></div>\n'
+        '    <div class="splash-progress-label" id="splash-progress-label" aria-live="polite"></div>\n'
         '    <div class="splash-error" id="splash-error" role="alert"></div>\n'
         '    <div class="splash-hint">You can swap files later from the top menu.</div>\n'
         '  </div>\n'
@@ -433,18 +490,42 @@ def _inject_splash(html: str) -> str:
         "splash hide-on-import hook",
     )
 
+    html = _replace_once(
+        html,
+        "    if (!newData) { setStatus('Could not parse — check the sheet structure.', 'error'); return; }",
+        "    if (!newData || !newData.customers || newData.customers.length === 0) { setStatus('Could not read this workbook — no customers found. Make sure it is the ACR Details Excel export with the expected columns.', 'error'); return; }",
+        "import empty-workbook guard",
+    )
+
     splash_wire = (
         "<script>\n"
         "(function(){\n"
         "  var btn = document.getElementById('splash-import-btn');\n"
         "  var dz = document.getElementById('splash-dropzone');\n"
         "  var err = document.getElementById('splash-error');\n"
+        "  var prog = document.getElementById('splash-progress');\n"
+        "  var plabel = document.getElementById('splash-progress-label');\n"
         "  var importBtn = document.getElementById('import-btn');\n"
         "  var fileInput = document.getElementById('file-input');\n"
         "  if (!importBtn || !fileInput) return;\n"
         "\n"
-        "  function showError(msg){ if (err) err.textContent = msg || ''; }\n"
+        "  function showError(msg){ if (err) err.textContent = msg || ''; if (msg && prog) prog.classList.remove('active'); if (msg && plabel) plabel.textContent = ''; }\n"
         "  function clickBrowse(){ showError(''); importBtn.click(); }\n"
+        "\n"
+        "  // Determinate progress driver used by the import handler. Each import\n"
+        "  // stage (read -> parse -> score -> render) sets a percentage so the bar\n"
+        "  // visibly fills, repainting between the synchronous parse/build steps.\n"
+        "  window.__attachProgress = function(pct, label){\n"
+        "    var splashEl = document.getElementById('splash');\n"
+        "    if (!prog || (splashEl && splashEl.hidden)) return;\n"
+        "    prog.classList.add('active');\n"
+        "    var bar = prog.querySelector('.bar');\n"
+        "    var p = Math.max(0, Math.min(100, Number(pct) || 0));\n"
+        "    if (bar) bar.style.width = p + '%';\n"
+        "    prog.setAttribute('aria-valuenow', String(Math.round(p)));\n"
+        "    if (plabel && typeof label === 'string') plabel.textContent = label;\n"
+        "    if (err) { err.textContent = ''; err.className = 'splash-error'; }\n"
+        "  };\n"
         "\n"
         "  if (btn) btn.addEventListener('click', clickBrowse);\n"
         "\n"
@@ -496,6 +577,36 @@ def _inject_splash(html: str) -> str:
         "    var splash = document.getElementById('splash');\n"
         "    if (splash && !splash.hidden) e.preventDefault();\n"
         "  });\n"
+        "\n"
+        "  // Mirror import status onto the splash overlay. The top-menu status\n"
+        "  // element is hidden behind the splash, so a failed or empty import\n"
+        "  // would otherwise look like 'nothing happened'. Errors show red text;\n"
+        "  // in-progress messages reveal the determinate bar (filled via\n"
+        "  // window.__attachProgress from the import handler).\n"
+        "  if (typeof window.setStatus === 'function') {\n"
+        "    var _origSetStatus = window.setStatus;\n"
+        "    window.setStatus = function(msg, kind){\n"
+        "      try { _origSetStatus(msg, kind); } catch (_) {}\n"
+        "      var splashEl = document.getElementById('splash');\n"
+        "      if (!(err && splashEl && !splashEl.hidden)) return;\n"
+        "      if (kind === 'error') {\n"
+        "        if (prog) prog.classList.remove('active');\n"
+        "        if (plabel) plabel.textContent = '';\n"
+        "        err.textContent = msg || '';\n"
+        "        err.className = 'splash-error error';\n"
+        "      } else if (kind) {\n"
+        "        if (prog) prog.classList.remove('active');\n"
+        "        if (plabel) plabel.textContent = '';\n"
+        "        err.textContent = '';\n"
+        "        err.className = 'splash-error';\n"
+        "      } else {\n"
+        "        err.textContent = '';\n"
+        "        err.className = 'splash-error';\n"
+        "        if (prog) prog.classList.add('active');\n"
+        "        if (plabel) plabel.textContent = msg || 'Loading…';\n"
+        "      }\n"
+        "    };\n"
+        "  }\n"
         "})();\n"
         "</script>\n"
     )
@@ -629,7 +740,7 @@ def _taxonomy_and_skus(html: str) -> str:
         "escaped product trend legend",
     )
 
-    # 3. Customer drill-down: escape product names + collapsible SKU sub-rows.
+    # 3. Customer drill-down: escape product names + collapsible SL4 detail rows.
     html = _replace_once(
         html,
         "    cd.products.map(p => {\n"
@@ -642,22 +753,30 @@ def _taxonomy_and_skus(html: str) -> str:
         "        <div>${sparkline(p.series, 140, 26, sparkColor)}</div>\n"
         "      </div>`;\n"
         "    }).join('');",
-        "    cd.products.map((p, pi) => {\n"
+        "    `<div class=\"product-row product-header\">\n"
+        "      <div>Azure service category / Service Level 4 detail</div>\n"
+        "      <div class=\"num\">Monthly ACR</div>\n"
+        "      <div class=\"num\">MoM</div>\n"
+        "      <div class=\"num\">3M</div>\n"
+        "      <div>Trend</div>\n"
+        "    </div>` + cd.products.map((p, pi) => {\n"
         "      const sparkColor = p.product === 'Defender for Cloud' ? '#0078d4' : '#605e5c';\n"
         "      const nameEsc = escapeHtml(p.product);\n"
         "      const nameHtml = p.product === 'Defender for Cloud' ? '<strong style=\"color:#0078d4\">' + nameEsc + '</strong>' : nameEsc;\n"
         "      const skus = Array.isArray(p.skus) ? p.skus : [];\n"
         "      const sid = 'sku-' + pi;\n"
-        "      const caret = skus.length ? `<span class=\"sku-caret\" style=\"cursor:pointer;user-select:none;color:#605e5c;margin-right:6px;\">\\u25b8</span>` : '<span style=\"display:inline-block;width:14px;\"></span>';\n"
-        "      const head = `<div class=\"product-row\"${skus.length ? ` data-sku-toggle=\"${sid}\" style=\"cursor:pointer;\"` : ''}>\n"
-        "        <div class=\"name\">${caret}${nameHtml}</div>\n"
+        "      const caret = skus.length ? `<span class=\"sku-caret\">\\u25b8</span>` : '<span class=\"sku-caret\"></span>';\n"
+        "      const detailLabel = skus.length ? `<span class=\"sku-meta\">Click to show ${skus.length} service detail${skus.length === 1 ? '' : 's'}</span>` : '<span class=\"sku-meta\">No active Service Level 4 detail in this category</span>';\n"
+        "      const toggleAttrs = skus.length ? ` data-sku-toggle=\"${sid}\" aria-expanded=\"false\" role=\"button\" tabindex=\"0\"` : '';\n"
+        "      const head = `<div class=\"product-row category-row\"${toggleAttrs}>\n"
+        "        <div class=\"name\">${caret}${nameHtml}${detailLabel}</div>\n"
         "        <div class=\"num\">${fmt.money2(p.current)}</div>\n"
         "        <div class=\"num ${fmt.pctClass(p.mom)}\">${fmt.pct(p.mom)}</div>\n"
         "        <div class=\"num ${fmt.pctClass(p.three_m)}\">${fmt.pct(p.three_m)}</div>\n"
         "        <div>${sparkline(p.series, 140, 26, sparkColor)}</div>\n"
         "      </div>`;\n"
-        "      const subs = skus.map(s => `<div class=\"product-row sku-row ${sid}\" hidden style=\"background:#faf9f8;\">\n"
-        "        <div class=\"name\" style=\"padding-left:22px;color:#605e5c;\">${escapeHtml(s.sku)}</div>\n"
+        "      const subs = skus.map(s => `<div class=\"product-row sku-row ${sid}\" hidden>\n"
+        "        <div class=\"name\">${escapeHtml(s.sku)}</div>\n"
         "        <div class=\"num\">${fmt.money2(s.current)}</div>\n"
         "        <div class=\"num ${fmt.pctClass(s.mom)}\">${fmt.pct(s.mom)}</div>\n"
         "        <div class=\"num ${fmt.pctClass(s.three_m)}\">${fmt.pct(s.three_m)}</div>\n"
@@ -665,7 +784,7 @@ def _taxonomy_and_skus(html: str) -> str:
         "      </div>`).join('');\n"
         "      return head + subs;\n"
         "    }).join('');",
-        "SKU drill-down rows in customer table",
+        "SL4 service detail drill-down rows in customer table",
     )
 
     # 4. Delegated click handler that expands/collapses the SKU sub-rows.
@@ -680,6 +799,14 @@ def _taxonomy_and_skus(html: str) -> str:
         "  rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });\n"
         "  const caret = head.querySelector('.sku-caret');\n"
         "  if (caret) caret.textContent = target ? '\\u25b8' : '\\u25be';\n"
+        "  head.setAttribute('aria-expanded', target ? 'false' : 'true');\n"
+        "});\n"
+        "document.getElementById('cust-products').addEventListener('keydown', (e) => {\n"
+        "  if (e.key !== 'Enter' && e.key !== ' ') return;\n"
+        "  const head = e.target.closest('[data-sku-toggle]');\n"
+        "  if (!head) return;\n"
+        "  e.preventDefault();\n"
+        "  head.click();\n"
         "});"
     )
     html = _replace_once(
@@ -765,35 +892,6 @@ def _weekly_views(html: str) -> str:
         "renderAll DfC trend routing",
     )
 
-    # 5. Customer drill-down charts: prefer weekly series + labels.
-    html = _replace_once(
-        html,
-        "  lineChart('chart-cust-dfc', [\n"
-        "    {label: 'Defender for Cloud', values: cd.dfc_series, color: '#0078d4'},\n"
-        "    {label: 'Other Azure', values: cd.other_series, color: '#605e5c', dash: '4 3'},\n"
-        "  ]);\n"
-        "  const pctSeries = cd.dfc_series.map((v, i) => {\n"
-        "    const t = cd.total_series[i];\n"
-        "    return t > 0 ? (v / t) * 100 : 0;\n"
-        "  });\n"
-        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}]);",
-        "  const cWeekly = !!(DATA.weekly_enabled && Array.isArray(cd.dfc_weekly) && Array.isArray(cd.other_weekly) && Array.isArray(cd.total_weekly));\n"
-        "  const dfcSeries = cWeekly ? cd.dfc_weekly : cd.dfc_series;\n"
-        "  const otherSeries = cWeekly ? cd.other_weekly : cd.other_series;\n"
-        "  const totalSeries = cWeekly ? cd.total_weekly : cd.total_series;\n"
-        "  const cLabels = cWeekly ? DATA.week_labels : DATA.month_labels;\n"
-        "  lineChart('chart-cust-dfc', [\n"
-        "    {label: 'Defender for Cloud', values: dfcSeries, color: '#0078d4'},\n"
-        "    {label: 'Other Azure', values: otherSeries, color: '#605e5c', dash: '4 3'},\n"
-        "  ], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});\n"
-        "  const pctSeries = dfcSeries.map((v, i) => {\n"
-        "    const t = totalSeries[i];\n"
-        "    return t > 0 ? (v / t) * 100 : 0;\n"
-        "  });\n"
-        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});",
-        "weekly customer drill-down charts",
-    )
-
     # 6. lineChart partial-month marker: honour an explicit opts.partialIdx so
     #    weekly charts (which pass -1) don't stamp the red "*" onto an arbitrary
     #    week. Monthly fallback callers omit it and keep DATA.partial_month_idx.
@@ -824,40 +922,9 @@ def _weekly_views(html: str) -> str:
         '    <div class="title">Product mix — ACR trend by service</div>',
         "product trend title relabel",
     )
-    html = _replace_once(
-        html,
-        '      <div class="sub">Monthly ACR — does DfC track with the rest of the footprint?</div>',
-        '      <div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>',
-        "customer dfc trend sub relabel",
-    )
-    html = _replace_once(
-        html,
-        '      <div class="sub">DfC as % of total monthly ACR for this customer</div>',
-        '      <div class="sub">DfC as % of total ACR for this customer</div>',
-        "customer pct trend sub relabel",
-    )
 
-    # 8. DfC penetration chart is a percentage series, but lineChart formats the
-    #    Y axis and tooltip as dollars. Teach lineChart an opts.format ='percent'
-    #    mode and flag the penetration call so its axis/tooltip read in %.
-    html = _replace_once(
-        html,
-        "    const lbl = indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0));",
-        "    const lbl = opts.format === 'percent' ? yv.toFixed(yMax < 10 ? 1 : 0) + '%' : (indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0)));",
-        "lineChart percent Y-axis label",
-    )
-    html = _replace_once(
-        html,
-        "      const display = indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2});",
-        "      const display = opts.format === 'percent' ? parseFloat(val).toFixed(2) + '%' : (indexed ? val : '$' + parseFloat(val).toLocaleString('en-US', {maximumFractionDigits: 2}));",
-        "lineChart percent tooltip",
-    )
-    html = _replace_once(
-        html,
-        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx});",
-        "  lineChart('chart-cust-pct', [{label: 'DfC % of total', values: pctSeries, color: '#8764b8'}], {labels: cLabels, partialIdx: cWeekly ? -1 : DATA.partial_month_idx, format: 'percent'});",
-        "DfC penetration chart percent format",
-    )
+    # 8. DfC penetration chart removed: the percent-format lineChart transforms
+    #    that supported it are gone, so the base lineChart stays dollar-only.
 
     return html
 
@@ -1179,9 +1246,8 @@ def _harden_charts(html: str) -> str:
 def _harden_heatmap(html: str) -> str:
     """Escape Excel-derived values rendered into table markup.
 
-    Covers the injected opportunity heatmap as well as the original
-    Opportunity Map and All Customers Table from the upstream template,
-    all of which originally interpolated raw workbook strings.
+    Covers the injected opportunity heatmap, which originally interpolated
+    raw workbook strings.
     """
 
     html = _replace_exact(
@@ -1189,34 +1255,13 @@ def _harden_heatmap(html: str) -> str:
         '<tr class="clickable" data-customer="${r.customer.replace(/"/g, \'&quot;\')}">',
         '<tr class="clickable" data-customer="${escapeHtml(r.customer)}">',
         "row data-customer attribute",
-        3,
+        1,
     )
     html = _replace_exact(
         html,
         "<td><strong>${r.customer}</strong></td>",
         "<td><strong>${escapeHtml(r.customer)}</strong></td>",
         "heatmap customer cell",
-        1,
-    )
-    html = _replace_exact(
-        html,
-        "<td>${r.customer}</td>",
-        "<td>${escapeHtml(r.customer)}</td>",
-        "original table customer cell",
-        2,
-    )
-    html = _replace_exact(
-        html,
-        "<td>${r.notes}</td>",
-        "<td>${escapeHtml(r.notes)}</td>",
-        "original table notes cell",
-        2,
-    )
-    html = _replace_exact(
-        html,
-        "}${r.notes}</td>",
-        "}${escapeHtml(r.notes)}</td>",
-        "heatmap notes cell",
         1,
     )
     return html
@@ -1258,6 +1303,7 @@ def _threshold_priority(html: str) -> str:
         "  renderKpis();",
         "function renderAll() {\n"
         "  if (!DATA.customers || DATA.customers.length === 0) return;\n"
+        "  __slDossierMap = null;\n"
         "  reclassifyOpportunities(dfcShareThreshold);\n"
         "  renderKpis();",
         "renderAll baseline reclassify",
@@ -1289,26 +1335,6 @@ const PRIORITY_META = {
   Low:         { color: '#107c10', bg: '#f3f9ef', label: 'Low priority' },
   'Too small': { color: '#605e5c', bg: '#f3f2f1', label: 'Too small to prioritize' },
 };
-
-// Threshold-aware rubric mirroring AcrModel.classifyOpportunity. The highest
-// tier whose conditions are met wins.
-function priorityGradingRules() {
-  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
-  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
-  return [
-    { tier: 'Too small', text: 'Total Azure ACR under $1,500 / month — sales priority is low regardless of Defender share.' },
-    { tier: 'High',   text: 'No Defender for Cloud spend at all (under $15 / month) while the customer spends over $3,000 / month on Azure — 0% against the ' + tl + ' attach baseline.' },
-    { tier: 'High',   text: 'Other Azure workloads grew over the last 3 months while Defender for Cloud is shrinking (declining more than 5%).' },
-    { tier: 'High',   text: 'Other Azure is growing, Defender is flat (under 2% growth) AND Defender is under 2% of total ACR.' },
-    { tier: 'High',   text: 'Break of trend: core workloads (Compute, Databases, Developer Tools, Integration, AI + Machine Learning, Containers) grew over 5% over 3 months, Defender did not keep pace (more than 5 points behind), and the customer is below the ' + tl + ' baseline.' },
-    { tier: 'Medium', text: 'Defender penetration under 1.5% of total ACR while other Azure is growing — undersold.' },
-    { tier: 'Medium', text: 'Defender for Cloud is growing more than 5 points slower than the rest of Azure.' },
-    { tier: 'Medium', text: 'Very low Defender penetration (under 0.5%) on a sizeable account (total ACR over $6,000 / month).' },
-    { tier: 'Medium', text: 'Break of trend on core workloads while already at or above the ' + tl + ' baseline.' },
-    { tier: 'Medium', text: 'Defender attach baseline: Defender share is below the ' + tl + ' corporate baseline — every customer should run at least ' + tl + ' of total ACR on Defender workloads.' },
-    { tier: 'Low',    text: 'None of the above triggers fire — Defender attach looks healthy for this customer at the current ' + tl + ' baseline.' },
-  ];
-}
 
 // Clickable, accessible replacement for the template's tagFor. Late-bound, so
 // every render path (tables, heatmap, action queue, drill-down) picks it up.
@@ -1342,11 +1368,24 @@ function _ensurePrioOverlay() {
     '.prio-head{padding:14px 16px;border-radius:6px;margin:6px 0 18px}' +
     '.prio-head-tier{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}' +
     '.prio-head h2{margin:4px 0 0;font-size:19px;color:#201f1e}' +
+    '.prio-head p{margin:6px 0 0;font-size:13px;color:#605e5c;line-height:1.4}' +
     '.prio-section{margin-bottom:18px}' +
     '.prio-section h3{font-size:14px;margin:0 0 8px;color:#201f1e}' +
     '.prio-signals{margin:0;padding-left:18px}' +
     '.prio-signals li{margin-bottom:6px;color:#323130}' +
     '.prio-none{color:#107c10;margin:0}' +
+    '.prio-gap-banner{display:flex;flex-wrap:wrap;gap:16px;align-items:baseline;background:#fbf6ff;border:1px solid #e3d3f5;border-radius:8px;padding:12px 14px;margin:0 0 12px}' +
+    '.prio-gap-banner .big{font-size:22px;font-weight:700;color:#5c2d91}' +
+    '.prio-gap-banner .lbl{font-size:12px;color:#605e5c}' +
+    '.prio-gap-banner .sub{font-size:12px;color:#605e5c;flex:1 1 200px}' +
+    '.prio-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 14px}' +
+    '.prio-kpi{border:1px solid #eef1f5;border-radius:8px;padding:10px;background:#fff}' +
+    '.prio-kpi .big{font-size:19px;font-weight:700;color:#201f1e}.prio-kpi .lbl{font-size:11px;color:#605e5c;margin-top:3px}' +
+    '.prio-svc-list{display:flex;flex-direction:column;gap:8px}' +
+    '.prio-svc-row{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid #eef1f5;border-radius:6px;padding:8px 10px;flex-wrap:wrap}' +
+    '.prio-svc-row .svc{font-weight:600;color:#201f1e}' +
+    '.prio-svc-row .nums{font-size:12px;color:#605e5c;margin-top:3px}' +
+    '.prio-svc-row .gapv{font-weight:600;white-space:nowrap;font-size:13px}' +
     '.prio-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}' +
     '.prio-metric{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eef1f5;padding:5px 0;font-size:13px}' +
     '.prio-metric .k{color:#605e5c}.prio-metric .v{font-weight:600;color:#201f1e;text-align:right}' +
@@ -1356,7 +1395,9 @@ function _ensurePrioOverlay() {
     '.prio-rule.current{background:#f5f7fb}' +
     '.prio-pill{flex:0 0 auto;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid}' +
     '.prio-rule-text{color:#323130}' +
-    '@media(max-width:560px){.prio-metrics{grid-template-columns:1fr}}';
+    '.prio-talktrack{border-left:3px solid #0078d4;background:#f3f9fd;border-radius:6px;padding:10px 12px;color:#323130;font-size:13px;line-height:1.45}' +
+    '@media(max-width:720px){.prio-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}' +
+    '@media(max-width:560px){.prio-metrics,.prio-kpis{grid-template-columns:1fr}}';
   document.head.appendChild(style);
 
   const overlay = document.createElement('div');
@@ -1374,57 +1415,100 @@ function _ensurePrioOverlay() {
   return overlay;
 }
 
+function _prioDossier(customer) {
+  const sa = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach : null;
+  if (!sa || !Array.isArray(sa.dossiers)) return null;
+  return sa.dossiers.find(function (x) { return x.customer === customer; }) || null;
+}
+
+function _prioSignalLabel(o) {
+  if (!o || !o.hasDollarGap) return 'Needs validation';
+  if ((o.defenderActual || 0) <= 0) return 'No attach';
+  return 'Under-attached';
+}
+
+// Per-service evidence for the priority modal: leads with the concrete
+// "you buy X but don't protect X" gaps plus the $ opportunity, so the rating
+// is justified by service-level facts rather than the corp total-vs-DfC ratio.
+function _prioServiceEvidence(customer) {
+  const d = _prioDossier(customer);
+  if (!d) return '';
+  const opps = (Array.isArray(d.opportunities) ? d.opportunities.slice() : []).sort(function (a, b) {
+    return ((a.priorityRank == null ? 9 : a.priorityRank) - (b.priorityRank == null ? 9 : b.priorityRank)) ||
+      ((b.blendedScore || 0) - (a.blendedScore || 0));
+  });
+  if (!opps.length) {
+    return '<section class="prio-section"><h3>Service-level evidence</h3>' +
+      '<p class="prio-none">No specific per-service Defender gaps \u2014 this customer protects the Azure services they run. ' +
+      'Use the customer breakdown for supporting service details.</p></section>';
+  }
+  const monthly = d.totalGapDollars || 0;
+  const annual = monthly * 12;
+  const covSignals = opps.filter(function (o) { return !o.hasDollarGap; }).length;
+  const measurable = opps.filter(function (o) { return o.hasDollarGap && (o.gapDollars || 0) > 0; }).length;
+  const kpis =
+    '<div class="prio-kpis">' +
+      '<div class="prio-kpi"><div class="big">' + fmt.money(d.eligibleWorkloadAcr || 0) + '</div><div class="lbl">Eligible Azure workload ACR / mo</div></div>' +
+      '<div class="prio-kpi"><div class="big">' + fmt.money(d.dfcAcr || 0) + '</div><div class="lbl">Mapped Defender ACR / mo</div></div>' +
+      '<div class="prio-kpi"><div class="big">' + fmt.money(monthly) + '</div><div class="lbl">Estimated service gap / mo' + (annual > 0 ? ' \u00b7 ' + fmt.money(annual) + '/yr' : '') + '</div></div>' +
+      '<div class="prio-kpi"><div class="big">' + opps.length + '</div><div class="lbl">Services to discuss</div></div>' +
+    '</div>';
+  const rows = opps.slice(0, 6).map(function (o) {
+    const pr = (o.priority || '').toLowerCase();
+    const prClass = pr === 'high' ? 'high' : (pr === 'medium' ? 'medium' : 'low');
+    const gapStr = o.hasDollarGap ? fmt.money(o.gapDollars) + ' / mo gap' : 'needs validation';
+    return '<div class="prio-svc-row">' +
+      '<div><span class="tag ' + prClass + '">' + escapeHtml(o.priority || '') + '</span> ' +
+        '<span class="svc">' + escapeHtml(o.planLabel) + '</span>' +
+        '<div class="nums">' + escapeHtml(_prioSignalLabel(o)) + ' \u00b7 Azure service ' + fmt.money(o.workloadAcr) + ' / mo (' + fmt.pct(o.workloadGrowth) + ' 3M) \u2192 Defender ' + fmt.money(o.defenderActual) + ' / mo</div>' +
+      '</div>' +
+      '<div class="gapv">' + escapeHtml(gapStr) + '</div>' +
+    '</div>';
+  }).join('');
+  const bullets = opps.slice(0, 4).map(function (o) {
+    const signal = _prioSignalLabel(o).toLowerCase();
+    const gap = o.hasDollarGap && (o.gapDollars || 0) > 0 ? ' with an estimated ' + fmt.money(o.gapDollars) + '/mo gap' : ' and should be validated for active coverage';
+    return '<li>' + escapeHtml(o.planLabel) + ': ' + escapeHtml(signal) + ' on ' + fmt.money(o.workloadAcr) + '/mo Azure service consumption' + escapeHtml(gap) + '.</li>';
+  }).join('');
+  const lead = opps[0];
+  const leadWorkload = lead ? escapeHtml(lead.workloadLabel || lead.planLabel) : 'priority services';
+  const talkTrack = '<section class="prio-section"><h3>Suggested seller conversation</h3>' +
+    '<div class="prio-talktrack">&ldquo;We noticed material Azure consumption in ' + leadWorkload +
+    ', but Defender consumption does not appear to match that usage. Can we review whether these workloads are already protected and where Defender-for-X attach makes sense?&rdquo;</div></section>';
+  return '<section class="prio-section"><h3>Service-level summary</h3>' + kpis +
+    '<p class="prio-rubric-intro">' + measurable + ' quantified gap' + (measurable === 1 ? '' : 's') +
+      (covSignals > 0 ? ' plus ' + covSignals + ' usage-priced service' + (covSignals === 1 ? '' : 's') + ' where coverage should be validated.' : '.') +
+    '</p></section>' +
+    '<section class="prio-section"><h3>Top service attach gaps</h3><div class="prio-svc-list">' + rows + '</div></section>' +
+    '<section class="prio-section"><h3>Why this is a priority</h3><ul class="prio-signals">' + bullets + '</ul></section>' +
+    talkTrack;
+}
+
 function openPriorityExplainer(customer) {
   if (!DATA || !Array.isArray(DATA.opportunity)) return;
   const row = DATA.opportunity.find(r => r.customer === customer);
   if (!row) return;
   const overlay = _ensurePrioOverlay();
-  const meta = PRIORITY_META[row.opportunity] || PRIORITY_META.Low;
-  const t = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
-  const tl = (typeof fmtThreshold === 'function') ? fmtThreshold(t) : (t + '%');
-
-  const signals = (row.notes && row.notes !== '-')
-    ? row.notes.split('; ').map(s => s.trim()).filter(Boolean) : [];
-  const signalsHtml = signals.length
-    ? '<ul class="prio-signals">' + signals.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ul>'
-    : '<p class="prio-none">No attach gaps detected at the current ' + escapeHtml(tl) +
-      ' baseline — Defender coverage looks healthy for this customer.</p>';
-
-  const catNames = (Array.isArray(row.growth_cat_names) && row.growth_cat_names.length)
-    ? row.growth_cat_names.join(', ') : '—';
-  const metrics = [
-    ['Total monthly ACR', fmt.money2(row.total_current)],
-    ['Defender for Cloud monthly ACR', fmt.money2(row.dfc_current)],
-    ['Defender share of total', fmt.pctRaw(row.dfc_ratio)],
-    ['Attach baseline', escapeHtml(tl)],
-    ['Defender 3-month trend', fmt.pct(row.dfc_3m)],
-    ['Other Azure 3-month trend', fmt.pct(row.other_3m)],
-    ['Core workloads 3-month trend', row.growth_cat_3m == null ? '—' : fmt.pct(row.growth_cat_3m)],
-    ['Growing core workloads', escapeHtml(catNames)],
-  ];
-  const metricsHtml = metrics.map(m =>
-    '<div class="prio-metric"><span class="k">' + m[0] + '</span><span class="v">' + m[1] + '</span></div>'
-  ).join('');
-
-  const rubricHtml = priorityGradingRules().map(rule => {
-    const rm = PRIORITY_META[rule.tier] || PRIORITY_META.Low;
-    const current = rule.tier === row.opportunity ? ' current' : '';
-    return '<li class="prio-rule' + current + '">' +
-      '<span class="prio-pill" style="background:' + rm.bg + ';color:' + rm.color + ';border-color:' + rm.color + ';">' +
-      escapeHtml(rule.tier) + '</span>' +
-      '<span class="prio-rule-text">' + escapeHtml(rule.text) + '</span></li>';
-  }).join('');
+  // In SL2/SL4 mode the headline rating is the per-service Defender priority
+  // (the same value the opportunity-map row pill shows), NOT the legacy
+  // corp-level row.opportunity. This keeps the modal header consistent with
+  // the matrix; the corp rating is still explained below as a separate signal.
+  const sl = (typeof slAttach === 'function') ? slAttach(customer) : null;
+  const ratingTier = sl ? sl.priority : row.opportunity;
+  const meta = PRIORITY_META[ratingTier] || PRIORITY_META.Low;
+  const dossier = _prioDossier(customer);
+  const svcEvidenceHtml = _prioServiceEvidence(customer);
+  const headline = dossier
+    ? escapeHtml(customer) + ' has material Azure service consumption with low or missing matching Defender-for-X consumption.'
+    : 'Use this explanation to review why the customer is prioritized.';
 
   document.getElementById('prio-body').innerHTML =
     '<div class="prio-head" style="border-left:6px solid ' + meta.color + ';background:' + meta.bg + ';">' +
       '<div class="prio-head-tier" style="color:' + meta.color + ';">' + escapeHtml(meta.label) + '</div>' +
-      '<h2 id="prio-title">Why is ' + escapeHtml(customer) + ' rated &ldquo;' + escapeHtml(row.opportunity) + '&rdquo;?</h2>' +
+      '<h2 id="prio-title">Why ' + escapeHtml(customer) + ' is a ' + escapeHtml(ratingTier) + ' service attach opportunity</h2>' +
+      '<p>' + headline + '</p>' +
     '</div>' +
-    '<section class="prio-section"><h3>Signals for this customer</h3>' + signalsHtml + '</section>' +
-    '<section class="prio-section"><h3>Key numbers</h3><div class="prio-metrics">' + metricsHtml + '</div></section>' +
-    '<section class="prio-section"><h3>How priorities are graded</h3>' +
-      '<p class="prio-rubric-intro">The highest tier whose conditions are met wins. The tier this customer landed in is highlighted.</p>' +
-      '<ul class="prio-rubric">' + rubricHtml + '</ul></section>';
+    (svcEvidenceHtml || '<section class="prio-section"><h3>Priority notes</h3><p class="prio-rubric-intro">' + escapeHtml(row.notes || 'No service-level dossier is available for this import.') + '</p></section>');
   overlay.removeAttribute('hidden');
   const closeBtn = overlay.querySelector('.prio-close');
   if (closeBtn) closeBtn.focus();
@@ -1493,7 +1577,7 @@ def _inject_customer_modal(html: str) -> str:
       ``m-``-prefixed clones. The same refactor escapes ``opp.notes`` (a
       DOM-XSS sink that previously interpolated Excel-derived text raw).
     * A single capture-phase click listener on ``document`` intercepts customer
-      clicks within ``#chart-quadrant`` / ``#opp-tbody`` before the row's
+      clicks within the Opportunity Matrix before the target's
       bubbling ``selectCustomer`` handler runs, so no navigation happens. It
       early-returns on ``.prio-badge`` so the priority explainer still wins.
     * This pass runs AFTER ``_inject_priority_explainer`` so its document
@@ -1511,7 +1595,8 @@ def _inject_customer_modal(html: str) -> str:
     html = _replace_once(
         html,
         "document.getElementById('cust-priority').innerHTML = tagFor(opp.opportunity);",
-        "document.getElementById(idp + 'cust-priority').innerHTML = tagFor(opp.opportunity);",
+        "var _slPrio = (typeof slAttach === 'function') ? slAttach(name) : null;\n"
+        "  document.getElementById(idp + 'cust-priority').innerHTML = tagFor(_slPrio ? _slPrio.priority : opp.opportunity);",
         "cust-priority id prefix",
     )
     html = _replace_once(
@@ -1531,18 +1616,6 @@ def _inject_customer_modal(html: str) -> str:
         "note.innerHTML = `<strong>Signal:</strong> ${opp.notes}`;",
         "note.innerHTML = `<strong>Signal:</strong> ${escapeHtml(opp.notes)}`;",
         "escape drill-down signal note (XSS)",
-    )
-    html = _replace_once(
-        html,
-        "lineChart('chart-cust-dfc', [",
-        "lineChart(idp + 'chart-cust-dfc', [",
-        "chart-cust-dfc id prefix",
-    )
-    html = _replace_once(
-        html,
-        "lineChart('chart-cust-pct', [{label: 'DfC % of total'",
-        "lineChart(idp + 'chart-cust-pct', [{label: 'DfC % of total'",
-        "chart-cust-pct id prefix",
     )
     html = _replace_once(
         html,
@@ -1586,25 +1659,9 @@ function _ensureCustOverlay() {
       '<div class="controls" style="margin-bottom:14px;"><span id="m-cust-priority"></span></div>' +
       '<div class="cards" id="m-cust-cards"></div>' +
       '<div class="note" id="m-cust-signal"></div>' +
-      '<div class="grid-2">' +
-        '<div class="chart-box">' +
-          '<div class="title">Defender for Cloud vs. other Azure workloads</div>' +
-          '<div class="sub">ACR trend — does DfC track with the rest of the footprint?</div>' +
-          '<div class="svg-container" id="m-chart-cust-dfc"></div>' +
-          '<div class="legend">' +
-            '<span class="legend-item"><span class="legend-swatch" style="background:#0078d4"></span>Defender for Cloud</span>' +
-            '<span class="legend-item"><span class="legend-swatch" style="background:#605e5c"></span>Other Azure (Total - DfC)</span>' +
-          '</div>' +
-        '</div>' +
-        '<div class="chart-box">' +
-          '<div class="title">DfC penetration over time</div>' +
-          '<div class="sub">DfC as % of total ACR for this customer</div>' +
-          '<div class="svg-container" id="m-chart-cust-pct"></div>' +
-        '</div>' +
-      '</div>' +
       '<div class="chart-box">' +
         '<div class="title">Product breakdown</div>' +
-        '<div class="sub">All workloads ranked by current monthly ACR. Spark line shows full trajectory.</div>' +
+        '<div class="sub">Azure service categories ranked by current monthly ACR. Click a category to reveal the Service Level 4 details from the workbook.</div>' +
         '<div id="m-cust-products"></div>' +
       '</div>' +
     '</div></div>';
@@ -1623,6 +1680,14 @@ function _ensureCustOverlay() {
     rows.forEach(r => { if (target === null) target = !r.hidden; r.hidden = target; });
     const caret = head.querySelector('.sku-caret');
     if (caret) caret.textContent = target ? '\u25b8' : '\u25be';
+    head.setAttribute('aria-expanded', target ? 'false' : 'true');
+  });
+  mprod.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const head = e.target.closest('[data-sku-toggle]');
+    if (!head || !mprod.contains(head)) return;
+    e.preventDefault();
+    head.click();
   });
 
   // Lightweight focus trap so keyboard users stay within the dialog.
@@ -1675,7 +1740,7 @@ function closeCustomerModal() {
 document.addEventListener('click', function (e) {
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;
@@ -1691,7 +1756,7 @@ document.addEventListener('click', function (e) {
 // host containers re-apply this whenever their contents are re-rendered (tab
 // switch, data reload), and an initial pass covers anything already drawn.
 function _enhanceCustomerTargetsA11y() {
-  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const nodes = document.querySelectorAll('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (n.getAttribute('tabindex') === null) n.setAttribute('tabindex', '0');
@@ -1703,7 +1768,7 @@ function _enhanceCustomerTargetsA11y() {
     if (nm && !n.getAttribute('aria-label')) n.setAttribute('aria-label', 'Open breakdown for ' + nm);
   }
 }
-['chart-quadrant', 'opp-tbody', 'chart-top-dfc', 'action-queue', 'all-tbody'].forEach(function (id) {
+['chart-quadrant', 'chart-top-dfc', 'action-queue'].forEach(function (id) {
   const host = document.getElementById(id);
   if (!host || typeof MutationObserver !== 'function') return;
   new MutationObserver(_enhanceCustomerTargetsA11y).observe(host, { childList: true, subtree: true });
@@ -1717,7 +1782,7 @@ document.addEventListener('keydown', function (e) {
   if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
   if (!e.target.closest) return;
   if (e.target.closest('.prio-badge')) return;
-  const el = e.target.closest('#chart-quadrant [data-customer], #opp-tbody tr[data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer], #all-tbody tr[data-customer]');
+  const el = e.target.closest('#chart-quadrant [data-customer], #chart-top-dfc [data-customer], #action-queue tr[data-customer]');
   if (!el) return;
   const name = el.getAttribute('data-customer');
   if (!name) return;
@@ -1750,6 +1815,350 @@ document.addEventListener('keydown', function (e) {
         script + "\nfunction renderAll() {",
         "customer modal injection point",
     )
+
+
+def _inject_service_attach(html: str) -> str:
+    """Per-service Defender attach (AE talk-track) drill-down.
+
+    Adds a `renderServiceAttach(idp, name)` renderer and mounts it inside the
+    per-customer detail view (inline and modal). For customers in an SL2/SL4
+    import it surfaces the "you buy service X but don't protect it with the
+    matching Defender plan" motion: a KPI strip (true attach ratio on the mapped
+    eligible-workload denominator, eligible workload ACR, DfC ACR, open gap),
+    ranked per-service opportunities with auto-generated AE openers, and a
+    foundational-coverage pill panel. Hides itself gracefully when the active
+    import has no `DATA.service_attach` (non-SL2/SL4 workbooks), and shows the
+    engine error when `DATA.service_attach_error` is present.
+
+    All customer-derived strings are escapeHtml-wrapped (XSS / A05). Must run
+    AFTER _inject_customer_modal so the idp-refactored renderCustomerDetail
+    signature and the m-cust-signal modal anchor already exist.
+    """
+    # 1) Inline mount point, directly under the existing signal note.
+    html = _replace_once(
+        html,
+        '<div class="note" id="cust-signal"></div>',
+        '<div class="note" id="cust-signal"></div>\n  <div id="cust-attach"></div>',
+        "inline service attach mount",
+    )
+
+    # 2) Modal mount point, directly under the modal signal note (built in JS).
+    html = _replace_once(
+        html,
+        "'<div class=\"note\" id=\"m-cust-signal\"></div>' +",
+        "'<div class=\"note\" id=\"m-cust-signal\"></div>' +\n      '<div id=\"m-cust-attach\"></div>' +",
+        "modal service attach mount",
+    )
+
+    # 3) Invoke the renderer at the end of the (idp-aware) detail render. The
+    #    note.style.color line is unique to renderCustomerDetail.
+    color_anchor = (
+        "note.style.color = opp.opportunity === 'High' ? '#5d1014' : "
+        "opp.opportunity === 'Medium' ? '#5d3a00' : '#0e3a0e';"
+    )
+    html = _replace_once(
+        html,
+        color_anchor,
+        color_anchor + "\n  renderServiceAttach(idp, name);",
+        "service attach render call",
+    )
+
+    # 4) Define renderServiceAttach just before renderCustomerDetail.
+    renderer = r'''// ---- Per-service Defender attach (AE talk-track) ------------------------
+function _saPct1(v) {
+  return (v == null || isNaN(v)) ? '\u2013' : (v * 100).toFixed(1) + '%';
+}
+
+// Plain-language attach sentence for one catalog/opportunity entry.
+// Dollar-gap plans get the "spends $X on workload but only $Y on Defender ..." line;
+// usage-priced plans get a coverage signal with no fabricated dollar figure.
+function _saSentence(customer, c) {
+  const who = escapeHtml(customer || 'This customer');
+  const wname = escapeHtml(c.workloadName || 'this workload');
+  const plan = escapeHtml(c.planLabel || 'the matching Defender plan');
+  if (c.hasDollarGap) {
+    return who + ' spends <strong>' + fmt.money(c.workloadAcr) + '/mo</strong> on ' + wname +
+      ' but only <strong>' + fmt.money(c.defenderActual) + '/mo</strong> on ' + plan +
+      ' \u2014 roughly a <strong>' + fmt.money(c.gapDollars) + '/mo</strong> attach gap.';
+  }
+  return who + ' spends <strong>' + fmt.money(c.workloadAcr) + '/mo</strong> on ' + wname +
+    ' but has <strong>no ' + plan + '</strong> coverage \u2014 usage-priced, so the upside is not yet quantified.';
+}
+
+// Rich detail for an open (below-threshold) opportunity, shown inside an
+// expanded scorecard row. Mirrors the former standalone opportunity card,
+// minus the plan label (the row head already shows it).
+function _saOppDetail(o) {
+  const isAttach = o.signal === 'attach';
+  const pr = (o.priority || '').toLowerCase();
+  const prClass = pr === 'high' ? 'high' : (pr === 'medium' ? 'medium' : 'low');
+  const prTag = o.priority
+    ? '<span class="tag ' + prClass + '">' + escapeHtml(o.priority) + ' priority</span>'
+    : '';
+  const badge = isAttach
+    ? '<span class="tag high">Not protected</span>'
+    : '<span class="tag medium">Under-protected</span>';
+  const covTip = 'This Defender plan is billed by usage \u2014 per resource, machine, or transaction \u2014 not as a share of spend. '
+    + 'So we flag the unprotected workload but do not guess a dollar gap, which would be too speculative. '
+    + 'Confirm the resource count with the customer to size the real upside.';
+  const gapStr = o.hasDollarGap
+    ? fmt.money(o.gapDollars) + ' / mo gap'
+    : 'usage-priced \u00b7 coverage signal '
+      + '<span class="prio-badge-i" tabindex="0" role="img" '
+      + 'aria-label="What does usage-priced coverage signal mean?" '
+      + 'style="cursor:help;" title="' + covTip + '">&#9432;</span>';
+  const cov = (o.hasDollarGap && o.coveragePct != null)
+    ? ' \u00b7 ' + (o.coveragePct * 100).toFixed(0) + '% of benchmark'
+    : '';
+  const reason = o.priorityReason
+    ? '<div style="font-size:11px;color:#605e5c;margin-top:4px;">Why: ' + escapeHtml(o.priorityReason) + '</div>'
+    : '';
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+      '<div>' + prTag + ' ' + badge + '</div>' +
+      '<div style="font-weight:600;white-space:nowrap;">' + gapStr + '</div>' +
+    '</div>' +
+    reason +
+    '<div class="note" style="margin:8px 0 0;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">' +
+      escapeHtml(o.opener) + '</div>' +
+    '<div style="font-size:12px;color:#605e5c;margin-top:8px;">' +
+      'Workload ' + fmt.money(o.workloadAcr) + ' / mo (' + fmt.pct(o.workloadGrowth) + ' 3M) \u00b7 ' +
+      'Defender ' + fmt.money(o.defenderActual) + ' / mo (' + fmt.pct(o.defenderGrowth) + ' 3M)' + cov +
+    '</div>';
+}
+
+// Detail for an on-track plan (already protecting its workload to benchmark).
+function _saOnTrackDetail(c) {
+  const covTxt = (c.coveragePct != null) ? ' \u00b7 ' + (c.coveragePct * 100).toFixed(0) + '% of benchmark' : '';
+  return '<div style="font-size:12px;color:#323130;">Defender <strong>' + fmt.money(c.defenderActual) +
+    '/mo</strong> protecting <strong>' + fmt.money(c.workloadAcr) + '/mo</strong> of ' +
+    escapeHtml(c.workloadName || 'this workload') + covTxt + '</div>';
+}
+
+// Minimal fallback when a below-threshold plan has no matching opportunity record.
+function _saPlainDetail(c) {
+  return '<div style="font-size:12px;color:#323130;">' + _saSentence(null, c) + '</div>';
+}
+
+// All-services scorecard: every Defender plan for the customer, clearly marked
+// below-threshold (open opportunity) / on-track / not-in-use. Below-threshold
+// and on-track rows are click-to-expand accordions revealing the recommended
+// play; not-in-use rows are static. Returns an HTML string.
+function _saScorecard(d) {
+  const cat = Array.isArray(d.catalog) ? d.catalog : [];
+  if (!cat.length) return '';
+  const oppByPlan = {};
+  (Array.isArray(d.opportunities) ? d.opportunities : []).forEach(function (o) {
+    if (o && o.planLabel != null) oppByPlan[o.planLabel] = o;
+  });
+  const order = { below_threshold: 0, on_track: 1, not_deployed: 2 };
+  const sorted = cat.slice().sort(function (a, b) {
+    return ((order[a.status] == null ? 9 : order[a.status]) - (order[b.status] == null ? 9 : order[b.status])) ||
+      ((b.gapDollars || 0) - (a.gapDollars || 0)) ||
+      (a.planLabel < b.planLabel ? -1 : a.planLabel > b.planLabel ? 1 : 0);
+  });
+  const rows = sorted.map(function (c) {
+    let color, bg, dot, label, detail, expandable, panelInner;
+    if (c.status === 'below_threshold') {
+      color = '#a4262c'; bg = '#fdf3f4'; dot = '\u25cf';
+      label = (c.signal === 'expand') ? 'Under-attached' : 'Below threshold';
+      detail = c.hasDollarGap
+        ? fmt.money(c.workloadAcr) + '/mo ' + escapeHtml(c.workloadName) + ' vs ' + fmt.money(c.defenderActual) +
+          '/mo Defender \u00b7 ~' + fmt.money(c.gapDollars) + '/mo gap'
+        : fmt.money(c.workloadAcr) + '/mo ' + escapeHtml(c.workloadName) + ' \u00b7 no coverage (usage-priced)';
+      expandable = true;
+      panelInner = oppByPlan[c.planLabel] ? _saOppDetail(oppByPlan[c.planLabel]) : _saPlainDetail(c);
+    } else if (c.status === 'on_track') {
+      color = '#107c10'; bg = '#f3f9ef'; dot = '\u2713'; label = 'On track';
+      detail = fmt.money(c.defenderActual) + '/mo Defender on ' + fmt.money(c.workloadAcr) + '/mo workload';
+      expandable = true;
+      panelInner = _saOnTrackDetail(c);
+    } else {
+      color = '#8a8886'; bg = '#f3f2f1'; dot = '\u25cb'; label = 'Not in use';
+      detail = 'Customer does not run this workload yet';
+      expandable = false;
+      panelInner = '';
+    }
+    const caret = expandable
+      ? '<span class="sa-caret" style="color:' + color + ';width:12px;display:inline-block;text-align:center;">\u25b8</span>'
+      : '<span style="width:12px;display:inline-block;"></span>';
+    const headOpen = expandable
+      ? '<div data-sa-toggle role="button" tabindex="0" aria-expanded="false" style="cursor:pointer;'
+      : '<div style="';
+    const head = headOpen +
+        'display:flex;align-items:center;gap:8px;padding:8px 12px;border-left:3px solid ' + color +
+        ';background:' + bg + ';border-radius:4px;">' +
+      caret +
+      '<span style="color:' + color + ';font-weight:700;width:14px;text-align:center;">' + dot + '</span>' +
+      '<div style="flex:1 1 auto;min-width:0;">' +
+        '<div style="font-weight:600;color:#323130;">' + escapeHtml(c.planLabel) + '</div>' +
+        '<div style="font-size:11px;color:#605e5c;">' + detail + '</div>' +
+      '</div>' +
+      '<span style="font-size:11px;font-weight:700;color:' + color + ';white-space:nowrap;">' + label + '</span>' +
+    '</div>';
+    const panel = expandable
+      ? '<div class="sa-detail" hidden style="padding:10px 12px 12px 34px;background:#ffffff;' +
+          'border:1px solid #edebe9;border-top:none;border-radius:0 0 4px 4px;margin:-2px 0 2px;">' +
+          panelInner + '</div>'
+      : '';
+    return '<div>' + head + panel + '</div>';
+  }).join('');
+  return '<div style="margin-top:14px;font-size:13px;color:#323130;font-weight:600;">Defender coverage scorecard</div>' +
+    '<div style="font-size:11px;color:#605e5c;margin-bottom:6px;">Every Defender for Cloud plan for this customer. ' +
+      'Plans marked <strong style="color:#a4262c;">below threshold</strong> are the open attach opportunities. ' +
+      'Click an open or on-track plan to reveal the recommended play.</div>' +
+    '<div style="display:flex;flex-direction:column;gap:4px;">' + rows + '</div>';
+}
+
+function renderServiceAttach(idp, name) {
+  idp = idp || '';
+  if (!window.__saAccordionWired) {
+    window.__saAccordionWired = true;
+    const _saToggle = function (head) {
+      const panel = head.nextElementSibling;
+      if (!panel || panel.className !== 'sa-detail') return;
+      const opening = panel.hasAttribute('hidden');
+      if (opening) { panel.removeAttribute('hidden'); } else { panel.setAttribute('hidden', ''); }
+      head.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      const caret = head.querySelector('.sa-caret');
+      if (caret) caret.textContent = opening ? '\u25be' : '\u25b8';
+    };
+    document.addEventListener('click', function (e) {
+      const head = e.target.closest('[data-sa-toggle]');
+      if (head) _saToggle(head);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      const head = e.target.closest('[data-sa-toggle]');
+      if (!head) return;
+      e.preventDefault();
+      _saToggle(head);
+    });
+  }
+  const host = document.getElementById(idp + 'cust-attach');
+  if (!host) return;
+  const sa = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach : null;
+  const saErr = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach_error : null;
+
+  if (!sa || !Array.isArray(sa.dossiers)) {
+    if (saErr) {
+      host.style.display = '';
+      host.innerHTML =
+        '<div class="note" style="margin-top:18px;border-left-color:#ff8c00;background:#fffaf0;color:#5d3a00;">' +
+        '<strong>Service-level attach unavailable:</strong> ' + escapeHtml(String(saErr)) + '</div>';
+    } else {
+      host.innerHTML = '';
+      host.style.display = 'none';
+    }
+    return;
+  }
+
+  const d = sa.dossiers.find(function (x) { return x.customer === name; });
+  if (!d) { host.innerHTML = ''; host.style.display = 'none'; return; }
+  host.style.display = '';
+
+  const kpis =
+    '<div class="cards" style="margin-top:6px;">' +
+      '<div class="card"><div class="label">Defender Attach Rate</div><div class="val">' + _saPct1(d.attachRatio) + '</div><div class="delta">DfC \u00f7 eligible workload</div></div>' +
+      '<div class="card"><div class="label">Eligible Workload ACR</div><div class="val">' + fmt.money(d.eligibleWorkloadAcr) + '</div><div class="delta">mapped services / mo</div></div>' +
+      '<div class="card"><div class="label">Defender for Cloud ACR</div><div class="val">' + fmt.money(d.dfcAcr) + '</div><div class="delta">per month</div></div>' +
+      '<div class="card"><div class="label">Open Attach Gap</div><div class="val">' + fmt.money(d.totalGapDollars) + '</div><div class="delta">' + d.uncoveredEligibleCount + ' of ' + d.presentEligibleCount + ' services unprotected</div></div>' +
+    '</div>';
+
+  const opps = Array.isArray(d.opportunities)
+    ? d.opportunities.slice().sort(function (a, b) {
+        return ((a.priorityRank == null ? 9 : a.priorityRank) - (b.priorityRank == null ? 9 : b.priorityRank)) ||
+          ((b.blendedScore || 0) - (a.blendedScore || 0));
+      })
+    : [];
+  const emptyNote = opps.length ? '' :
+    '<div class="note" style="border-left-color:#107c10;background:#f3f9ef;color:#0e3a0e;">' +
+    'No open per-service attach gaps \u2014 this customer protects the Azure services they run.</div>';
+
+  const tierLegend = opps.length
+    ? '<div style="font-size:11px;color:#605e5c;margin-top:10px;line-height:1.6;">' +
+        '<span class="tag high">High</span> workload growing faster than Defender attach \u00b7 ' +
+        '<span class="tag medium">Medium</span> active workload materially under-protected \u00b7 ' +
+        '<span class="tag low">Low</span> roughly tracking the benchmark \u2014 minor top-up' +
+      '</div>'
+    : '';
+
+  const found = Array.isArray(d.foundational) ? d.foundational : [];
+  let foundHtml = '';
+  if (found.length) {
+    foundHtml =
+      '<div style="margin-top:14px;font-size:13px;color:#323130;font-weight:600;">Foundational coverage</div>' +
+      '<div style="font-size:11px;color:#605e5c;margin-bottom:6px;">Posture plans (CSPM, Resource Manager, DNS, EASM) \u2014 not workload-priced.</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
+      found.map(function (f) {
+        const on = !!f.present;
+        const c = on ? '#107c10' : '#a19f9d';
+        const bg = on ? '#f3f9ef' : '#f3f2f1';
+        const mark = on ? '\u2713' : '\u25cb';
+        return '<span style="border:1px solid ' + c + ';background:' + bg + ';color:' + c +
+          ';border-radius:12px;padding:2px 10px;font-size:12px;">' + mark + ' ' + escapeHtml(f.planLabel) + '</span>';
+      }).join('') +
+      '</div>';
+  }
+
+  let reconHtml = '';
+  if (d.reconciliationOk === false) {
+    reconHtml = '<div class="note" style="margin-top:10px;border-left-color:#ff8c00;background:#fffaf0;color:#5d3a00;font-size:12px;">' +
+      'Heads-up: provided totals did not fully reconcile against summed service rows for this customer \u2014 treat figures as directional.</div>';
+  }
+
+  // Headline open attach gap: quantified monthly gap (sum of dollar-gap plans)
+  // annualized x12, plus a count of usage-priced coverage-signal services as
+  // separate unquantified upside (never fabricate a $ for those).
+  const monthlyGap = d.totalGapDollars || 0;
+  const annualGap = monthlyGap * 12;
+  const covSignals = opps.filter(function (o) { return !o.hasDollarGap; }).length;
+  const gapBanner = (monthlyGap > 0 || covSignals > 0)
+    ? '<div style="margin-top:12px;border:1px solid #e3d3f5;background:#fbf6ff;border-radius:8px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;">' +
+        '<div><div style="font-size:24px;font-weight:700;color:#5c2d91;">' + fmt.money(monthlyGap) + '</div>' +
+          '<div style="font-size:12px;color:#605e5c;">Total ACR gap per month</div></div>' +
+        '<div><div style="font-size:24px;font-weight:700;color:#5c2d91;">' + fmt.money(annualGap) + '</div>' +
+          '<div style="font-size:12px;color:#605e5c;">Total ACR gap per year</div></div>' +
+        '<div style="flex:1 1 220px;font-size:12px;color:#605e5c;">Estimated additional Defender for Cloud ACR if these per-service gaps are closed to benchmark.' +
+          (covSignals > 0 ? ' Plus ' + covSignals + ' usage-priced service' + (covSignals === 1 ? '' : 's') + ' with coverage gaps (upside not yet quantified).' : '') +
+        '</div>' +
+      '</div>'
+    : '';
+
+  // Plain-language lead: the single biggest below-threshold gap, stated as a sentence.
+  const leadEntry = (Array.isArray(d.catalog) ? d.catalog : [])
+    .filter(function (c) { return c.status === 'below_threshold'; })
+    .sort(function (a, b) {
+      return (Number(b.hasDollarGap) - Number(a.hasDollarGap)) || ((b.gapDollars || 0) - (a.gapDollars || 0));
+    })[0];
+  const leadBox = leadEntry
+    ? '<div class="note" style="margin-top:14px;border-left-color:#a4262c;background:#fdf3f4;color:#5d1a1d;font-size:14px;line-height:1.5;">' +
+        _saSentence(d.customer, leadEntry) + '</div>'
+    : '';
+  const scorecard = _saScorecard(d);
+
+  host.innerHTML =
+    '<div class="chart-box" style="margin-top:18px;">' +
+      '<div class="title">Per-Service Defender Attach</div>' +
+      '<div class="sub">Where this customer buys an Azure service but is not protecting it with the matching Defender plan. Ranked by opportunity score.</div>' +
+      kpis +
+      gapBanner +
+      leadBox +
+      reconHtml +
+      scorecard +
+      emptyNote +
+      tierLegend +
+      foundHtml +
+    '</div>';
+}
+
+'''
+    html = _replace_once(
+        html,
+        "function renderCustomerDetail(name, idp) {",
+        renderer + "function renderCustomerDetail(name, idp) {",
+        "service attach renderer definition",
+    )
+    return html
 
 
 def _inject_category_modal(html: str) -> str:
