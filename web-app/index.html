@@ -256,7 +256,8 @@ tr.clickable:hover { background: #f3f2f1; }
 
 <div class="tabs">
   <button class="tab active" data-tab="overview">Overview</button>
-  <button class="tab" data-tab="opportunity">Opportunity Matrix</button>
+  <button class="tab" data-tab="opportunity">Service Attach Opportunities</button>
+    <button class="tab" data-tab="divergence">Defender Coverage Drift</button>
   <button class="tab" data-tab="drilldown">Customer Drill-Down</button>
 </div>
 
@@ -296,7 +297,7 @@ tr.clickable:hover { background: #f3f2f1; }
   </div>
 </div>
 
-<!-- ============ OPPORTUNITY MATRIX ============ -->
+<!-- ============ SERVICE ATTACH OPPORTUNITIES ============ -->
 <div class="panel" id="panel-opportunity">
   <div class="legend-strip">
     <span><span class="tag high">High</span> Other Azure growing, DfC flat or declining (or zero spend)</span>
@@ -322,6 +323,9 @@ tr.clickable:hover { background: #f3f2f1; }
   </div>
 </div>
 
+<!-- ============ DIVERGENCE STORIES ============ -->
+<div class="panel" id="panel-divergence"></div>
+
 <!-- ============ DRILL-DOWN ============ -->
 <div class="panel" id="panel-drilldown">
   <div class="controls">
@@ -334,6 +338,7 @@ tr.clickable:hover { background: #f3f2f1; }
 
   <div class="note" id="cust-signal"></div>
   <div id="cust-attach"></div>
+  <div id="cust-sales-stories"></div>
 
   <div class="chart-box">
     <div class="title">Product breakdown</div>
@@ -1385,6 +1390,7 @@ function renderCustomerDetail(name, idp) {
   note.style.background = opp.opportunity === 'High' ? '#fdf3f4' : opp.opportunity === 'Medium' ? '#fffaf0' : '#f3f9ef';
   note.style.color = opp.opportunity === 'High' ? '#5d1014' : opp.opportunity === 'Medium' ? '#5d3a00' : '#0e3a0e';
   renderServiceAttach(idp, name);
+  renderCustomerSalesStories(idp, name);
 
   const ph = document.getElementById(idp + 'cust-products');
   ph.innerHTML = '<div class="product-row" style="font-weight:600; background:#faf9f8; border-bottom:1px solid #d2d0ce;"><div class="name">Product</div><div class="num">Monthly ACR</div><div class="num">MoM</div><div class="num">3M</div><div>Trend</div></div>' +
@@ -1588,6 +1594,816 @@ function ensureMergedQueueControls() {
   document.getElementById('action-queue-limit').addEventListener('change', renderOpportunityHeatmap);
   document.getElementById('copy-action-queue').addEventListener('click', copyActionQueue);
   document.getElementById('download-action-queue').addEventListener('click', downloadActionQueueCsv);
+}
+
+
+// ---- Manager-level divergence stories ------------------------------------
+let _divOverlay = null;
+let _divLastFocus = null;
+
+function storyValue(story, camelName, snakeName, fallback = null) {
+  if (!story || typeof story !== 'object') return fallback;
+  if (story[camelName] !== undefined && story[camelName] !== null) return story[camelName];
+  if (story[snakeName] !== undefined && story[snakeName] !== null) return story[snakeName];
+  return fallback;
+}
+
+function _storyCustomerKey(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function sortDivergenceStoryList(stories) {
+  const rank = {High: 0, Medium: 1, Low: 2};
+  return stories.slice().sort((a, b) =>
+    ((rank[storyValue(a, 'severity', 'severity', 'Low')] ?? 9) - (rank[storyValue(b, 'severity', 'severity', 'Low')] ?? 9)) ||
+    ((storyValue(b, 'gapDollars', 'gap_dollars', 0) || 0) - (storyValue(a, 'gapDollars', 'gap_dollars', 0) || 0)) ||
+    ((storyValue(b, 'latestWorkloadAcr', 'latest_workload_acr', 0) || 0) - (storyValue(a, 'latestWorkloadAcr', 'latest_workload_acr', 0) || 0)) ||
+    String(storyValue(a, 'customer', 'customer', '')).localeCompare(String(storyValue(b, 'customer', 'customer', ''))) ||
+    String(storyValue(a, 'planLabel', 'plan_label', '')).localeCompare(String(storyValue(b, 'planLabel', 'plan_label', ''))));
+}
+
+function divergenceStories() {
+  const sa = DATA.service_attach || {};
+  let stories = Array.isArray(sa.divergenceStories) ? sa.divergenceStories :
+    (Array.isArray(sa.divergence_stories) ? sa.divergence_stories : []);
+  if (!stories.length && Array.isArray(sa.dossiers)) {
+    stories = sa.dossiers.flatMap(d => {
+      const items = Array.isArray(d.divergenceStories) ? d.divergenceStories :
+        (Array.isArray(d.divergence_stories) ? d.divergence_stories : []);
+      return items.map(s => ({customer: d.customer, ...s}));
+    });
+  }
+  return sortDivergenceStoryList(stories);
+}
+
+function storyDossier(customer) {
+  const target = _storyCustomerKey(customer);
+  if (!target) return null;
+  const dossiers = (DATA.service_attach && Array.isArray(DATA.service_attach.dossiers)) ? DATA.service_attach.dossiers : [];
+  return dossiers.find(d => _storyCustomerKey(d.customer) === target) || null;
+}
+
+function storyOpportunity(story) {
+  const dossier = storyDossier(storyValue(story, 'customer', 'customer', ''));
+  if (!dossier || !Array.isArray(dossier.opportunities)) return null;
+  const plan = storyValue(story, 'planLabel', 'plan_label', '');
+  return dossier.opportunities.find(o => String(o.planLabel || o.plan_label || '') === String(plan)) || null;
+}
+
+function storyAccountAcr(customer) {
+  const target = _storyCustomerKey(customer);
+  if (!target || !DATA || !Array.isArray(DATA.opportunity)) return 0;
+  const row = DATA.opportunity.find(r => _storyCustomerKey(r.customer) === target);
+  return row ? (row.total_monthly_current || row.total_current || 0) : 0;
+}
+
+function divergenceSeverityRank(severity) {
+  return ({High: 0, Medium: 1, Low: 2})[severity] ?? 9;
+}
+
+function divergenceSeverityTag(severity) {
+  const sev = ['High', 'Medium', 'Low'].includes(severity) ? severity : 'Low';
+  const cls = sev === 'High' ? 'high' : (sev === 'Medium' ? 'medium' : 'low');
+  return '<span class="tag ' + cls + ' div-severity-badge" role="button" tabindex="0" ' +
+    'title="Why is divergence severity ' + escapeHtml(sev) + '? Click for the divergence grading.">' +
+    escapeHtml(sev) + ' <span class="prio-badge-i" aria-hidden="true">&#9432;</span></span>';
+}
+
+function ensureDivergenceModal() {
+  if (_divOverlay) return _divOverlay;
+  const style = document.createElement('style');
+  style.textContent =
+    '.div-severity-badge{cursor:pointer;user-select:none}' +
+    '.div-severity-badge:hover{filter:brightness(.96);box-shadow:0 0 0 1px rgba(0,0,0,.15)}' +
+    '.div-severity-badge:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.div-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:flex-start;justify-content:center;z-index:3980;padding:40px 16px;overflow:auto}' +
+    '.div-overlay[hidden]{display:none}' +
+    '.div-dialog{position:relative;background:#fff;border-radius:10px;max-width:1120px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+    '.div-close{position:absolute;top:8px;right:12px;border:none;background:transparent;font-size:28px;line-height:1;cursor:pointer;color:#605e5c;z-index:1}' +
+    '.div-close:hover{color:#201f1e}.div-close:focus-visible{outline:2px solid #0078d4;outline-offset:1px}' +
+    '.div-body{padding:24px 28px 28px}.div-body h2{margin:0 34px 4px 0;font-size:20px;color:#201f1e}.div-sub{font-size:12px;color:#605e5c;margin-bottom:14px}' +
+    '.div-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:0 0 14px}.div-kpi{border:1px solid #eef1f5;border-radius:8px;padding:10px;background:#fff}.div-kpi .big{font-size:20px;font-weight:700;color:#201f1e}.div-kpi .lbl{font-size:11px;color:#605e5c;margin-top:3px}' +
+    '.div-comparison{border:1px solid #edebe9;border-radius:8px;margin-top:10px;background:#fff;overflow:hidden}.div-comparison summary{list-style:none;cursor:pointer;padding:12px 14px}.div-comparison summary::-webkit-details-marker{display:none}.div-comparison[open] summary{border-bottom:1px solid #edebe9;background:#faf9f8}' +
+    '.div-comp-grid{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(4,minmax(110px,.7fr)) minmax(220px,1.4fr);gap:10px;align-items:start}.div-comp-grid .num{text-align:right;font-variant-numeric:tabular-nums}' +
+    '.div-comp-label{font-size:12px;color:#605e5c}.div-comp-main{font-weight:700;color:#201f1e}.div-comp-detail{padding:0 14px 14px}.div-rubric{margin:0;padding-left:18px;color:#323130}.div-rubric li{margin-bottom:6px}' +
+    '@media(max-width:780px){.div-comp-grid{grid-template-columns:1fr}.div-comp-grid .num{text-align:left}}';
+  document.head.appendChild(style);
+  const overlay = document.createElement('div');
+  overlay.id = 'divergence-modal';
+  overlay.className = 'div-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML =
+    '<div class="div-dialog" role="dialog" aria-modal="true" aria-labelledby="div-modal-title">' +
+    '<button class="div-close" type="button" aria-label="Close">&times;</button>' +
+    '<div class="div-body" id="div-modal-body"></div></div>';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeDivergenceModal(); });
+  overlay.querySelector('.div-close').addEventListener('click', closeDivergenceModal);
+  overlay.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const nodes = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const focusable = Array.prototype.filter.call(nodes, el => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  document.body.appendChild(overlay);
+  _divOverlay = overlay;
+  return overlay;
+}
+
+function closeDivergenceModal() {
+  if (_divOverlay) _divOverlay.setAttribute('hidden', '');
+  if (_divLastFocus && typeof _divLastFocus.focus === 'function') {
+    try { _divLastFocus.focus(); } catch (_) {}
+  }
+  _divLastFocus = null;
+}
+
+function divergenceSeverityExplanationHtml(currentSeverity) {
+  const sev = ['High', 'Medium', 'Low'].includes(currentSeverity) ? currentSeverity : 'Low';
+  const meta = {
+    High: {color: '#d13438', bg: '#fdf3f4', text: 'urgent divergence'},
+    Medium: {color: '#ff8c00', bg: '#fffaf0', text: 'meaningful divergence'},
+    Low: {color: '#107c10', bg: '#f3f9ef', text: 'watch-list divergence'},
+  }[sev];
+  return `
+    <div class="prio-head" style="border-left:6px solid ${meta.color};background:${meta.bg};">
+      <div class="prio-head-tier" style="color:${meta.color};">${escapeHtml(sev)} divergence severity</div>
+      <h2 id="div-modal-title">How divergence severity is calculated</h2>
+      <p>Divergence severity is separate from Service Attach priority. It ranks how strongly Azure workload momentum and the matching Defender plan trend are moving apart.</p>
+    </div>
+    <section class="prio-section">
+      <h3>Current tier: ${escapeHtml(meta.text)}</h3>
+      <ul class="div-rubric">
+        <li><strong>High:</strong> material workload growth with Defender flat/zero, Defender regression while workload is stable or growing, or the largest momentum spread signals an urgent coverage review.</li>
+        <li><strong>Medium:</strong> workload and Defender trends are materially misaligned, but the evidence is less severe or lower confidence than a High story.</li>
+        <li><strong>Low:</strong> Defender is broadly tracking, or the divergence is small enough to monitor before using as a sales motion.</li>
+      </ul>
+    </section>
+    <div class="note" style="margin-top:10px;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">
+      <strong>Directional signal:</strong> this is a trend-comparison story, not proof of missing protection. Validate resource scope, entitlements, and pricing drivers before forecasting.
+    </div>`;
+}
+
+function openDivergenceSeverityExplainer(severity) {
+  const overlay = ensureDivergenceModal();
+  document.getElementById('div-modal-body').innerHTML = divergenceSeverityExplanationHtml(severity);
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.div-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function ensureDivergenceInteractions() {
+  if (window.__divergenceInteractionsWired) return;
+  window.__divergenceInteractionsWired = true;
+  document.addEventListener('click', e => {
+    if (!e.target.closest) return;
+    const badge = e.target.closest('.div-severity-badge');
+    if (!badge) return;
+    e.stopPropagation();
+    e.preventDefault();
+    _divLastFocus = badge;
+    openDivergenceSeverityExplainer((badge.textContent || '').replace(/\s+.*/, '').trim());
+  }, true);
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    if (!e.target.closest) return;
+    const badge = e.target.closest('.div-severity-badge');
+    if (!badge) return;
+    e.stopPropagation();
+    e.preventDefault();
+    _divLastFocus = badge;
+    openDivergenceSeverityExplainer((badge.textContent || '').replace(/\s+.*/, '').trim());
+  }, true);
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!_divOverlay || _divOverlay.hasAttribute('hidden')) return;
+    closeDivergenceModal();
+  }, true);
+}
+
+function _storySeries(story, opp, camelName, snakeName, startCamel, startSnake, endCamel, endSnake) {
+  const raw = opp ? (opp[camelName] || opp[snakeName]) : null;
+  if (Array.isArray(raw) && raw.length) return raw.map(v => Number(v) || 0);
+  const start = Number(storyValue(story, startCamel, startSnake, 0)) || 0;
+  const end = Number(storyValue(story, endCamel, endSnake, 0)) || 0;
+  return [start, end];
+}
+
+function _storyMonths(story, seriesLen) {
+  const months = (DATA.service_attach && Array.isArray(DATA.service_attach.months)) ? DATA.service_attach.months : (DATA.months || []);
+  if (Array.isArray(months) && months.length === seriesLen) return months;
+  const compared = storyValue(story, 'monthsCompared', 'months_compared', []);
+  if (Array.isArray(compared) && compared.length) return compared;
+  return ['Start', 'End'];
+}
+
+function _seriesSpark(values, color) {
+  const vals = (Array.isArray(values) ? values : []).map(v => Number(v) || 0);
+  if (!vals.length) return '';
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = Math.max(1, max - min);
+  const w = 220, h = 54;
+  const points = vals.map((v, i) => {
+    const x = vals.length === 1 ? w / 2 : (i / (vals.length - 1)) * w;
+    const y = h - ((v - min) / span) * (h - 8) - 4;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="54" aria-hidden="true"><polyline fill="none" stroke="${color}" stroke-width="3" points="${points}"/></svg>`;
+}
+
+function _storyEvidencePanel(story) {
+  const opp = storyOpportunity(story);
+  const workload = _storySeries(story, opp, 'workloadSeries', 'workload_series', 'workloadStart', 'workload_start', 'workloadEnd', 'workload_end');
+  const defender = _storySeries(story, opp, 'defenderSeries', 'defender_series', 'defenderStart', 'defender_start', 'defenderEnd', 'defender_end');
+  const months = _storyMonths(story, Math.max(workload.length, defender.length));
+  const firstMonth = months[0] || 'Start';
+  const lastMonth = months[months.length - 1] || 'End';
+  const workloadCats = storyValue(story, 'workloadSl2Categories', 'workload_sl2_categories', []);
+  const cats = Array.isArray(workloadCats) ? workloadCats.filter(Boolean).join(', ') : String(workloadCats || '');
+  const plan = storyValue(story, 'planLabel', 'plan_label', 'Defender plan');
+  const pricing = storyValue(story, 'pricingDriver', 'pricing_driver', 'Pricing driver varies by plan');
+  const caveat = storyValue(story, 'caveatText', 'caveat_text', 'Treat this as a directional coverage review signal until validated.');
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:12px;">
+      <div style="border:1px solid #edebe9;border-radius:8px;padding:12px;background:#faf9f8;">
+        <div style="font-size:11px;color:#605e5c;text-transform:uppercase;letter-spacing:.04em;">Azure workload trend</div>
+        <div style="font-weight:700;margin-top:3px;">${escapeHtml(cats || 'Mapped workload')}</div>
+        <div style="font-size:12px;color:#605e5c;margin-top:2px;">${escapeHtml(firstMonth)} to ${escapeHtml(lastMonth)}</div>
+        ${_seriesSpark(workload, '#0078d4')}
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px;"><span>${fmt.money2(workload[0] || 0)}</span><strong>${fmt.money2(workload[workload.length - 1] || 0)}</strong></div>
+      </div>
+      <div style="border:1px solid #edebe9;border-radius:8px;padding:12px;background:#faf9f8;">
+        <div style="font-size:11px;color:#605e5c;text-transform:uppercase;letter-spacing:.04em;">Matching Defender trend</div>
+        <div style="font-weight:700;margin-top:3px;">${escapeHtml(plan)}</div>
+        <div style="font-size:12px;color:#605e5c;margin-top:2px;">${escapeHtml(firstMonth)} to ${escapeHtml(lastMonth)}</div>
+        ${_seriesSpark(defender, '#d13438')}
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px;"><span>${fmt.money2(defender[0] || 0)}</span><strong>${fmt.money2(defender[defender.length - 1] || 0)}</strong></div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:10px;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">
+      <strong>Pricing context:</strong> ${escapeHtml(pricing)}. ${escapeHtml(caveat)}
+    </div>`;
+}
+
+function ensureDivergenceStoriesShell() {
+  if (document.getElementById('divergence-stories-section')) return;
+  ensureDivergenceInteractions();
+  const host = document.getElementById('panel-divergence');
+  if (!host) return;
+  const section = document.createElement('div');
+  section.id = 'divergence-stories-section';
+  section.innerHTML = `
+    <div class="cards">
+      <div class="card high"><div class="label">Coverage drift signals</div><div class="val" id="divergence-total">-</div><div class="delta">workload and Defender trends misaligned</div></div>
+      <div class="card medium"><div class="label">Accounts affected</div><div class="val" id="divergence-accounts">-</div><div class="delta">unique customers to review</div></div>
+      <div class="card high"><div class="label">High severity</div><div class="val" id="divergence-high">-</div><div class="delta">regression or no-coverage stories</div></div>
+      <div class="card"><div class="label">Largest momentum spread</div><div class="val" id="divergence-spread" style="font-size:22px;">-</div><div class="delta" id="divergence-top-plan-note">top affected Defender plan</div></div>
+    </div>
+    <div class="chart-box">
+      <div class="title">Defender Coverage Drift</div>
+      <div class="sub">Customers where an Azure workload trend and its mapped Defender plan trend are moving apart.</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 8px;">
+        <label>Filter:
+          <select id="divergence-filter">
+            <option value="HighMed" selected>High + Medium</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+            <option value="All">All stories</option>
+          </select>
+        </label>
+        <label for="divergence-search">Search
+          <input id="divergence-search" type="search" placeholder="Customer, service, action..." aria-label="Search Defender coverage drift signals" style="min-width:260px;">
+        </label>
+        <label>Rows
+          <select id="divergence-limit">
+            <option value="10">Top 10</option>
+            <option value="25" selected>Top 25</option>
+            <option value="all">All visible</option>
+          </select>
+        </label>
+        <button class="import-btn" id="copy-divergence-stories" type="button">Copy stories</button>
+        <button class="import-btn" id="download-divergence-stories" type="button">Download CSV</button>
+        <span id="divergence-status" style="font-size:12px;color:#605e5c;"></span>
+      </div>
+      <div id="divergence-table"></div>
+      <div class="note" style="margin-top:10px;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">
+        <strong>Directional signal:</strong> Defender Coverage Drift compares ACR momentum and mapped Defender plan attach. Pricing drivers differ by plan, and usage-priced services may flag coverage gaps without a reliable dollar estimate. Validate resource scope and entitlement before forecasting.
+      </div>
+    </div>`;
+  host.appendChild(section);
+  document.getElementById('divergence-filter').addEventListener('change', renderDivergenceStories);
+  document.getElementById('divergence-search').addEventListener('input', renderDivergenceStories);
+  document.getElementById('divergence-limit').addEventListener('change', renderDivergenceStories);
+  document.getElementById('copy-divergence-stories').addEventListener('click', copyDivergenceStories);
+  document.getElementById('download-divergence-stories').addEventListener('click', downloadDivergenceStoriesCsv);
+}
+
+function setDivergenceStatus(message) {
+  const status = document.getElementById('divergence-status');
+  if (status) status.textContent = message;
+}
+
+function storyToDivergenceRow(s) {
+  const workloadCats = storyValue(s, 'workloadSl2Categories', 'workload_sl2_categories', []);
+  const evidence = storyValue(s, 'evidenceBullets', 'evidence_bullets', []);
+  const rawSeverity = storyValue(s, 'severity', 'severity', 'Low');
+  const severity = ['High', 'Medium', 'Low'].includes(rawSeverity) ? rawSeverity : 'Low';
+  const customer = storyValue(s, 'customer', 'customer', '');
+  return {
+    rawStory: s,
+    customer,
+    headline: storyValue(s, 'headline', 'headline', ''),
+    plan: storyValue(s, 'planLabel', 'plan_label', ''),
+    storyType: _storyTypeLabel(s),
+    severity,
+    accountAcr: storyAccountAcr(customer),
+    workloadChange: storyValue(s, 'workloadPctChange', 'workload_pct_change', null),
+    defenderChange: storyValue(s, 'defenderPctChange', 'defender_pct_change', null),
+    spread: storyValue(s, 'momentumSpread', 'momentum_spread', 0),
+    confidence: storyValue(s, 'confidence', 'confidence', ''),
+    recommendedAction: storyValue(s, 'recommendedAction', 'recommended_action', ''),
+    pricingDriver: storyValue(s, 'pricingDriver', 'pricing_driver', ''),
+    caveat: storyValue(s, 'caveatText', 'caveat_text', ''),
+    gapDollars: storyValue(s, 'gapDollars', 'gap_dollars', 0),
+    latestWorkloadAcr: storyValue(s, 'latestWorkloadAcr', 'latest_workload_acr', 0),
+    latestDefenderAcr: storyValue(s, 'latestDefenderAcr', 'latest_defender_acr', 0),
+    workloadDelta: storyValue(s, 'workloadDelta', 'workload_delta', 0),
+    defenderDelta: storyValue(s, 'defenderDelta', 'defender_delta', 0),
+    workloadCategories: Array.isArray(workloadCats) ? workloadCats.join(', ') : String(workloadCats || ''),
+    evidence: Array.isArray(evidence) ? evidence.join(' ') : String(evidence || ''),
+  };
+}
+
+function normalizedDivergenceRows() {
+  const term = (document.getElementById('divergence-search')?.value || '').trim().toLowerCase();
+  const filter = document.getElementById('divergence-filter')?.value || 'HighMed';
+  return divergenceStories().map(storyToDivergenceRow).filter(row => {
+    if (filter === 'High' || filter === 'Medium' || filter === 'Low') {
+      if (row.severity !== filter) return false;
+    } else if (filter === 'HighMed' && row.severity !== 'High' && row.severity !== 'Medium') {
+      return false;
+    }
+    if (!term) return true;
+    return [row.customer, row.headline, row.plan, row.severity, row.confidence,
+      row.storyType, row.recommendedAction, row.pricingDriver, row.workloadCategories, row.evidence]
+      .some(value => String(value ?? '').toLowerCase().includes(term));
+  });
+}
+
+function sortDivergenceRows(rows) {
+  return rows.slice().sort((a, b) =>
+    divergenceSeverityRank(a.severity) - divergenceSeverityRank(b.severity) ||
+    (Number(b.spread) || 0) - (Number(a.spread) || 0) ||
+    (Number(b.gapDollars) || 0) - (Number(a.gapDollars) || 0) ||
+    (Number(b.latestWorkloadAcr) || 0) - (Number(a.latestWorkloadAcr) || 0) ||
+    String(a.plan || '').localeCompare(String(b.plan || '')));
+}
+
+function divergenceCustomerRows() {
+  const groups = new Map();
+  normalizedDivergenceRows().forEach(row => {
+    const key = _storyCustomerKey(row.customer);
+    if (!key) return;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        customer: row.customer,
+        accountAcr: row.accountAcr || 0,
+        stories: [],
+        storyCount: 0,
+        severity: 'Low',
+        maxSpread: 0,
+        totalGap: 0,
+        topStory: row,
+      };
+      groups.set(key, group);
+    }
+    group.stories.push(row);
+  });
+  groups.forEach(group => {
+    group.stories = sortDivergenceRows(group.stories);
+    group.storyCount = group.stories.length;
+    group.topStory = group.stories[0];
+    group.severity = group.topStory ? group.topStory.severity : 'Low';
+    group.maxSpread = Math.max(...group.stories.map(r => Number(r.spread) || 0), 0);
+    group.totalGap = group.stories.reduce((sum, r) => sum + (Number(r.gapDollars) || 0), 0);
+    group.accountAcr = group.accountAcr || (group.topStory ? group.topStory.accountAcr : 0);
+  });
+  return Array.from(groups.values()).sort((a, b) =>
+    divergenceSeverityRank(a.severity) - divergenceSeverityRank(b.severity) ||
+    (Number(b.maxSpread) || 0) - (Number(a.maxSpread) || 0) ||
+    (Number(b.totalGap) || 0) - (Number(a.totalGap) || 0) ||
+    (Number(b.accountAcr) || 0) - (Number(a.accountAcr) || 0) ||
+    String(a.customer || '').localeCompare(String(b.customer || '')));
+}
+
+function visibleDivergenceCustomerRows() {
+  const rows = divergenceCustomerRows();
+  const limit = document.getElementById('divergence-limit')?.value || '10';
+  return limit === 'all' ? rows : rows.slice(0, parseInt(limit, 10));
+}
+
+function updateDivergenceKpis(allStories) {
+  const totalEl = document.getElementById('divergence-total');
+  const accountsEl = document.getElementById('divergence-accounts');
+  const highEl = document.getElementById('divergence-high');
+  const spreadEl = document.getElementById('divergence-spread');
+  const topNoteEl = document.getElementById('divergence-top-plan-note');
+  if (totalEl) totalEl.textContent = allStories.length.toLocaleString('en-US');
+  if (accountsEl) {
+    const accounts = new Set(allStories.map(s => _storyCustomerKey(storyValue(s, 'customer', 'customer', ''))).filter(Boolean));
+    accountsEl.textContent = accounts.size.toLocaleString('en-US');
+  }
+  if (highEl) highEl.textContent = allStories.filter(s => storyValue(s, 'severity', 'severity', '') === 'High').length.toLocaleString('en-US');
+  const counts = new Map();
+  let largestSpread = null;
+  allStories.forEach(s => {
+    const label = storyValue(s, 'planLabel', 'plan_label', '') || 'Unmapped plan';
+    counts.set(label, (counts.get(label) || 0) + 1);
+    const spread = Number(storyValue(s, 'momentumSpread', 'momentum_spread', 0)) || 0;
+    if (largestSpread === null || spread > largestSpread) largestSpread = spread;
+  });
+  const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  if (spreadEl) spreadEl.textContent = largestSpread == null ? '\u2013' : fmt.pct(largestSpread);
+  if (topNoteEl) topNoteEl.textContent = top ? `${top[0]} (${top[1]} ${top[1] === 1 ? 'story' : 'stories'})` : 'no story data';
+}
+
+function renderDivergenceStories() {
+  ensureDivergenceStoriesShell();
+  const host = document.getElementById('divergence-table');
+  if (!host) return;
+  const allStories = divergenceStories();
+  updateDivergenceKpis(allStories);
+  const allCustomerRows = divergenceCustomerRows();
+  const rows = visibleDivergenceCustomerRows();
+  if (!allStories.length) {
+    host.innerHTML = '<div style="padding:24px;color:#605e5c;text-align:center;border:1px dashed #c8c6c4;border-radius:8px;">No Defender coverage drift detected in this workbook yet. When workload ACR grows while the mapped Defender plan lags or declines, signals will appear here.</div>';
+    setDivergenceStatus('');
+    return;
+  }
+  if (!rows.length) {
+    host.innerHTML = '<div style="padding:24px;text-align:center;color:#605e5c;border:1px dashed #c8c6c4;border-radius:8px;">No Defender coverage drift signals match the current filter or search.</div>';
+    setDivergenceStatus(`0 of ${allCustomerRows.length.toLocaleString('en-US')} customers visible`);
+    return;
+  }
+  const maxSpread = Math.max(...rows.map(r => Math.max(0, Number(r.maxSpread) || 0)), 1);
+  const spreadHeat = value => {
+    const intensity = Math.max(0.08, Math.min(0.85, (Math.max(0, Number(value) || 0)) / maxSpread));
+    return `background: color-mix(in srgb, #d13438 ${Math.round(intensity * 70)}%, white);font-weight:700;`;
+  };
+  host.innerHTML = `
+    <div class="scroll-table" style="max-height:620px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Severity</th>
+            <th class="num">Account ACR/mo</th>
+            <th class="num">Divergence services</th>
+            <th>Top Defender plan</th>
+            <th class="num">Top workload change</th>
+            <th class="num">Top Defender change</th>
+            <th class="num">Largest trend difference</th>
+            <th>Recommended action</th>
+            <th>Conversation angle</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r, index) => {
+            const top = r.topStory || {};
+            return `
+              <tr class="clickable" data-divergence-customer="${escapeHtml(r.customer)}" tabindex="0" aria-label="Open divergence story details for ${escapeHtml(r.customer)}">
+                <td><strong>${escapeHtml(r.customer)}</strong></td>
+                <td>${divergenceSeverityTag(r.severity)}</td>
+                <td class="num">${fmt.money2(r.accountAcr || 0)}</td>
+                <td class="num">${r.storyCount.toLocaleString('en-US')} ${r.storyCount === 1 ? 'service' : 'services'}</td>
+                <td>${escapeHtml(top.plan || '')}<br><span style="font-size:12px;color:#605e5c;">${escapeHtml(top.storyType || '')}</span></td>
+                <td class="num"><strong>${fmt.pct(top.workloadChange)}</strong><br><span style="font-size:12px;color:#605e5c;">${fmt.money2(top.workloadDelta || 0)}</span></td>
+                <td class="num"><strong>${fmt.pct(top.defenderChange)}</strong><br><span style="font-size:12px;color:#605e5c;">${fmt.money2(top.defenderDelta || 0)}</span></td>
+                <td class="num" style="${spreadHeat(r.maxSpread)}">${fmt.pct(r.maxSpread)}</td>
+                <td>${escapeHtml(top.recommendedAction || '')}<br><span style="font-size:12px;color:#605e5c;">${escapeHtml(top.confidence || 'unknown')} confidence</span></td>
+                <td>${escapeHtml(top.headline || '')}${top.workloadCategories ? `<br><span style="font-size:12px;color:#605e5c;">Workload: ${escapeHtml(top.workloadCategories)}</span>` : ''}</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  document.querySelectorAll('#divergence-table tr[data-divergence-customer]').forEach(tr => {
+    const open = () => {
+      _divLastFocus = tr;
+      openDivergenceCustomerModal(tr.getAttribute('data-divergence-customer'));
+    };
+    tr.addEventListener('click', e => {
+      if (e.target.closest && e.target.closest('.div-severity-badge')) return;
+      open();
+    });
+    tr.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+  });
+  setDivergenceStatus(`${rows.length.toLocaleString('en-US')} of ${allCustomerRows.length.toLocaleString('en-US')} customers visible`);
+}
+
+function divergenceStoriesText() {
+  return visibleDivergenceCustomerRows().map((r, index) => {
+    const top = r.topStory || {};
+    return `${index + 1}. ${r.customer} | ${r.severity} | ${r.storyCount} divergence service(s) | Top: ${top.plan || ''} | ${top.headline || ''} | Workload ${fmt.pct(top.workloadChange)} vs Defender ${fmt.pct(top.defenderChange)} | Trend difference ${fmt.pct(r.maxSpread)} | ${top.recommendedAction || ''}`;
+  }
+  ).join('\n');
+}
+
+function customerDivergenceStories(name) {
+  const target = _storyCustomerKey(name);
+  if (!target) return [];
+  const sa = DATA.service_attach || {};
+  const dossiers = Array.isArray(sa.dossiers) ? sa.dossiers : [];
+  const dossier = dossiers.find(d => _storyCustomerKey(d.customer) === target);
+  if (dossier) {
+    const direct = Array.isArray(dossier.divergenceStories) ? dossier.divergenceStories :
+      (Array.isArray(dossier.divergence_stories) ? dossier.divergence_stories : []);
+    return sortDivergenceStoryList(direct.map(s => ({customer: dossier.customer, ...s})));
+  }
+  return sortDivergenceStoryList(divergenceStories().filter(s =>
+    _storyCustomerKey(storyValue(s, 'customer', 'customer', '')) === target));
+}
+
+function _storyTypeLabel(story) {
+  const raw = String(storyValue(story, 'storyType', 'story_type', '') || 'Divergence');
+  return raw.replace(/[_-]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+function _storyEvidenceList(story) {
+  const evidence = storyValue(story, 'evidenceBullets', 'evidence_bullets', []);
+  if (Array.isArray(evidence)) return evidence.filter(Boolean).slice(0, 4);
+  return String(evidence || '').split(/\s*[;|]\s*/).filter(Boolean).slice(0, 4);
+}
+
+function openDivergenceCustomerModal(name) {
+  const customer = String(name || '');
+  const rows = sortDivergenceRows(customerDivergenceStories(customer).map(storyToDivergenceRow));
+  if (!rows.length) return;
+  const severity = rows[0].severity || 'Low';
+  const maxSpread = Math.max(...rows.map(r => Number(r.spread) || 0), 0);
+  const totalGap = rows.reduce((sum, r) => sum + (Number(r.gapDollars) || 0), 0);
+  const top = rows[0];
+  const overlay = ensureDivergenceModal();
+  const comparisonHtml = rows.map((r, index) => {
+    const sevClass = String(r.severity).toLowerCase() === 'high' ? 'high' : (String(r.severity).toLowerCase() === 'medium' ? 'medium' : 'low');
+    const evidence = r.evidence ? `<div style="margin-top:10px;font-size:12px;color:#323130;"><strong>Evidence:</strong> ${escapeHtml(r.evidence)}</div>` : '';
+    return `
+      <details class="div-comparison" ${index === 0 ? 'open' : ''} data-divergence-story-card>
+        <summary>
+          <div class="div-comp-grid">
+            <div>
+              <div class="div-comp-label">Defender service + Azure workload</div>
+              <div class="div-comp-main">${escapeHtml(r.plan)}</div>
+              <div style="font-size:12px;color:#605e5c;margin-top:3px;">${escapeHtml(r.workloadCategories || 'Mapped Azure workload')}</div>
+            </div>
+            <div class="num"><div class="div-comp-label">Severity</div>${divergenceSeverityTag(r.severity)}</div>
+            <div class="num"><div class="div-comp-label">Workload trend</div><strong>${fmt.pct(r.workloadChange)}</strong><br><span style="font-size:12px;color:#605e5c;">${fmt.money2(r.workloadDelta || 0)}</span></div>
+            <div class="num"><div class="div-comp-label">Defender trend</div><strong>${fmt.pct(r.defenderChange)}</strong><br><span style="font-size:12px;color:#605e5c;">${fmt.money2(r.defenderDelta || 0)}</span></div>
+            <div class="num"><div class="div-comp-label">Trend difference</div><strong>${fmt.pct(r.spread)}</strong><br><span style="font-size:12px;color:#605e5c;">workload minus Defender</span></div>
+            <div>
+              <div class="div-comp-label">Recommended action</div>
+              <div class="div-comp-main">${escapeHtml(r.recommendedAction)}</div>
+              <div style="font-size:12px;color:#605e5c;margin-top:3px;">${escapeHtml(r.storyType)} · ${escapeHtml(r.confidence || 'unknown')} confidence</div>
+            </div>
+          </div>
+        </summary>
+        <div class="div-comp-detail" style="border-left:4px solid ${sevClass === 'high' ? '#d13438' : sevClass === 'medium' ? '#ff8c00' : '#107c10'};">
+          ${_storyEvidencePanel(r.rawStory)}
+          ${evidence}
+          <div class="note" style="margin:10px 0 0;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">
+            <strong>Pricing context:</strong> ${escapeHtml(r.pricingDriver || 'Pricing varies by plan')}. ${escapeHtml(r.caveat || 'Treat as directional until validated.')}
+          </div>
+        </div>
+      </details>`;
+  }).join('');
+  document.getElementById('div-modal-body').innerHTML = `
+    <h2 id="div-modal-title">${escapeHtml(customer)} coverage drift signals</h2>
+    <div class="div-sub">Per Defender service comparison against the corresponding Azure workload. Highest-opportunity divergences are listed first.</div>
+    <div class="div-kpis">
+      <div class="div-kpi"><div class="big">${divergenceSeverityTag(severity)}</div><div class="lbl">Highest divergence severity</div></div>
+      <div class="div-kpi"><div class="big">${rows.length.toLocaleString('en-US')}</div><div class="lbl">Defender services to review</div></div>
+      <div class="div-kpi"><div class="big">${fmt.pct(maxSpread)}</div><div class="lbl">Largest workload-vs-Defender trend difference</div></div>
+      <div class="div-kpi"><div class="big">${fmt.money2(totalGap)}</div><div class="lbl">Quantified gap where available</div></div>
+    </div>
+    <div class="note" style="margin-bottom:12px;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;">
+      <strong>Top story:</strong> ${escapeHtml(top.headline || '')}
+    </div>
+    ${comparisonHtml}`;
+  overlay.removeAttribute('hidden');
+  const closeBtn = overlay.querySelector('.div-close');
+  if (closeBtn) closeBtn.focus();
+}
+
+function _storyTrendLine(story) {
+  const workloadChange = storyValue(story, 'workloadPctChange', 'workload_pct_change', null);
+  const defenderChange = storyValue(story, 'defenderPctChange', 'defender_pct_change', null);
+  const workloadDelta = storyValue(story, 'workloadDelta', 'workload_delta', null);
+  const defenderDelta = storyValue(story, 'defenderDelta', 'defender_delta', null);
+  let line = 'Workload ' + fmt.pct(workloadChange) + ' (' + fmt.money2(workloadDelta || 0) + ') vs Defender ' +
+    fmt.pct(defenderChange) + ' (' + fmt.money2(defenderDelta || 0) + ')';
+  const spread = storyValue(story, 'momentumSpread', 'momentum_spread', null);
+  if (spread !== null && spread !== undefined && !isNaN(spread)) line += ' · spread ' + fmt.pct(spread);
+  return line;
+}
+
+function _storyMomentumLine(story) {
+  const workloadCats = storyValue(story, 'workloadSl2Categories', 'workload_sl2_categories', []);
+  const cats = Array.isArray(workloadCats) ? workloadCats.filter(Boolean).join(', ') : String(workloadCats || '');
+  const latestWorkload = storyValue(story, 'latestWorkloadAcr', 'latest_workload_acr', null);
+  const latestDefender = storyValue(story, 'latestDefenderAcr', 'latest_defender_acr', null);
+  const parts = [];
+  if (cats) parts.push('Workload: ' + cats);
+  if (latestWorkload !== null || latestDefender !== null) {
+    parts.push('Latest ACR: workload ' + fmt.money2(latestWorkload || 0) + ' vs Defender ' + fmt.money2(latestDefender || 0));
+  }
+  return parts.join(' · ');
+}
+
+function customerSalesStoriesText(name) {
+  return customerDivergenceStories(name).slice(0, 3).map((s, index) => {
+    const plan = storyValue(s, 'planLabel', 'plan_label', 'Unmapped plan');
+    const severity = storyValue(s, 'severity', 'severity', 'Low');
+    const headline = storyValue(s, 'headline', 'headline', '');
+    const action = storyValue(s, 'recommendedAction', 'recommended_action', '');
+    const pricing = storyValue(s, 'pricingDriver', 'pricing_driver', 'Pricing varies by plan');
+    const caveat = storyValue(s, 'caveatText', 'caveat_text', 'Treat as directional until validated.');
+    const evidence = _storyEvidenceList(s).join('; ');
+    return `${index + 1}. ${headline} | ${_storyTypeLabel(s)} / ${severity} | ${plan} | ${_storyTrendLine(s)} | Evidence: ${evidence} | Pricing: ${pricing}. ${caveat} | Action: ${action}`;
+  }).join('\n');
+}
+
+function setCustomerStoriesStatus(idp, message) {
+  const status = document.getElementById((idp || '') + 'cust-sales-stories-status');
+  if (status) status.textContent = message;
+}
+
+function copyCustomerSalesStories(idp, name) {
+  const text = customerSalesStoriesText(name);
+  if (!text) { setCustomerStoriesStatus(idp, 'Nothing to copy'); return; }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => setCustomerStoriesStatus(idp, 'Copied'),
+      () => setCustomerStoriesStatus(idp, 'Copy failed')
+    );
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  setCustomerStoriesStatus(idp, copied ? 'Copied' : 'Copy failed');
+}
+
+function ensureCustomerSalesStoriesCopy() {
+  if (window.__customerSalesStoriesCopyWired) return;
+  window.__customerSalesStoriesCopyWired = true;
+  document.addEventListener('click', function (event) {
+    const btn = event.target.closest('[data-customer-stories-copy]');
+    if (!btn) return;
+    const wrap = btn.closest('[data-customer-stories-name]');
+    copyCustomerSalesStories(btn.getAttribute('data-customer-stories-prefix') || '', wrap ? wrap.getAttribute('data-customer-stories-name') : '');
+  });
+}
+
+function renderCustomerSalesStories(idp, name) {
+  idp = idp || '';
+  const host = document.getElementById(idp + 'cust-sales-stories');
+  if (!host) return;
+  const sa = (typeof DATA !== 'undefined' && DATA) ? DATA.service_attach : null;
+  if (!sa || !Array.isArray(sa.dossiers)) {
+    host.innerHTML = '';
+    host.style.display = 'none';
+    return;
+  }
+  ensureCustomerSalesStoriesCopy();
+  const stories = customerDivergenceStories(name).slice(0, 3);
+  host.style.display = '';
+  if (!stories.length) {
+    host.innerHTML =
+      '<div class="note" style="margin-top:14px;border-left-color:#c8c6c4;background:#faf9f8;color:#605e5c;font-size:12px;">' +
+      'No sales stories detected for this customer yet.</div>';
+    return;
+  }
+  const cards = stories.map(function (s) {
+    const severity = storyValue(s, 'severity', 'severity', 'Low');
+    const sevClass = String(severity).toLowerCase() === 'high' ? 'high' : (String(severity).toLowerCase() === 'medium' ? 'medium' : 'low');
+    const plan = storyValue(s, 'planLabel', 'plan_label', 'Unmapped plan');
+    const headline = storyValue(s, 'headline', 'headline', 'Divergence story');
+    const action = storyValue(s, 'recommendedAction', 'recommended_action', 'Validate Defender attach motion.');
+    const pricing = storyValue(s, 'pricingDriver', 'pricing_driver', 'Pricing driver varies by plan');
+    const caveat = storyValue(s, 'caveatText', 'caveat_text', 'Treat as directional until validated.');
+    const momentum = _storyMomentumLine(s);
+    const evidence = _storyEvidenceList(s);
+    const evidenceHtml = evidence.length
+      ? '<ul style="margin:8px 0 0 18px;padding:0;color:#323130;line-height:1.45;">' + evidence.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul>'
+      : '<div style="font-size:12px;color:#605e5c;margin-top:8px;">No detailed evidence bullets available.</div>';
+    return '<details data-customer-divergence-card style="border:1px solid #edebe9;border-left:4px solid ' + (sevClass === 'high' ? '#d13438' : sevClass === 'medium' ? '#ff8c00' : '#107c10') +
+      ';border-radius:8px;background:#fff;padding:0;">' +
+        '<summary style="list-style:none;cursor:pointer;padding:12px 14px;">' +
+        '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;">' +
+          '<div style="min-width:220px;flex:1 1 320px;">' +
+            '<div style="font-weight:700;color:#201f1e;">' + escapeHtml(headline) + '</div>' +
+            '<div style="font-size:12px;color:#605e5c;margin-top:3px;">' + escapeHtml(plan) + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+            '<span class="tag ' + sevClass + '">' + escapeHtml(_storyTypeLabel(s)) + '</span>' +
+            '<span class="tag ' + sevClass + '">' + escapeHtml(severity) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div style="margin-top:10px;font-size:12px;color:#323130;"><strong>Trend:</strong> ' + escapeHtml(_storyTrendLine(s)) + '</div>' +
+        (momentum ? '<div style="margin-top:4px;font-size:12px;color:#605e5c;">' + escapeHtml(momentum) + '</div>' : '') +
+        '<div style="font-size:12px;color:#605e5c;margin-top:8px;">Open to compare workload trend and mapped Defender trend side-by-side.</div>' +
+        '</summary>' +
+        '<div style="border-top:1px solid #edebe9;padding:0 14px 12px;">' +
+        _storyEvidencePanel(s) +
+        evidenceHtml +
+        '<div style="margin-top:10px;font-size:12px;color:#605e5c;"><strong>Pricing:</strong> ' + escapeHtml(pricing) + '. ' + escapeHtml(caveat) + '</div>' +
+        '<div class="note" style="margin:10px 0 0;border-left-color:#0078d4;background:#f0f6fc;color:#243a5e;font-size:12px;">' +
+          '<strong>Recommended action:</strong> ' + escapeHtml(action) + '</div>' +
+        '</div>' +
+      '</details>';
+  }).join('');
+  host.innerHTML =
+    '<div class="chart-box" style="margin-top:18px;" data-customer-stories-name="' + escapeHtml(name) + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+        '<div><div class="title">Sales Stories</div>' +
+        '<div class="sub">Top Defender attach divergence narratives for this customer.</div></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<button class="import-btn" type="button" data-customer-stories-copy="1" data-customer-stories-prefix="' + escapeHtml(idp) + '">Copy</button>' +
+          '<span id="' + escapeHtml(idp) + 'cust-sales-stories-status" style="font-size:12px;color:#605e5c;"></span>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:10px;">' + cards + '</div>' +
+    '</div>';
+}
+
+function copyDivergenceStories() {
+  const text = divergenceStoriesText();
+  if (!text) { setDivergenceStatus('Nothing to copy'); return; }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => setDivergenceStatus('Copied'),
+      () => setDivergenceStatus('Copy failed')
+    );
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  setDivergenceStatus(copied ? 'Copied' : 'Copy failed');
+}
+
+function downloadDivergenceStoriesCsv() {
+  const rows = visibleDivergenceCustomerRows();
+  if (!rows.length) { setDivergenceStatus('Nothing to download'); return; }
+  const headers = ['Customer', 'Severity', 'Account ACR/mo', 'Divergence services', 'Top Defender plan', 'Top workload change', 'Top Defender change', 'Largest trend difference', 'Top recommended action', 'Top conversation angle'];
+  const lines = [
+    headers.map(csvCell).join(','),
+    ...rows.map(r => {
+      const top = r.topStory || {};
+      return [
+        r.customer,
+        r.severity,
+        r.accountAcr,
+        r.storyCount,
+        top.plan || '',
+        top.workloadChange,
+        top.defenderChange,
+        r.maxSpread,
+        top.recommendedAction || '',
+        top.headline || '',
+      ].map(csvCell).join(',');
+    })
+  ];
+  const blob = new Blob([lines.join('\r\n')], {type: 'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'defender-divergence-stories.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setDivergenceStatus('CSV downloaded');
 }
 
 function hasServiceAttachData() {
@@ -2016,6 +2832,7 @@ function renderOpportunityHeatmap() {
   ensureDfcThresholdControl();
   ensureActionQueueShell();
   ensureMergedQueueControls();
+  renderDivergenceStories();
   updateActionQueueMetrics();
   const thresholdLabel = fmtThreshold(dfcShareThreshold);
   const slMode = hasServiceAttachData();
@@ -2201,8 +3018,8 @@ function slDecorateOverview() {
     note.innerHTML = '<strong>How to read this:</strong> Each account buys Azure workloads '
       + '(containers, SQL, App Service, storage, and more) without the matching Defender for Cloud plan switched on. '
       + 'The cards size the total monthly and annualized attach gap across the book, how many accounts are affected, '
-      + 'and which Defender service carries the largest gap. Use the <em>Opportunity Matrix</em> to work the ranked list '
-      + 'and a customer breakdown for the per-service talk track. To refresh, click <em>Import new Excel</em> and pick your latest export.';
+      + 'and which Defender service carries the largest gap. Use <em>Service Attach Opportunities</em> for workloads customers buy but do not protect, '
+      + 'and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart. To refresh, click <em>Import new Excel</em> and pick your latest export.';
   }
 
   // Chart 1: attach gap by Defender service (non-clickable plan bars).
@@ -2498,6 +3315,7 @@ function _ensureCustOverlay() {
       '<div class="cards" id="m-cust-cards"></div>' +
       '<div class="note" id="m-cust-signal"></div>' +
       '<div id="m-cust-attach"></div>' +
+      '<div id="m-cust-sales-stories"></div>' +
       '<div class="chart-box">' +
         '<div class="title">Product breakdown</div>' +
         '<div class="sub">Azure service categories ranked by current monthly ACR. Click a category to reveal the Service Level 4 details from the workbook.</div>' +

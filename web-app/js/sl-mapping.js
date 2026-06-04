@@ -160,6 +160,13 @@
       momentumCap: 1.0,
       priorityMomentumEps: 0.02,
       priorityCoverageMedium: 0.5,
+      divergenceStoryMinWorkloadAcr: 1000.0,
+      divergenceStoryMinStartWorkloadAcr: 1000.0,
+      divergenceStoryNewWorkloadMaxStartAcr: 100.0,
+      divergenceStoryMinWorkloadGrowth: 0.10,
+      divergenceStoryMaterialLag: 0.15,
+      divergenceStoryFlatDefenderGrowth: 0.02,
+      divergenceStoryDefenderRegression: -0.05,
     };
   }
 

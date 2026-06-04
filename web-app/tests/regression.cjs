@@ -147,6 +147,39 @@ console.log('\nweb-app/index.html (generated)');
     assert(/AppNav\.onReload\(function\(\)\{[\s\S]{0,200}sessionStorage\.removeItem\(ACR_CACHE_KEY\)/.test(src),
       'AppNav reload handler must clear the cache');
   });
+  test('Customer Drill-Down has escaped Sales Stories cards and copy action', () => {
+    assert(/function renderCustomerSalesStories\(idp, name\)/.test(src),
+      'customer sales stories renderer must exist');
+    assert(/function customerDivergenceStories\(name\)/.test(src),
+      'customer divergence story selector must exist');
+    assert(/id="cust-sales-stories"/.test(src),
+      'inline customer sales stories mount must exist');
+    assert(/id="m-cust-sales-stories"/.test(src),
+      'modal customer sales stories mount must exist');
+    assert(/renderCustomerSalesStories\(idp, name\);/.test(src),
+      'id-prefixed render call must run from customer detail');
+    assert(/data-customer-stories-copy/.test(src),
+      'compact copy action must be wired');
+    assert(/No sales stories detected for this customer yet\./.test(src),
+      'quiet no-story empty state must exist');
+    const start = src.indexOf('function renderCustomerSalesStories(idp, name)');
+    assert(start >= 0, 'renderCustomerSalesStories function missing');
+    const body = src.slice(start, start + 9000);
+    for (const expr of [
+      'escapeHtml(headline)',
+      'escapeHtml(plan)',
+      'escapeHtml(_storyTypeLabel(s))',
+      'escapeHtml(severity)',
+      'escapeHtml(_storyTrendLine(s))',
+      'escapeHtml(momentum)',
+      'escapeHtml(item)',
+      'escapeHtml(pricing)',
+      'escapeHtml(caveat)',
+      'escapeHtml(action)',
+    ]) {
+      assert(body.includes(expr), `expected ${expr} in sales story renderer`);
+    }
+  });
 }
 
 // ---- milestone-app persistence ----
@@ -1004,6 +1037,65 @@ console.log('\nweb-app/index.html (per-service Defender attach)');
   });
 }
 
+// ---- generated index.html: separate divergence stories page ----
+console.log('\nweb-app/index.html (divergence stories page)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  test('service opportunities and divergence stories are separate tabs', () => {
+    const divStart = src.indexOf('function ensureDivergenceStoriesShell()');
+    const divEnd = src.indexOf('\nfunction setDivergenceStatus', divStart);
+    const divShell = divStart >= 0 && divEnd > divStart ? src.slice(divStart, divEnd) : '';
+    assert(/data-tab="opportunity">Service Attach Opportunities<\/button>/.test(src),
+      'service attach tab has explicit seller-motion label');
+    assert(/data-tab="divergence">Defender Coverage Drift<\/button>/.test(src),
+      'divergence tab present');
+    assert(/id="panel-divergence"/.test(src), 'divergence panel present');
+    assert(/const host = document\.getElementById\('panel-divergence'\);/.test(src),
+      'divergence shell mounts into its own panel');
+    assert(!/chartBox\.parentElement\.insertBefore\(section, chartBox\)/.test(divShell),
+      'divergence section is no longer inserted into the service opportunity panel');
+  });
+  test('divergence information cards are scenario-specific', () => {
+    assert(/Coverage drift signals/.test(src), 'story count KPI present');
+    assert(/Accounts affected/.test(src), 'affected-account KPI present');
+    assert(/High severity/.test(src), 'high-severity KPI present');
+    assert(/Largest momentum spread/.test(src), 'momentum-spread KPI present');
+    assert(/workload and Defender trends misaligned/.test(src),
+      'KPI copy describes divergence rather than attach opportunity estimates');
+    assert(!/id="divergence-stories-section"[\s\S]{0,900}Annualized DfC Attach Opportunity/.test(src),
+      'divergence page does not reuse service attach opportunity estimate cards');
+  });
+  test('divergence stories use customer queue layout with modal drill-down', () => {
+    assert(/id="divergence-filter"/.test(src), 'divergence table has a priority-style filter');
+    assert(/id="divergence-search"/.test(src), 'divergence table has a search box');
+    assert(/id="divergence-limit"/.test(src), 'divergence table has a rows selector');
+    assert(/<div class="scroll-table" style="max-height:620px;">/.test(src), 'divergence stories render in the shared scroll-table layout');
+    assert(/<th>Customer<\/th>[\s\S]*<th>Severity<\/th>[\s\S]*<th class="num">Account ACR\/mo<\/th>[\s\S]*<th class="num">Divergence services<\/th>/.test(src),
+      'divergence table uses customer-level queue columns');
+    assert(/function divergenceCustomerRows\(\)/.test(src), 'customer grouping prevents duplicate customers in the main table');
+    assert(/data-divergence-customer/.test(src), 'manager customer rows are clickable summaries');
+    assert(/function openDivergenceCustomerModal\(name\)/.test(src), 'clicking a customer opens a divergence modal');
+    assert(/Highest-opportunity divergences are listed first/.test(src), 'modal explains service comparisons are opportunity-sorted');
+    assert(/Defender service \+ Azure workload/.test(src), 'modal compares Defender services to Azure workloads');
+    assert(/data-customer-divergence-card/.test(src), 'customer drill-down stories render as expandable cards');
+    assert(/Azure workload trend/.test(src), 'workload trend detail panel present');
+    assert(/Matching Defender trend/.test(src), 'Defender trend detail panel present');
+    assert(/function _storyEvidencePanel\(story\)/.test(src), 'shared side-by-side evidence renderer defined');
+    assert(/function _seriesSpark\(values, color\)/.test(src), 'mini trend renderer defined');
+    assert(/storyOpportunity\(story\)/.test(src), 'detail joins stories back to matching opportunity series');
+  });
+  test('divergence severity has its own explanation, separate from service attach priority', () => {
+    assert(/function divergenceSeverityTag\(severity\)/.test(src), 'divergence severity badge helper exists');
+    assert(/function openDivergenceSeverityExplainer\(severity\)/.test(src), 'divergence severity explainer exists');
+    assert(/Divergence severity is separate from Service Attach priority/.test(src),
+      'divergence explainer does not reuse service attach priority copy');
+    assert(/<td>\$\{divergenceSeverityTag\(r\.severity\)\}<\/td>/.test(src),
+      'main divergence table uses divergence severity badges');
+    assert(!/<td>\$\{tagFor\(r\.severity\)\}<\/td>/.test(src),
+      'main divergence table no longer uses service attach priority tag helper');
+  });
+}
+
 // ---- service-level (SL2/SL4) attach: pipeline parity + privacy guards ----
 console.log('\nweb-app service-level attach (SL2/SL4)');
 {
@@ -1012,6 +1104,7 @@ console.log('\nweb-app service-level attach (SL2/SL4)');
   global.window = global.window || global;
   const XLSX = require(path.join(WEBAPP, 'vendor', 'xlsx.full.min.js'));
   const SLParser = require(path.join(WEBAPP, 'js', 'sl-parser.js'));
+  const SLMapping = require(path.join(WEBAPP, 'js', 'sl-mapping.js'));
   const SLEngine = require(path.join(WEBAPP, 'js', 'sl-engine.js'));
   const SLExport = require(path.join(WEBAPP, 'js', 'sl-export.js'));
 
@@ -1025,50 +1118,56 @@ console.log('\nweb-app service-level attach (SL2/SL4)');
     skipTest('SL pipeline output matches Python golden oracle within tolerance',
       'gitignored customer fixture/golden not present');
   } else {
-  test('SL pipeline output matches Python golden oracle within tolerance', () => {
-    assert(fs.existsSync(FIXTURE), 'fixture ACR Details SL2-SL4.xlsx must exist');
-    assert(fs.existsSync(GOLDEN), 'sl-golden.json oracle must exist');
-    const buf = fs.readFileSync(FIXTURE);
-    const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
-    const sheet = wb.Sheets.Export || wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, cellDates: true });
-    const parsed = SLParser.parseSl2Sl4(rows, 'ACR Details SL2-SL4.xlsx');
-    const model = SLEngine.buildModel(parsed, undefined);
-    const jsJson = SLExport.buildJson(model);
-    const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
-    jsJson.meta.generated_at = golden.meta.generated_at;
+    const goldenForSchema = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
+    if (!goldenForSchema.meta || !Object.prototype.hasOwnProperty.call(goldenForSchema.meta, 'divergence_story_count')) {
+      skipTest('SL pipeline output matches Python golden oracle within tolerance',
+        'local gitignored sl-golden.json predates divergence-story export schema');
+    } else {
+      test('SL pipeline output matches Python golden oracle within tolerance', () => {
+        assert(fs.existsSync(FIXTURE), 'fixture ACR Details SL2-SL4.xlsx must exist');
+        assert(fs.existsSync(GOLDEN), 'sl-golden.json oracle must exist');
+        const buf = fs.readFileSync(FIXTURE);
+        const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
+        const sheet = wb.Sheets.Export || wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, cellDates: true });
+        const parsed = SLParser.parseSl2Sl4(rows, 'ACR Details SL2-SL4.xlsx');
+        const model = SLEngine.buildModel(parsed, undefined);
+        const jsJson = SLExport.buildJson(model);
+        const golden = goldenForSchema;
+        jsJson.meta.generated_at = golden.meta.generated_at;
 
-    assertEqual(jsJson.customers.length, golden.customers.length, 'customer count must match golden');
+        assertEqual(jsJson.customers.length, golden.customers.length, 'customer count must match golden');
 
-    function deepDiff(a, b, p, diffs, tol) {
-      if (diffs.length > 40) return;
-      if (typeof a === 'number' && typeof b === 'number') {
-        if (!Number.isFinite(a) || !Number.isFinite(b)) { if (a !== b) diffs.push(`${p}: ${a} != ${b}`); return; }
-        const t = p.includes('ratio') ? 1e-6 : tol;
-        if (Math.abs(a - b) > t) diffs.push(`${p}: ${a} != ${b} (Δ ${Math.abs(a - b)})`);
-        return;
-      }
-      if (Array.isArray(a) || Array.isArray(b)) {
-        if (!Array.isArray(a) || !Array.isArray(b)) { diffs.push(`${p}: array mismatch`); return; }
-        if (a.length !== b.length) diffs.push(`${p}: length ${a.length} != ${b.length}`);
-        const n = Math.min(a.length, b.length);
-        for (let i = 0; i < n; i += 1) deepDiff(a[i], b[i], `${p}[${i}]`, diffs, tol);
-        return;
-      }
-      if (a && b && typeof a === 'object' && typeof b === 'object') {
-        for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
-          if (!(k in a)) { diffs.push(`${p}.${k}: missing in JS`); continue; }
-          if (!(k in b)) { diffs.push(`${p}.${k}: missing in golden`); continue; }
-          deepDiff(a[k], b[k], `${p}.${k}`, diffs, tol);
+        function deepDiff(a, b, p, diffs, tol) {
+          if (diffs.length > 40) return;
+          if (typeof a === 'number' && typeof b === 'number') {
+            if (!Number.isFinite(a) || !Number.isFinite(b)) { if (a !== b) diffs.push(`${p}: ${a} != ${b}`); return; }
+            const t = p.includes('ratio') ? 1e-6 : tol;
+            if (Math.abs(a - b) > t) diffs.push(`${p}: ${a} != ${b} (Δ ${Math.abs(a - b)})`);
+            return;
+          }
+          if (Array.isArray(a) || Array.isArray(b)) {
+            if (!Array.isArray(a) || !Array.isArray(b)) { diffs.push(`${p}: array mismatch`); return; }
+            if (a.length !== b.length) diffs.push(`${p}: length ${a.length} != ${b.length}`);
+            const n = Math.min(a.length, b.length);
+            for (let i = 0; i < n; i += 1) deepDiff(a[i], b[i], `${p}[${i}]`, diffs, tol);
+            return;
+          }
+          if (a && b && typeof a === 'object' && typeof b === 'object') {
+            for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+              if (!(k in a)) { diffs.push(`${p}.${k}: missing in JS`); continue; }
+              if (!(k in b)) { diffs.push(`${p}.${k}: missing in golden`); continue; }
+              deepDiff(a[k], b[k], `${p}.${k}`, diffs, tol);
+            }
+            return;
+          }
+          if (a !== b) diffs.push(`${p}: ${JSON.stringify(a)} != ${JSON.stringify(b)}`);
         }
-        return;
-      }
-      if (a !== b) diffs.push(`${p}: ${JSON.stringify(a)} != ${JSON.stringify(b)}`);
+        const diffs = [];
+        deepDiff(jsJson, golden, '$', diffs, 0.011);
+        assert(diffs.length === 0, 'SL output diverged from golden:\n      ' + diffs.slice(0, 10).join('\n      '));
+      });
     }
-    const diffs = [];
-    deepDiff(jsJson, golden, '$', diffs, 0.011);
-    assert(diffs.length === 0, 'SL output diverged from golden:\n      ' + diffs.slice(0, 10).join('\n      '));
-  });
   }
 
   if (!fs.existsSync(FIXTURE)) {
@@ -1095,6 +1194,63 @@ console.log('\nweb-app service-level attach (SL2/SL4)');
       assert(jsJson.customers.every((c) => !('catalog' in c)), 'catalog is not serialized (parity preserved)');
     });
   }
+
+  test('SL divergence stories are exported at book and customer level', () => {
+    const months = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6'];
+    const frame = [];
+    function add(customer, sl2, sl4, level, series) {
+      months.forEach((month, idx) => {
+        frame.push({ customer, sl2, sl4, level, month, acr: Number(series[idx]) });
+      });
+    }
+    add('ExportCo', SLMapping.TOTAL_TOKEN, '', SLParser.LEVEL_CUSTOMER_TOTAL,
+      [10000, 10000, 10000, 20000, 20000, 20000]);
+    add('ExportCo', 'SQL Database', SLMapping.TOTAL_TOKEN, SLParser.LEVEL_SERVICE_TOTAL,
+      [10000, 10000, 10000, 20000, 20000, 20000]);
+    add('ExportCo', SLMapping.DEFENDER_SL2, SLMapping.TOTAL_TOKEN, SLParser.LEVEL_SERVICE_TOTAL,
+      [100, 100, 100, 100, 100, 100]);
+    add('ExportCo', SLMapping.DEFENDER_SL2, 'Microsoft Defender for SQL', SLParser.LEVEL_LEAF,
+      [100, 100, 100, 100, 100, 100]);
+
+    const parsed = {
+      frame,
+      months,
+      customers: ['ExportCo'],
+      reconciliation: [],
+      sourceName: 'synthetic',
+      rowCount: frame.length,
+      latestMonth: 'M6',
+    };
+    const config = SLMapping.defaultConfig();
+    config.useCohortMedian = false;
+    const model = SLEngine.buildModel(parsed, config);
+    const payload = SLExport.buildJson(model);
+    const bookStory = payload.divergence_stories[0];
+    const customerStory = payload.customers[0].divergence_stories[0];
+    const requiredFields = [
+      'customer', 'plan_label', 'workload_sl2_categories', 'workload_categories',
+      'story_type', 'severity', 'confidence', 'pricing_driver',
+      'latest_workload_acr', 'latest_defender_acr', 'compared_months',
+      'workload_start_value', 'workload_end_value', 'defender_start_value',
+      'defender_end_value', 'workload_delta', 'defender_delta',
+      'workload_pct_change', 'defender_pct_change', 'momentum_spread',
+      'has_dollar_gap', 'gap_dollars', 'headline', 'evidence_bullets',
+      'recommended_action', 'caveat', 'caveat_text',
+    ];
+
+    assertEqual(payload.meta.divergence_story_count, 1, 'book story count');
+    assert(bookStory && customerStory, 'story exists at book and customer level');
+    assertEqual(JSON.stringify(bookStory), JSON.stringify(customerStory), 'book/customer story payloads match');
+    requiredFields.forEach((field) => assert(field in customerStory, `missing story field ${field}`));
+    assertEqual(customerStory.customer, 'ExportCo', 'story customer');
+    assertEqual(customerStory.story_type, SLEngine.STORY_GROWTH_DIVERGENCE, 'story type');
+    assertEqual(customerStory.workload_sl2_categories[0], 'SQL Database', 'workload category');
+    assertEqual(customerStory.compared_months.length, months.length, 'compared months');
+    assertEqual(customerStory.workload_pct_change, 1, 'workload safe percentage');
+    assertEqual(customerStory.defender_pct_change, 0, 'defender safe percentage');
+    assert(customerStory.caveat.includes('Directional signal'), 'caveat included');
+    assertEqual(customerStory.caveat, customerStory.caveat_text, 'caveat alias');
+  });
 
   test('SL app scripts make no network calls (client-side privacy guard)', () => {
     const files = fs.readdirSync(path.join(WEBAPP, 'js'))

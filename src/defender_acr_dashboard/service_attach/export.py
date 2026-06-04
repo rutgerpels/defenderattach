@@ -14,7 +14,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from .engine import BookModel, CustomerDossier, Opportunity
+from .engine import BookModel, CustomerDossier, DivergenceStory, Opportunity
 
 
 def _safe(value: Any) -> Any:
@@ -49,6 +49,45 @@ def _opp_dict(opp: Opportunity) -> Dict[str, Any]:
     }
 
 
+def _story_dict(story: DivergenceStory) -> Dict[str, Any]:
+    payload = {
+        "customer": story.customer,
+        "plan_label": story.plan_label,
+        "workload_sl2_categories": list(story.workload_sl2_categories),
+        "workload_categories": list(story.workload_sl2_categories),
+        "story_type": story.story_type,
+        "severity": story.severity,
+        "confidence": story.confidence,
+        "pricing_driver": story.pricing_driver,
+        "latest_workload_acr": _safe(story.latest_workload_acr),
+        "latest_defender_acr": _safe(story.latest_defender_acr),
+        "compared_months": list(story.compared_months),
+        "workload_start_value": _safe(story.workload_start_value),
+        "workload_end_value": _safe(story.workload_end_value),
+        "defender_start_value": _safe(story.defender_start_value),
+        "defender_end_value": _safe(story.defender_end_value),
+        "workload_delta": _safe(story.workload_delta),
+        "defender_delta": _safe(story.defender_delta),
+        "workload_pct_change": _safe(story.workload_pct_change),
+        "defender_pct_change": _safe(story.defender_pct_change),
+        "momentum_spread": _safe(story.momentum_spread),
+        "has_dollar_gap": story.has_dollar_gap,
+        "gap_dollars": _safe(story.gap_dollars),
+        "headline": story.headline,
+        "evidence_bullets": list(story.evidence_bullets),
+        "recommended_action": story.recommended_action,
+        "caveat": story.caveat_text,
+        "caveat_text": story.caveat_text,
+    }
+    talk_track = getattr(story, "talk_track", None)
+    if talk_track is not None:
+        payload["talk_track"] = talk_track
+    summary = getattr(story, "summary", None)
+    if summary is not None:
+        payload["summary"] = summary
+    return payload
+
+
 def _customer_dict(d: CustomerDossier) -> Dict[str, Any]:
     return {
         "customer": d.customer,
@@ -69,6 +108,7 @@ def _customer_dict(d: CustomerDossier) -> Dict[str, Any]:
             _opp_dict(o)
             for o in sorted(d.opportunities, key=lambda x: x.blended_score, reverse=True)
         ],
+        "divergence_stories": [_story_dict(s) for s in d.divergence_stories],
         "foundational": [
             {"plan_label": f.plan_label, "actual": _safe(f.actual), "present": f.present}
             for f in d.foundational
@@ -91,6 +131,7 @@ def build_json(model: BookModel) -> Dict[str, Any]:
             "total_eligible_workload_acr": _safe(model.total_eligible_workload_acr),
             "total_dfc_acr": _safe(model.total_dfc_acr),
             "total_gap_dollars": _safe(model.total_gap_dollars),
+            "divergence_story_count": len(model.divergence_stories),
             "reconciliation_ok": all(
                 i.rel_diff <= 0.01 for i in model.reconciliation
             ),
@@ -103,8 +144,30 @@ def build_json(model: BookModel) -> Dict[str, Any]:
                 "min_denominator": model.config.min_denominator,
                 "attach_threshold": model.config.attach_threshold,
                 "use_cohort_median": model.config.use_cohort_median,
+                "divergence_story_min_workload_acr": (
+                    model.config.divergence_story_min_workload_acr
+                ),
+                "divergence_story_min_start_workload_acr": (
+                    model.config.divergence_story_min_start_workload_acr
+                ),
+                "divergence_story_new_workload_max_start_acr": (
+                    model.config.divergence_story_new_workload_max_start_acr
+                ),
+                "divergence_story_min_workload_growth": (
+                    model.config.divergence_story_min_workload_growth
+                ),
+                "divergence_story_material_lag": (
+                    model.config.divergence_story_material_lag
+                ),
+                "divergence_story_flat_defender_growth": (
+                    model.config.divergence_story_flat_defender_growth
+                ),
+                "divergence_story_defender_regression": (
+                    model.config.divergence_story_defender_regression
+                ),
             },
         },
+        "divergence_stories": [_story_dict(s) for s in model.divergence_stories],
         "customers": [_customer_dict(d) for d in model.dossiers],
     }
 

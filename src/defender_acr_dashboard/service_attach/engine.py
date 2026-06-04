@@ -42,6 +42,18 @@ from .parser import (
 
 SIGNAL_ATTACH = "attach"
 SIGNAL_EXPAND = "expand"
+SIGNAL_COVERED = "covered"
+
+STORY_GROWTH_DIVERGENCE = "growth_divergence"
+STORY_DEFENDER_REGRESSION = "defender_regression"
+STORY_NEW_WORKLOAD_NO_DEFENDER = "new_workload_no_defender"
+
+DIVERGENCE_STORY_CAVEAT = (
+    "Directional signal based on ACR trend comparison. Defender for Cloud pricing "
+    "can be vCore, resource, transaction, or unit based rather than a fixed "
+    "percentage of workload ACR; validate usage, plan scope, and entitlement "
+    "before treating this as a commercial forecast."
+)
 
 
 @dataclass
@@ -89,6 +101,37 @@ class FoundationalCoverage:
 
 
 @dataclass
+class DivergenceStory:
+    customer: str
+    plan_label: str
+    workload_sl2_categories: List[str]
+    story_type: str
+    severity: str
+    confidence: str
+    pricing_driver: str
+
+    latest_workload_acr: float
+    latest_defender_acr: float
+    compared_months: List[str]
+    workload_start_value: float
+    workload_end_value: float
+    defender_start_value: float
+    defender_end_value: float
+    workload_delta: float
+    defender_delta: float
+    workload_pct_change: Optional[float]
+    defender_pct_change: Optional[float]
+    momentum_spread: float
+    has_dollar_gap: bool
+    gap_dollars: float
+
+    headline: str
+    evidence_bullets: List[str]
+    recommended_action: str
+    caveat_text: str
+
+
+@dataclass
 class SpendCategory:
     sl2: str
     acr: float
@@ -104,6 +147,7 @@ class CustomerDossier:
     attach_ratio: Optional[float]
 
     opportunities: List[Opportunity] = field(default_factory=list)
+    divergence_stories: List[DivergenceStory] = field(default_factory=list)
     foundational: List[FoundationalCoverage] = field(default_factory=list)
     top_spend: List[SpendCategory] = field(default_factory=list)
 
@@ -130,6 +174,7 @@ class BookModel:
     total_eligible_workload_acr: float = 0.0
     total_dfc_acr: float = 0.0
     total_gap_dollars: float = 0.0
+    divergence_stories: List[DivergenceStory] = field(default_factory=list)
 
     @property
     def book_attach_ratio(self) -> Optional[float]:
@@ -161,6 +206,7 @@ def _rolling_growth(series: List[float], window: int, cap: float) -> tuple[float
     Returns (growth, grew_from_zero). Growth is clipped to +/- ``cap``.
     """
 
+    window = max(1, window)
     n = len(series)
     if n < 2 * window:
         # Not enough history for a stable two-window comparison.
@@ -224,12 +270,13 @@ def _cohort_ratios(
     return ratios
 
 
-def _build_opportunity(
+def _build_plan_candidate(
     plan: WorkloadPlan,
     frame: pd.DataFrame,
     months: List[str],
     config: AttachConfig,
     benchmark_ratio: float,
+    include_covered: bool = False,
 ) -> Optional[Opportunity]:
     workload_series = _series_for(
         frame, months, plan.workload_sl2, None, LEVEL_SERVICE_TOTAL
@@ -270,6 +317,8 @@ def _build_opportunity(
         signal = SIGNAL_ATTACH
     elif has_dollar_gap and gap_dollars > 0:
         signal = SIGNAL_EXPAND
+    elif include_covered:
+        signal = SIGNAL_COVERED
     else:
         return None  # Attached and at/above benchmark -> covered.
 
@@ -318,6 +367,16 @@ def _build_opportunity(
     )
     opp.priority, opp.priority_reason, opp.priority_rank = _classify_priority(opp, config)
     return opp
+
+
+def _build_opportunity(
+    plan: WorkloadPlan,
+    frame: pd.DataFrame,
+    months: List[str],
+    config: AttachConfig,
+    benchmark_ratio: float,
+) -> Optional[Opportunity]:
+    return _build_plan_candidate(plan, frame, months, config, benchmark_ratio)
 
 
 def _classify_priority(opp: Opportunity, config: AttachConfig) -> tuple:
@@ -369,6 +428,210 @@ def _opener(customer: str, opp: Opportunity) -> str:
     )
 
 
+def _comparison_window(
+    series: List[float], months: List[str], window: int
+) -> tuple[List[str], float, float]:
+    if not series:
+        return [], 0.0, 0.0
+    safe_window = max(1, min(window, len(series)))
+    if len(series) >= 2 * safe_window:
+        start_values = series[-2 * safe_window : -safe_window]
+        end_values = series[-safe_window:]
+        compared = months[-2 * safe_window :] if months else []
+    else:
+        start_values = [series[0]]
+        end_values = [series[-1]]
+        compared = [months[0], months[-1]] if len(months) > 1 else list(months)
+    start = sum(start_values) / len(start_values) if start_values else 0.0
+    end = sum(end_values) / len(end_values) if end_values else 0.0
+    return compared, start, end
+
+
+def _safe_pct_change(start: float, end: float) -> Optional[float]:
+    if start <= 0:
+        return None
+    return (end - start) / start
+
+
+def _format_pct(value: Optional[float]) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value * 100:.1f}%"
+
+
+def _story_severity(story_type: str, opp: Opportunity) -> str:
+    if story_type == STORY_NEW_WORKLOAD_NO_DEFENDER:
+        return "High"
+    if story_type == STORY_DEFENDER_REGRESSION and opp.defender_growth <= -0.20:
+        return "High"
+    if opp.defender_zero_with_workload_growth or opp.momentum_raw >= 0.30:
+        return "High"
+    return "Medium"
+
+
+def _story_headline(customer: str, story_type: str, opp: Opportunity) -> str:
+    workload = ", ".join(opp.workload_sl2_present) or "mapped workload"
+    if story_type == STORY_NEW_WORKLOAD_NO_DEFENDER:
+        return (
+            f"{customer} has material new {workload} spend with no detected "
+            f"{opp.plan_label} attach."
+        )
+    if story_type == STORY_DEFENDER_REGRESSION:
+        return (
+            f"{customer}'s {opp.plan_label} ACR is declining while {workload} "
+            "is stable or growing."
+        )
+    return (
+        f"{customer}'s {workload} growth is outpacing {opp.plan_label} attach."
+    )
+
+
+def _recommended_action(story_type: str, opp: Opportunity) -> str:
+    workload = ", ".join(opp.workload_sl2_present) or "the workload"
+    if story_type == STORY_NEW_WORKLOAD_NO_DEFENDER:
+        return (
+            f"Confirm ownership of {workload}, validate Defender plan eligibility, "
+            f"and position {opp.plan_label} enablement for the newly material workload."
+        )
+    if story_type == STORY_DEFENDER_REGRESSION:
+        return (
+            f"Review whether {opp.plan_label} coverage was removed, scoped down, "
+            "or displaced by a billing change while workload consumption continued."
+        )
+    return (
+        f"Use the workload momentum in {workload} to discuss whether "
+        f"{opp.plan_label} coverage is keeping pace with deployment growth."
+    )
+
+
+def detect_divergence_stories(
+    customer: str, opportunities: List[Opportunity], months: List[str], config: AttachConfig
+) -> List[DivergenceStory]:
+    """Emit conservative trend stories from already-computed opportunities."""
+
+    stories: List[DivergenceStory] = []
+    window = max(1, config.momentum_window)
+    full_history = len(months) >= 2 * window
+    if not full_history:
+        return stories
+
+    for opp in opportunities:
+        if opp.workload_acr < config.divergence_story_min_workload_acr:
+            continue
+
+        compared, workload_start, workload_end = _comparison_window(
+            opp.workload_series, months, window
+        )
+        _, defender_start, defender_end = _comparison_window(
+            opp.defender_series, months, window
+        )
+
+        story_type: Optional[str] = None
+        workload_material = workload_end >= config.divergence_story_min_workload_acr
+        defender_below_attach = (
+            defender_end <= config.attach_threshold
+            and opp.defender_actual <= config.attach_threshold
+        )
+        workload_new = (
+            workload_start <= config.divergence_story_new_workload_max_start_acr
+            and workload_material
+        )
+        workload_has_stable_baseline = (
+            workload_start >= config.divergence_story_min_start_workload_acr
+        )
+        workload_stable_or_growing = opp.workload_growth >= 0
+        defender_lag_is_material = (
+            opp.momentum_raw >= config.divergence_story_material_lag
+        )
+
+        if workload_new and defender_below_attach:
+            story_type = STORY_NEW_WORKLOAD_NO_DEFENDER
+        elif (
+            workload_has_stable_baseline
+            and opp.defender_growth <= config.divergence_story_defender_regression
+            and workload_stable_or_growing
+        ):
+            story_type = STORY_DEFENDER_REGRESSION
+        elif (
+            workload_has_stable_baseline
+            and opp.workload_growth >= config.divergence_story_min_workload_growth
+            and defender_lag_is_material
+            and (
+                opp.defender_growth <= config.divergence_story_flat_defender_growth
+                or opp.defender_growth < opp.workload_growth
+                or opp.defender_zero_with_workload_growth
+            )
+        ):
+            story_type = STORY_GROWTH_DIVERGENCE
+
+        if story_type is None:
+            continue
+
+        workload_delta = workload_end - workload_start
+        defender_delta = defender_end - defender_start
+        workload_pct = _safe_pct_change(workload_start, workload_end)
+        defender_pct = _safe_pct_change(defender_start, defender_end)
+        severity = _story_severity(story_type, opp)
+        gap_note = (
+            f"Estimated benchmark gap: ${opp.gap_dollars:,.0f}/mo."
+            if opp.has_dollar_gap
+            else "No fixed dollar benchmark is used for this plan."
+        )
+        evidence = [
+            (
+                f"Workload ACR moved from ${workload_start:,.0f} to "
+                f"${workload_end:,.0f} ({_format_pct(workload_pct)})."
+            ),
+            (
+                f"Defender ACR moved from ${defender_start:,.0f} to "
+                f"${defender_end:,.0f} ({_format_pct(defender_pct)})."
+            ),
+            f"Momentum spread is {_format_pct(opp.momentum_raw)}.",
+            gap_note,
+        ]
+
+        stories.append(
+            DivergenceStory(
+                customer=customer,
+                plan_label=opp.plan_label,
+                workload_sl2_categories=list(opp.workload_sl2_present),
+                story_type=story_type,
+                severity=severity,
+                confidence=opp.confidence,
+                pricing_driver=opp.pricing_driver,
+                latest_workload_acr=opp.workload_acr,
+                latest_defender_acr=opp.defender_actual,
+                compared_months=list(compared),
+                workload_start_value=workload_start,
+                workload_end_value=workload_end,
+                defender_start_value=defender_start,
+                defender_end_value=defender_end,
+                workload_delta=workload_delta,
+                defender_delta=defender_delta,
+                workload_pct_change=workload_pct,
+                defender_pct_change=defender_pct,
+                momentum_spread=opp.momentum_raw,
+                has_dollar_gap=opp.has_dollar_gap,
+                gap_dollars=opp.gap_dollars if opp.has_dollar_gap else 0.0,
+                headline=_story_headline(customer, story_type, opp),
+                evidence_bullets=evidence,
+                recommended_action=_recommended_action(story_type, opp),
+                caveat_text=DIVERGENCE_STORY_CAVEAT,
+            )
+        )
+
+    severity_rank = {"High": 0, "Medium": 1}
+    return sorted(
+        stories,
+        key=lambda s: (
+            severity_rank.get(s.severity, 9),
+            -s.gap_dollars,
+            -s.latest_workload_acr,
+            s.plan_label,
+        ),
+    )
+
+
 def build_model(parsed: ParsedData, config: Optional[AttachConfig] = None) -> BookModel:
     config = config or default_config()
     frame = parsed.frame
@@ -387,6 +650,7 @@ def build_model(parsed: ParsedData, config: Optional[AttachConfig] = None) -> Bo
 
     dossiers: List[CustomerDossier] = []
     all_opps: List[Opportunity] = []
+    divergence_candidates_by_customer: Dict[str, List[Opportunity]] = {}
 
     for customer in parsed.customers:
         cust = frame[frame["customer"] == customer]
@@ -432,6 +696,7 @@ def build_model(parsed: ParsedData, config: Optional[AttachConfig] = None) -> Bo
 
         present_eligible = 0
         uncovered_eligible = 0
+        divergence_candidates: List[Opportunity] = []
         for plan in WORKLOAD_PLANS:
             workload_now = _series_for(
                 cust, months, plan.workload_sl2, None, LEVEL_SERVICE_TOTAL
@@ -450,6 +715,13 @@ def build_model(parsed: ParsedData, config: Optional[AttachConfig] = None) -> Bo
                 opp.opener = _opener(customer, opp)
                 dossier.opportunities.append(opp)
                 all_opps.append(opp)
+                divergence_candidates.append(opp)
+            else:
+                covered_candidate = _build_plan_candidate(
+                    plan, cust, months, config, ratio, include_covered=True
+                )
+                if covered_candidate is not None:
+                    divergence_candidates.append(covered_candidate)
 
         dossier.present_eligible_count = present_eligible
         dossier.uncovered_eligible_count = uncovered_eligible
@@ -484,9 +756,17 @@ def build_model(parsed: ParsedData, config: Optional[AttachConfig] = None) -> Bo
             SpendCategory(sl2=r.sl2, acr=float(r.acr)) for r in top.itertuples(index=False)
         ]
 
+        divergence_candidates_by_customer[customer] = divergence_candidates
         dossiers.append(dossier)
 
     _score(dossiers, all_opps, config)
+
+    all_stories: List[DivergenceStory] = []
+    for dossier in dossiers:
+        dossier.divergence_stories = detect_divergence_stories(
+            dossier.customer, divergence_candidates_by_customer[dossier.customer], months, config
+        )
+        all_stories.extend(dossier.divergence_stories)
 
     total_elig = sum(d.eligible_workload_acr for d in dossiers)
     total_dfc = sum(d.dfc_acr for d in dossiers)
@@ -503,6 +783,16 @@ def build_model(parsed: ParsedData, config: Optional[AttachConfig] = None) -> Bo
         total_eligible_workload_acr=total_elig,
         total_dfc_acr=total_dfc,
         total_gap_dollars=total_gap,
+        divergence_stories=sorted(
+            all_stories,
+            key=lambda s: (
+                {"High": 0, "Medium": 1}.get(s.severity, 9),
+                -s.gap_dollars,
+                -s.latest_workload_acr,
+                s.customer,
+                s.plan_label,
+            ),
+        ),
     )
 
 

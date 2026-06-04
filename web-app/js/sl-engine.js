@@ -18,6 +18,13 @@
 
   const SIGNAL_ATTACH = 'attach';
   const SIGNAL_EXPAND = 'expand';
+  const SIGNAL_COVERED = 'covered';
+  const STORY_GROWTH_DIVERGENCE = 'growth_divergence';
+  const STORY_DEFENDER_REGRESSION = 'defender_regression';
+  const STORY_NEW_WORKLOAD_NO_DEFENDER = 'new_workload_no_defender';
+  const DIVERGENCE_STORY_CAVEAT = 'Directional signal based on ACR trend comparison. Defender for Cloud pricing '
+    + 'can be vCore, resource, transaction, or unit based rather than a fixed percentage of workload ACR; '
+    + 'validate usage, plan scope, and entitlement before treating this as a commercial forecast.';
 
   function toSet(values) {
     return values === null || values === undefined ? null : new Set(values);
@@ -163,7 +170,7 @@
     };
   }
 
-  function buildOpportunity(plan, frame, months, config, benchmarkRatio) {
+  function buildOpportunity(plan, frame, months, config, benchmarkRatio, includeCovered = false) {
     const workloadSeries = seriesFor(frame, months, plan.workloadSl2, null, LEVEL_SERVICE_TOTAL);
     const workloadAcr = last(workloadSeries);
     if (workloadAcr <= 0) return null;
@@ -196,6 +203,7 @@
     let signal;
     if (!attached) signal = SIGNAL_ATTACH;
     else if (hasDollarGap && gapDollars > 0) signal = SIGNAL_EXPAND;
+    else if (includeCovered) signal = SIGNAL_COVERED;
     else return null;
 
     const [workloadGrowth] = rollingGrowth(workloadSeries, config.momentumWindow, config.momentumCap);
@@ -263,6 +271,162 @@
       + `${opp.planLabel} coverage in place.`;
   }
 
+  function comparisonWindow(series, months, window) {
+    if (!series.length) return [[], 0.0, 0.0];
+    const safeWindow = Math.max(1, Math.min(window, series.length));
+    let startValues;
+    let endValues;
+    let compared;
+    if (series.length >= 2 * safeWindow) {
+      startValues = series.slice(series.length - 2 * safeWindow, series.length - safeWindow);
+      endValues = series.slice(series.length - safeWindow);
+      compared = months.length ? months.slice(months.length - 2 * safeWindow) : [];
+    } else {
+      startValues = [series[0]];
+      endValues = [series[series.length - 1]];
+      compared = months.length > 1 ? [months[0], months[months.length - 1]] : months.slice();
+    }
+    const avg = (values) => values.reduce((acc, v) => acc + v, 0.0) / values.length;
+    return [compared, avg(startValues), avg(endValues)];
+  }
+
+  function safePctChange(start, end) {
+    return start <= 0 ? null : (end - start) / start;
+  }
+
+  function formatPct(value) {
+    return value === null || value === undefined ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+  }
+
+  function storySeverity(storyType, opp) {
+    if (storyType === STORY_NEW_WORKLOAD_NO_DEFENDER) return 'High';
+    if (storyType === STORY_DEFENDER_REGRESSION && opp.defenderGrowth <= -0.20) return 'High';
+    if (opp.defenderZeroWithWorkloadGrowth || opp.momentumRaw >= 0.30) return 'High';
+    return 'Medium';
+  }
+
+  function storyHeadline(customer, storyType, opp) {
+    const workload = opp.workloadSl2Present.length ? opp.workloadSl2Present.join(', ') : 'mapped workload';
+    if (storyType === STORY_NEW_WORKLOAD_NO_DEFENDER) {
+      return `${customer} has material new ${workload} spend with no detected ${opp.planLabel} attach.`;
+    }
+    if (storyType === STORY_DEFENDER_REGRESSION) {
+      return `${customer}'s ${opp.planLabel} ACR is declining while ${workload} is stable or growing.`;
+    }
+    return `${customer}'s ${workload} growth is outpacing ${opp.planLabel} attach.`;
+  }
+
+  function recommendedAction(storyType, opp) {
+    const workload = opp.workloadSl2Present.length ? opp.workloadSl2Present.join(', ') : 'the workload';
+    if (storyType === STORY_NEW_WORKLOAD_NO_DEFENDER) {
+      return `Confirm ownership of ${workload}, validate Defender plan eligibility, `
+        + `and position ${opp.planLabel} enablement for the newly material workload.`;
+    }
+    if (storyType === STORY_DEFENDER_REGRESSION) {
+      return `Review whether ${opp.planLabel} coverage was removed, scoped down, `
+        + 'or displaced by a billing change while workload consumption continued.';
+    }
+    return `Use the workload momentum in ${workload} to discuss whether `
+      + `${opp.planLabel} coverage is keeping pace with deployment growth.`;
+  }
+
+  function detectDivergenceStories(customer, opportunities, months, config) {
+    const stories = [];
+    const window = Math.max(1, config.momentumWindow);
+    if (months.length < 2 * window) return stories;
+
+    for (const opp of opportunities) {
+      if (opp.workloadAcr < config.divergenceStoryMinWorkloadAcr) continue;
+
+      const [compared, workloadStart, workloadEnd] = comparisonWindow(opp.workloadSeries, months, window);
+      const [, defenderStart, defenderEnd] = comparisonWindow(opp.defenderSeries, months, window);
+
+      let storyType = null;
+      const workloadMaterial = workloadEnd >= config.divergenceStoryMinWorkloadAcr;
+      const defenderBelowAttach = (
+        defenderEnd <= config.attachThreshold && opp.defenderActual <= config.attachThreshold
+      );
+      const workloadNew = (
+        workloadStart <= config.divergenceStoryNewWorkloadMaxStartAcr && workloadMaterial
+      );
+      const workloadHasStableBaseline = workloadStart >= config.divergenceStoryMinStartWorkloadAcr;
+      const workloadStableOrGrowing = opp.workloadGrowth >= 0;
+      const defenderLagIsMaterial = opp.momentumRaw >= config.divergenceStoryMaterialLag;
+
+      if (workloadNew && defenderBelowAttach) {
+        storyType = STORY_NEW_WORKLOAD_NO_DEFENDER;
+      } else if (
+        workloadHasStableBaseline &&
+        opp.defenderGrowth <= config.divergenceStoryDefenderRegression &&
+        workloadStableOrGrowing
+      ) {
+        storyType = STORY_DEFENDER_REGRESSION;
+      } else if (
+        workloadHasStableBaseline &&
+        opp.workloadGrowth >= config.divergenceStoryMinWorkloadGrowth &&
+        defenderLagIsMaterial &&
+        (
+          opp.defenderGrowth <= config.divergenceStoryFlatDefenderGrowth ||
+          opp.defenderGrowth < opp.workloadGrowth ||
+          opp.defenderZeroWithWorkloadGrowth
+        )
+      ) {
+        storyType = STORY_GROWTH_DIVERGENCE;
+      }
+
+      if (storyType === null) continue;
+
+      const workloadDelta = workloadEnd - workloadStart;
+      const defenderDelta = defenderEnd - defenderStart;
+      const workloadPct = safePctChange(workloadStart, workloadEnd);
+      const defenderPct = safePctChange(defenderStart, defenderEnd);
+      const gapNote = opp.hasDollarGap
+        ? `Estimated benchmark gap: $${fmtInt(opp.gapDollars)}/mo.`
+        : 'No fixed dollar benchmark is used for this plan.';
+      const evidence = [
+        `Workload ACR moved from $${fmtInt(workloadStart)} to $${fmtInt(workloadEnd)} (${formatPct(workloadPct)}).`,
+        `Defender ACR moved from $${fmtInt(defenderStart)} to $${fmtInt(defenderEnd)} (${formatPct(defenderPct)}).`,
+        `Momentum spread is ${formatPct(opp.momentumRaw)}.`,
+        gapNote,
+      ];
+
+      stories.push({
+        customer,
+        planLabel: opp.planLabel,
+        workloadSl2Categories: opp.workloadSl2Present.slice(),
+        storyType,
+        severity: storySeverity(storyType, opp),
+        confidence: opp.confidence,
+        pricingDriver: opp.pricingDriver,
+        latestWorkloadAcr: opp.workloadAcr,
+        latestDefenderAcr: opp.defenderActual,
+        comparedMonths: compared.slice(),
+        workloadStartValue: workloadStart,
+        workloadEndValue: workloadEnd,
+        defenderStartValue: defenderStart,
+        defenderEndValue: defenderEnd,
+        workloadDelta,
+        defenderDelta,
+        workloadPctChange: workloadPct,
+        defenderPctChange: defenderPct,
+        momentumSpread: opp.momentumRaw,
+        hasDollarGap: opp.hasDollarGap,
+        gapDollars: opp.hasDollarGap ? opp.gapDollars : 0.0,
+        headline: storyHeadline(customer, storyType, opp),
+        evidenceBullets: evidence,
+        recommendedAction: recommendedAction(storyType, opp),
+        caveatText: DIVERGENCE_STORY_CAVEAT,
+      });
+    }
+
+    const severityRank = { High: 0, Medium: 1 };
+    return stories.sort((a, b) =>
+      ((severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9)) ||
+      (b.gapDollars - a.gapDollars) ||
+      (b.latestWorkloadAcr - a.latestWorkloadAcr) ||
+      (a.planLabel < b.planLabel ? -1 : a.planLabel > b.planLabel ? 1 : 0));
+  }
+
   // Python round(): round half to even.
   function bankRound(value, digits) {
     if (!Number.isFinite(value)) return value;
@@ -308,6 +472,7 @@
 
     const dossiers = [];
     const allOpps = [];
+    const divergenceCandidatesByCustomer = new Map();
 
     for (const customer of parsed.customers) {
       const cust = byCustomer.get(customer);
@@ -332,6 +497,7 @@
         dfcAcr,
         attachRatio,
         opportunities: [],
+        divergenceStories: [],
         catalog: [],
         foundational: [],
         topSpend: [],
@@ -345,6 +511,7 @@
 
       let presentEligible = 0;
       let uncoveredEligible = 0;
+      const divergenceCandidates = [];
       for (const plan of WORKLOAD_PLANS) {
         const workloadNow = last(seriesFor(cust, months, plan.workloadSl2, null, LEVEL_SERVICE_TOTAL));
         const defenderNow = last(seriesFor(cust, months, [DEFENDER_SL2], plan.defenderSl4, LEVEL_LEAF));
@@ -359,6 +526,10 @@
           opp.opener = opener(customer, opp);
           dossier.opportunities.push(opp);
           allOpps.push(opp);
+          divergenceCandidates.push(opp);
+        } else {
+          const coveredCandidate = buildOpportunity(plan, cust, months, config, ratio, true);
+          if (coveredCandidate !== null) divergenceCandidates.push(coveredCandidate);
         }
 
         // Full-catalog entry for the all-services scorecard. Renderer-only:
@@ -393,6 +564,7 @@
         });
       }
 
+      divergenceCandidatesByCustomer.set(customer, divergenceCandidates);
       dossier.presentEligibleCount = presentEligible;
       dossier.uncoveredEligibleCount = uncoveredEligible;
       dossier.totalGapDollars = dossier.opportunities.reduce((acc, o) => acc + o.gapDollars, 0.0);
@@ -421,6 +593,14 @@
 
     score(dossiers, allOpps, config);
 
+    const allStories = [];
+    for (const dossier of dossiers) {
+      dossier.divergenceStories = detectDivergenceStories(
+        dossier.customer, divergenceCandidatesByCustomer.get(dossier.customer) || dossier.opportunities, months, config,
+      );
+      allStories.push(...dossier.divergenceStories);
+    }
+
     let totalElig = 0;
     let totalDfc = 0;
     let totalGap = 0;
@@ -445,6 +625,14 @@
       totalDfcAcr: totalDfc,
       totalGapDollars: totalGap,
       bookAttachRatio,
+      divergenceStories: allStories.sort((a, b) => {
+        const severityRank = { High: 0, Medium: 1 };
+        return ((severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9)) ||
+          (b.gapDollars - a.gapDollars) ||
+          (b.latestWorkloadAcr - a.latestWorkloadAcr) ||
+          (a.customer < b.customer ? -1 : a.customer > b.customer ? 1 : 0) ||
+          (a.planLabel < b.planLabel ? -1 : a.planLabel > b.planLabel ? 1 : 0);
+      }),
     };
   }
 
@@ -485,12 +673,17 @@
   const api = {
     SIGNAL_ATTACH,
     SIGNAL_EXPAND,
+    STORY_GROWTH_DIVERGENCE,
+    STORY_DEFENDER_REGRESSION,
+    STORY_NEW_WORKLOAD_NO_DEFENDER,
+    DIVERGENCE_STORY_CAVEAT,
     seriesFor,
     rollingGrowth,
     percentileScores,
     median,
     cohortRatios,
     buildOpportunity,
+    detectDivergenceStories,
     buildModel,
     bankRound,
   };
