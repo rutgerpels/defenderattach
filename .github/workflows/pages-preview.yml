@@ -24,7 +24,7 @@ permissions:
 
 concurrency:
   group: pages-preview-${{ github.event.pull_request.number || inputs.pr_number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   publish-preview:
@@ -37,6 +37,9 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: gh-pages-publish
+      cancel-in-progress: false
     steps:
       - name: Check out preview source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -87,7 +90,7 @@ jobs:
           git remote set-url origin "${remote_url}"
 
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-            git fetch origin gh-pages --depth=1
+            git fetch origin gh-pages
             git worktree add _pages origin/gh-pages
           else
             git worktree add --detach _pages
@@ -105,7 +108,19 @@ jobs:
             echo "No GitHub Pages preview changes to publish."
           else
             git -C _pages commit -m "Deploy preview for PR ${PR_NUMBER}"
-            git -C _pages push origin HEAD:gh-pages
+            for attempt in 1 2 3 4 5; do
+              echo "Push attempt ${attempt}"
+              git -C _pages fetch origin gh-pages
+              git -C _pages rebase origin/gh-pages
+              if git -C _pages push origin HEAD:gh-pages; then
+                break
+              fi
+              if [ "${attempt}" -eq 5 ]; then
+                echo "::error::Failed to push gh-pages after retries"
+                exit 1
+              fi
+              sleep $((attempt * 5))
+            done
           fi
 
           preview_url="${SITE_URL}/${preview_path}/"
@@ -119,6 +134,9 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    concurrency:
+      group: gh-pages-publish
+      cancel-in-progress: false
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -145,7 +163,7 @@ jobs:
           remote_url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git remote set-url origin "${remote_url}"
 
-          git fetch origin gh-pages --depth=1
+          git fetch origin gh-pages
           git worktree add _pages origin/gh-pages
 
           if [ ! -d "_pages/${preview_path}" ]; then
@@ -160,5 +178,15 @@ jobs:
             echo "No preview cleanup changes to publish."
           else
             git -C _pages commit -m "Remove preview for PR ${PR_NUMBER}"
-            git -C _pages push origin HEAD:gh-pages
+            for attempt in 1 2 3 4 5; do
+              echo "Push attempt ${attempt}"
+              git -C _pages fetch origin gh-pages
+              git -C _pages rebase origin/gh-pages
+              if git -C _pages push origin HEAD:gh-pages; then
+                exit 0
+              fi
+              sleep $((attempt * 5))
+            done
+            echo "::error::Failed to push gh-pages after retries"
+            exit 1
           fi
