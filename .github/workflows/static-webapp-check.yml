@@ -1,7 +1,7 @@
 name: Static web app drift check
 
 # Verifies two things on every PR / push to main:
-#  1. web-app/index.html is up to date with its inputs (template + JS model +
+#  1. web-app/acr.html is up to date with its inputs (template + JS model +
 #     the static_dashboard.py helpers it reuses). If a contributor edits any
 #     input but forgets to regenerate, this job fails with the exact command
 #     to run.
@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   drift-check:
-    name: Verify generated index.html and run regression tests
+    name: Verify generated acr.html and run regression tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -73,7 +73,7 @@ jobs:
           echo "0dcbc967984de297bd4233cbb77febad8a396c72d8ac0cfab09094d6d7f6e805  xlsx.full.min.js" | sha256sum -c -
           echo "cd078ca9e91c6f9e061ee0a3c310d6ff157c3a71b1dea7f40fd53818017266ff  pptxgen.bundle.js" | sha256sum -c -
 
-      - name: Verify web-app/index.html is up to date
+      - name: Verify web-app/acr.html is up to date
         run: python scripts/build_static_webapp.py --check
 
       - name: Run web-app regression tests

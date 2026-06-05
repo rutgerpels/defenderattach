@@ -1,5 +1,5 @@
 // app-nav.js - shared app shell rendered into <div id="app-nav"></div> on each page.
-// Pass the active key ("acr" or "milestones") via data-active on the container.
+// Pass the active key ("home", "acr", or "milestones") via data-active on the container.
 (() => {
   const root = document.getElementById('app-nav');
   if (!root) return;
@@ -24,7 +24,8 @@
       </header>
       <aside class="app-sidebar" aria-label="Main">
         <nav class="app-menu">
-          <a href="index.html" class="${linkClass('acr')}"><span aria-hidden="true">ACR</span> ACR opportunities</a>
+          <a href="index.html" class="${linkClass('home')}"><span aria-hidden="true">HM</span> Home</a>
+          <a href="acr.html" class="${linkClass('acr')}"><span aria-hidden="true">ACR</span> ACR opportunities</a>
           <a href="milestones.html" class="${linkClass('milestones')}"><span aria-hidden="true">MS</span> Milestone gaps</a>
         </nav>
         <div class="sidebar-meta">
