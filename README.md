@@ -11,7 +11,7 @@ The app now includes two separate views:
 
 ### ⭐ Static web app (recommended for colleagues — no install)
 
-Open [`web-app/index.html`](./web-app/index.html) by **double-clicking** it in Microsoft Edge or Google Chrome. Drag in an `ACR Details by … Month` export, and you're done. No Python, no Docker, no `npm install` — Excel parsing happens entirely in the browser and your data never leaves your machine.
+Open [`web-app/index.html`](./web-app/index.html) by **double-clicking** it in Microsoft Edge or Google Chrome, then choose the ACR dashboard or the milestone dashboard. No Python, no Docker, no `npm install` — Excel parsing happens entirely in the browser and your data never leaves your machine.
 
 Read [`web-app/README.md`](./web-app/README.md) for the full colleague-friendly guide, browser support matrix, and feature list.
 

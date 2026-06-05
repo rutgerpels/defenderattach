@@ -19,7 +19,7 @@ patches:
 * insert the shared ``<div id="app-nav" ...>`` placeholder
 
 Usage:
-    python scripts/build_static_webapp.py            # write web-app/index.html
+    python scripts/build_static_webapp.py            # write web-app/acr.html
     python scripts/build_static_webapp.py --check    # exit 1 if output drifted
 
 Every string replacement asserts an expected count, so accidental drift in
@@ -44,7 +44,7 @@ from defender_acr_dashboard.static_dashboard import (  # noqa: E402
 )
 
 TEMPLATE_PATH = REPO_ROOT / "docs" / "defender_for_cloud_dashboard (2).html"
-OUTPUT_PATH = REPO_ROOT / "web-app" / "index.html"
+OUTPUT_PATH = REPO_ROOT / "web-app" / "acr.html"
 
 
 def _replace_once(haystack: str, needle: str, replacement: str, label: str) -> str:
@@ -2311,7 +2311,7 @@ document.addEventListener('keydown', function (e) {
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build web-app/index.html from the canonical template.")
+    parser = argparse.ArgumentParser(description="Build web-app/acr.html from the canonical template.")
     parser.add_argument("--check", action="store_true",
                         help="Do not write; exit 1 if the on-disk output differs from the freshly built HTML.")
     args = parser.parse_args()

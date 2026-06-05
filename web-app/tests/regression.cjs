@@ -7,6 +7,8 @@ const path = require('path');
 const vm = require('vm');
 
 const WEBAPP = path.resolve(__dirname, '..');
+const LANDING_PAGE = 'index.html';
+const ACR_PAGE = 'acr.html';
 function loadInto(sb, rel) {
   vm.runInContext(fs.readFileSync(path.join(WEBAPP, rel), 'utf8'), sb, { filename: rel });
 }
@@ -43,10 +45,25 @@ function assertEqual(actual, expected, msg) {
   if (actual !== expected) throw new Error(`${msg || ''}\n      expected: ${JSON.stringify(expected)}\n      actual:   ${JSON.stringify(actual)}`);
 }
 
-// ---- acr index.html: generated-artifact regressions ----
-console.log('\nweb-app/index.html (generated)');
+// ---- index.html: landing page regressions ----
+console.log('\nweb-app/index.html (landing)');
 {
-  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(WEBAPP, LANDING_PAGE), 'utf8');
+
+  test('landing page links to both dashboards without an upload gate', () => {
+    assert(/href="acr\.html"/.test(src), 'landing page must link to the ACR dashboard');
+    assert(/href="milestones\.html"/.test(src), 'landing page must link to the milestone dashboard');
+    assert(!/id="splash"/.test(src), 'landing page must not include the ACR splash overlay');
+    assert(!/id="splash-import-btn"/.test(src), 'landing page must not require ACR upload before navigation');
+    assert(!/id="file-input"/.test(src), 'landing page must not include dashboard file input');
+    assert(!/xlsx\.full\.min\.js/.test(src), 'landing page must not load the Excel parser');
+  });
+}
+
+// ---- acr.html: generated-artifact regressions ----
+console.log('\nweb-app/acr.html (generated)');
+{
+  const src = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
   const appNavSrc = fs.readFileSync(path.join(WEBAPP, 'js', 'app-nav.js'), 'utf8');
 
   test('uses vendored SheetJS, not CDN', () => {
@@ -63,6 +80,11 @@ console.log('\nweb-app/index.html (generated)');
     assert(/Build sales plan/.test(appNavSrc), 'placeholder must be labeled Build sales plan');
     assert(!/id="export-pptx-btn"/.test(appNavSrc), 'old export button must not be visible in the shared topbar');
     assert(!/getElementById\('export-pptx-btn'\)/.test(src), 'old export click handler must not be wired in generated HTML');
+  });
+  test('shared nav links home, ACR, and milestones without gating navigation', () => {
+    assert(/href="index\.html"/.test(appNavSrc), 'shared nav must link back to the landing page');
+    assert(/href="acr\.html"/.test(appNavSrc), 'shared nav must link to the generated ACR dashboard');
+    assert(/href="milestones\.html"/.test(appNavSrc), 'shared nav must link to the milestone dashboard');
   });
   test('overview guide sits above tabs and opens an accessible sales explanation modal', () => {
     const guideIndex = src.indexOf('id="overview-guide-trigger"');
@@ -541,10 +563,10 @@ console.log('\nacr-model.js (new weekly format)');
   });
 }
 
-// ---- generated index.html: taxonomy/SKU hardening ----
-console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
+// ---- generated acr.html: taxonomy/SKU hardening ----
+console.log('\nweb-app/acr.html (taxonomy + SKU drill-down)');
 {
-  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
   test('product mix donut sources product_monthly with validated colours', () => {
     assert(/Object\.keys\(src\)\.filter\(k => k !== 'Total'\)/.test(src), 'donut sources all product_monthly categories');
     assert(/const colorFor = \(label, rank\) =>/.test(src), 'rank-based colorFor helper present');
@@ -575,9 +597,9 @@ console.log('\nweb-app/index.html (taxonomy + SKU drill-down)');
   });
 }
 
-console.log('\nweb-app/index.html (weekly-only trend views)');
+console.log('\nweb-app/acr.html (weekly-only trend views)');
 {
-  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
   test('monthly/weekly granularity toggle is removed', () => {
     assert(!/id="product-trend-grain"/.test(src), 'no overview grain select');
     assert(!/id="cust-trend-grain"/.test(src), 'no customer grain select');
@@ -617,9 +639,9 @@ console.log('\nweb-app/index.html (weekly-only trend views)');
   });
 }
 
-console.log('\nweb-app/index.html (product-mix donut)');
+console.log('\nweb-app/acr.html (product-mix donut)');
 {
-  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
   test('donut replaces the product-trend line chart on the overview', () => {
     assert(/function donutChart\(/.test(src), 'donutChart helper defined');
     assert(/function renderProductMix\(\)/.test(src), 'renderProductMix defined');
@@ -850,10 +872,10 @@ console.log('\nacr-model.js (opportunity rules)');
   });
 }
 
-// ---- generated index.html: slider-driven reclassification ----
-console.log('\nweb-app/index.html (attach baseline + reclassification)');
+// ---- generated acr.html: slider-driven reclassification ----
+console.log('\nweb-app/acr.html (attach baseline + reclassification)');
 {
-  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
   test('default Defender share threshold is the 6% attach baseline', () => {
     assert(/const DEFAULT_DFC_SHARE_THRESHOLD = 6;/.test(src), 'default threshold must be 6');
     assert(/attach baseline/.test(src), 'footer copy must reference the attach baseline');
@@ -891,10 +913,10 @@ console.log('\nweb-app/index.html (attach baseline + reclassification)');
   });
 }
 
-// ---- generated index.html: Opportunity Matrix customer breakdown modal ----
-console.log('\nweb-app/index.html (customer breakdown modal)');
+// ---- generated acr.html: Opportunity Matrix customer breakdown modal ----
+console.log('\nweb-app/acr.html (customer breakdown modal)');
 {
-  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
   test('renderCustomerDetail is id-prefix aware (shared by panel + modal)', () => {
     assert(/function renderCustomerDetail\(name, idp\) \{/.test(src), 'renderCustomerDetail accepts an id prefix');
     assert(/idp = idp \|\| '';/.test(src), 'idp defaults to empty (drill-down panel)');
@@ -962,10 +984,10 @@ console.log('\nweb-app/index.html (customer breakdown modal)');
   });
 }
 
-// ---- generated index.html: per-service Defender attach (AE talk-track) ----
-console.log('\nweb-app/index.html (per-service Defender attach)');
+// ---- generated acr.html: per-service Defender attach (AE talk-track) ----
+console.log('\nweb-app/acr.html (per-service Defender attach)');
 {
-  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
   test('per-service attach renderer is defined and mounted (inline + modal)', () => {
     assert(/function renderServiceAttach\(idp, name\) \{/.test(src), 'renderServiceAttach defined');
     assert(/<div id="cust-attach"><\/div>/.test(src), 'inline mount present');
@@ -1056,10 +1078,10 @@ console.log('\nweb-app/index.html (per-service Defender attach)');
   });
 }
 
-// ---- generated index.html: separate divergence stories page ----
-console.log('\nweb-app/index.html (divergence stories page)');
+// ---- generated acr.html: separate divergence stories page ----
+console.log('\nweb-app/acr.html (divergence stories page)');
 {
-  const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
   test('service opportunities and divergence stories are separate tabs', () => {
     const divStart = src.indexOf('function ensureDivergenceStoriesShell()');
     const divEnd = src.indexOf('\nfunction setDivergenceStatus', divStart);
