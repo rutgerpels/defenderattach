@@ -47,6 +47,7 @@ function assertEqual(actual, expected, msg) {
 console.log('\nweb-app/index.html (generated)');
 {
   const src = fs.readFileSync(path.join(WEBAPP, 'index.html'), 'utf8');
+  const appNavSrc = fs.readFileSync(path.join(WEBAPP, 'js', 'app-nav.js'), 'utf8');
 
   test('uses vendored SheetJS, not CDN', () => {
     assert(!/cdn\.sheetjs\.com/.test(src), 'CDN SheetJS URL must not appear');
@@ -57,10 +58,28 @@ console.log('\nweb-app/index.html (generated)');
       'import handler must delegate to AcrModel.build');
     assert(!/= parseAndScore\(/.test(src), 'parseAndScore call must be replaced');
   });
-  test('PowerPoint export wired to window.PptxAcr.exportDeck', () => {
-    assert(/id="export-pptx-btn"/.test(src), 'export-pptx-btn must exist');
-    assert(/window\.PptxAcr\.exportDeck\(DATA, sourceName, threshold\)/.test(src),
-      'export handler must call PptxAcr.exportDeck with source + threshold');
+  test('sales-plan placeholder replaces the visible PowerPoint export button', () => {
+    assert(/id="build-sales-plan-btn"/.test(appNavSrc), 'sales-plan placeholder must exist in the shared topbar');
+    assert(/Build sales plan/.test(appNavSrc), 'placeholder must be labeled Build sales plan');
+    assert(!/id="export-pptx-btn"/.test(appNavSrc), 'old export button must not be visible in the shared topbar');
+    assert(!/getElementById\('export-pptx-btn'\)/.test(src), 'old export click handler must not be wired in generated HTML');
+  });
+  test('overview guide sits above tabs and opens an accessible sales explanation modal', () => {
+    const guideIndex = src.indexOf('id="overview-guide-trigger"');
+    const tabsIndex = src.indexOf('<div class="tabs">');
+    assert(guideIndex >= 0, 'overview guide trigger must exist');
+    assert(tabsIndex >= 0, 'tabs container must exist');
+    assert(guideIndex < tabsIndex, 'overview guide trigger must appear above tabs');
+    assert(/<button class="note guide-note" id="overview-guide-trigger" type="button" aria-haspopup="dialog" aria-controls="view-guide-modal">/.test(src),
+      'guide trigger must be a dialog button');
+    assert(/id="view-guide-modal" role="dialog" aria-modal="true"/.test(src),
+      'guide modal must expose dialog semantics');
+    assert(/Which view should I use\?/.test(src), 'guide modal title must be present');
+    assert(/Service Attach Opportunities/.test(src), 'service attach guidance must be included');
+    assert(/Defender Coverage Drift/.test(src), 'coverage drift guidance must be included');
+    assert(/event\.target === modal/.test(src), 'guide modal must close on backdrop click');
+    assert(/event\.key === 'Escape' && !modal\.hidden/.test(src), 'guide modal must close on Escape');
+    assert(/returnFocusTo\.focus\(\)/.test(src), 'guide modal must return focus to trigger');
   });
   test('renderOpportunityHeatmap escapes customer + derived fields', () => {
     const start = src.indexOf('function renderOpportunityHeatmap()');
@@ -104,22 +123,26 @@ console.log('\nweb-app/index.html (generated)');
     assert(/customers: \[\]/.test(m[1]) && /opportunity: \[\]/.test(m[1]),
       'bundled DATA must start empty');
   });
-  test('shared app nav + ACR-specific scripts are loaded', () => {
+  test('shared app nav + ACR-specific scripts are loaded without retired ACR PowerPoint export', () => {
     for (const tag of [
       '<div id="app-nav" data-active="acr"></div>',
       './js/acr-model.js',
-      './vendor/pptxgen.bundle.js',
-      './js/pptx-acr.js',
       './js/app-nav.js',
     ]) {
       assert(src.includes(tag), `expected to find ${tag}`);
     }
+    assert(!src.includes('./js/pptx-acr.js'), 'retired ACR PowerPoint script must not load on the ACR page');
+    assert(!src.includes('./vendor/pptxgen.bundle.js'), 'PptxGenJS must not load on the ACR page while export is retired');
   });
-  test('nav has flex layout (regression: app-menu must not fall back to UA styles)', () => {
-    assert(/#app-nav \.app-menu \{[\s\S]{0,400}display:\s*flex/.test(src),
-      'app-menu must have flex layout — nav CSS not injected');
+  test('nav has fixed app shell layout (regression: shell CSS must be injected)', () => {
+    assert(/#app-nav \.app-topbar \{[\s\S]{0,400}position:\s*fixed/.test(src),
+      'topbar must be fixed — nav CSS not injected');
+    assert(/#app-nav \.app-sidebar \{[\s\S]{0,400}position:\s*fixed/.test(src),
+      'sidebar must be fixed — nav CSS not injected');
+    assert(/#app-nav \.app-menu \{[\s\S]{0,400}display:\s*grid/.test(src),
+      'app-menu must have grid layout — nav CSS not injected');
     assert(/#app-nav \.app-menu a\.active/.test(src), 'active link styling required');
-    assert(/#app-nav \.app-menu \.source-pill/.test(src), 'source pill styling required');
+    assert(/#app-nav \.source-pill/.test(src), 'source pill styling required');
   });
   test('empty-state splash is present and hides on import', () => {
     assert(/id="splash"/.test(src), 'splash overlay must exist');
@@ -849,10 +872,6 @@ console.log('\nweb-app/index.html (attach baseline + reclassification)');
   test('threshold slider drives reclassification + re-render', () => {
     assert(/reclassifyOpportunities\(dfcShareThreshold\);\r?\n    applyThresholdRender\(\);/.test(src), 'slider handler must reclassify then re-render');
     assert(/function applyThresholdRender\(\)/.test(src), 'debounced render helper present');
-  });
-  test('PPTX export reclassifies against the current threshold', () => {
-    assert(/if \(typeof reclassifyOpportunities === 'function'\) reclassifyOpportunities\(threshold\);/.test(src), 'export must reclassify before building the deck');
-    assert(!/: 8;\n.*const sourceName = DATA\.source_name/.test(src), 'stale 8% export fallback must be gone');
   });
   test('priority badges are clickable and open a service evidence card', () => {
     assert(/tagFor = function \(opp\) \{/.test(src), 'tagFor reassigned to clickable badge');

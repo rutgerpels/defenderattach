@@ -8,6 +8,6 @@ services:
       - ./inputfolder_opty:/app/inputfolder_opty:ro
       - ./output:/app/output
     environment:
-      DASH_HOST: 0.0.0.0
-      DASH_PORT: 8050
-      DASH_DEBUG: "false"
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8050
+      APP_DEBUG: "false"

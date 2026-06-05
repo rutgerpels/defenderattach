@@ -24,7 +24,7 @@ The original Python stack is still here for anyone who wants `inputfolder/` auto
 - Flask-served HTML dashboard based on the executive opportunity dashboard in `docs`
 - pandas and openpyxl for Excel ingestion
 - Native SVG charts in the browser for fast drill-downs
-- python-pptx for PowerPoint export
+- python-pptx for Flask/Docker PowerPoint export
 
 ## Data assumptions
 
@@ -64,6 +64,14 @@ The script creates `.venv` if needed, installs dependencies, opens your browser,
 
 Use the top navigation to switch between the ACR dashboard and the milestone attach gap view. The navigation stays fixed while each dashboard loads inside the main frame.
 
+To run the optional Streamlit service-attach helper instead, use:
+
+```cmd
+start-service-attach.cmd
+```
+
+That script installs `requirements-streamlit.txt` into the same local `.venv`.
+
 ## Run with Docker Compose
 
 If you prefer not to manage Python locally, run:
@@ -82,6 +90,7 @@ Docker Desktop must be running before you run the command. The container mounts 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+python -m pip install -e . --no-deps
 $env:PYTHONPATH = ".\src"
 python app.py
 ```
@@ -90,28 +99,29 @@ Open the local dashboard URL printed in the terminal.
 
 ## Export
 
-Use **Export PowerPoint** in the app to generate a deck in `output` and download it from the browser.
+The Flask/Docker app still includes PowerPoint export endpoints that generate decks in `output` and download them from the browser.
 
 - The ACR dashboard deck includes the ranked customer opportunity table and charts for the top flagged customers.
 - The milestone attach deck includes summary metrics, priority mix, top 10 highest-priority gaps, and methodology notes.
 
-The milestone attach view also includes a **Download CSV** action for the full filtered gap table.
+In the zero-install static web app, the ACR page currently shows a **Build sales plan** placeholder instead of the retired browser PowerPoint export. The milestone attach view still includes **Export to PowerPoint** and **Download CSV** actions.
 
 ## Opportunity defaults
 
 Customers are flagged when:
 
-- Defender for Cloud share is below the selected threshold. The default dashboard threshold is 8%.
+- Defender for Cloud share is below the selected threshold. The default dashboard threshold is 6%.
 - Non-Defender ACR is growing more than 10% MoM.
 
 The Opportunity Matrix includes a Defender share slider so you can tune the view during analysis. The slider changes the heatmap highlighting and the sales action queue without reloading the page.
 
 ## Dashboard workflow
 
-The main dashboard uses three tabs:
+The main dashboard uses four tabs:
 
-- **Overview** for portfolio KPIs, monthly Defender for Cloud trend, top DfC customers, and product mix.
-- **Opportunity Matrix** for the ranked opportunity heatmap and sales action queue.
+- **Overview** for portfolio KPIs, attach gaps by Defender service, product mix, and top accounts.
+- **Service Attach Opportunities** for workloads customers buy but do not protect with the matching Defender plan.
+- **Defender Coverage Drift** for accounts where workload growth and Defender growth are moving apart.
 - **Customer Drill-Down** for customer-specific DfC penetration and product breakdown.
 
 The Excel import button from the original HTML example is disabled in this local app. To refresh data, replace the workbook in `inputfolder` and refresh the browser or restart the container.

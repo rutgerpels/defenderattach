@@ -22,8 +22,6 @@ body.acr-page { padding: 0; }
 }
 .import-btn:hover { background: var(--cp-dashboard-surface-soft); }
 .import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.import-btn.export-pptx { background: var(--cp-accent); color: var(--cp-accent-fg); }
-.import-btn.export-pptx:hover { background: var(--cp-accent-hover); }
 .import-status { font-size: 11px; color: var(--cp-dashboard-on-hero-muted); }
 .import-status.error { color: #ffd1d4; }
 .import-status.success { color: #c5f0c5; }

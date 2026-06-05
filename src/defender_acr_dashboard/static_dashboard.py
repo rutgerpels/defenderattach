@@ -2718,13 +2718,13 @@ function slDecorateOverview() {
     topPlan ? fmt.money(topPlanGap) : '\u2013',
     topPlan ? topPlan + ' / mo across the book' : 'no quantified service gap');
 
-  const note = document.querySelector('#panel-overview .note');
-  if (note) {
-    note.innerHTML = '<strong>How to read this:</strong> Each account buys Azure workloads '
+  const guideSummary = document.querySelector('#overview-guide-trigger .guide-summary');
+  if (guideSummary) {
+    guideSummary.innerHTML = '<strong>How to read this:</strong> Each account buys Azure workloads '
       + '(containers, SQL, App Service, storage, and more) without the matching Defender for Cloud plan switched on. '
       + 'The cards size the total monthly and annualized attach gap across the book, how many accounts are affected, '
       + 'and which Defender service carries the largest gap. Use <em>Service Attach Opportunities</em> for workloads customers buy but do not protect, '
-      + 'and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart. To refresh, click <em>Import new Excel</em> and pick your latest export.';
+      + 'and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart.';
   }
 
   // Chart 1: attach gap by Defender service (non-clickable plan bars).
