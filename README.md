@@ -1,13 +1,13 @@
 # Web app — double-click flow
 
-This folder is a self-contained, zero-install version of the Defender for Cloud ACR dashboard. No Python. No Docker. No build step.
+This folder is a self-contained, zero-install version of the Defender Attach dashboards. No Python. No Docker. No build step.
 
 ## Quick start (colleagues)
 
 1. Clone or download this repository.
 2. Open `web-app/index.html` in **Microsoft Edge** or **Google Chrome** by double-clicking it.
-3. Click **Pick an Excel file** (or drag and drop) and choose your `ACR Details by … Month` export. It stays on your machine.
-4. Use the **Milestones** link in the top nav to switch to the milestone attach-gap view. There you pick **two** workbooks — one Migration export, one Defender export.
+3. Choose **ACR Opportunity Dashboard** or **Milestone Gaps Dashboard** from the landing page.
+4. Load only the workbook files required by the dashboard you chose. ACR uses one `ACR Details by ... Month` export; milestones uses **two** workbooks — one Migration export, one Defender export.
 
 That's it. The ACR page includes a **Build sales plan** placeholder for the next sales workflow. The milestone page has **Export to PowerPoint** and **Download CSV**.
 
@@ -21,7 +21,8 @@ That's it. The ACR page includes a **Build sales plan** placeholder for the next
 
 | Capability | How it's done |
 |---|---|
-| ACR opportunity dashboard (Sales Action Queue, Opportunity Heatmap, KPI cards, threshold slider, All Customers table) | `index.html` is generated from `docs/defender_for_cloud_dashboard (2).html` by `scripts/build_static_webapp.py`, with the Python model swapped for the JS port (`js/acr-model.js`). |
+| Landing page | `index.html` lets users choose a dashboard without loading an Excel file first. |
+| ACR opportunity dashboard (Sales Action Queue, Opportunity Heatmap, KPI cards, threshold slider, All Customers table) | `acr.html` is generated from `docs/defender_for_cloud_dashboard (2).html` by `scripts/build_static_webapp.py`, with the Python model swapped for the JS port (`js/acr-model.js`). |
 | Milestone attach-gap analysis | Two file pickers, same model as `milestone_analysis.py`. |
 | ACR sales plan placeholder | Top-bar **Build sales plan** button reserved for the next sales workflow. |
 | PowerPoint export (milestone gaps) | [PptxGenJS](https://gitbrent.github.io/PptxGenJS/) (vendored under `vendor/`). |
@@ -48,7 +49,8 @@ That's it. The ACR page includes a **Build sales plan** placeholder for the next
 
 ```
 web-app/
-  index.html              # ACR dashboard (GENERATED — do not hand-edit)
+  index.html              # landing page
+  acr.html                # ACR dashboard (GENERATED - do not hand-edit)
   milestones.html         # milestone gaps
   css/
     theme.css             # Clawpilot light/dark tokens
@@ -60,7 +62,7 @@ web-app/
     app-nav.js            # top nav between pages
     excel-loader.js       # SheetJS wrapper (milestones)
     csv-export.js         # CSV Blob download
-    acr-model.js          # port of dashboard_model.py (consumed by index.html)
+    acr-model.js          # port of dashboard_model.py (consumed by acr.html)
     milestone-model.js    # port of milestone_analysis.py
     milestone-view.js     # milestone page renderers
     milestone-app.js      # milestone page bootstrap
@@ -77,7 +79,7 @@ No bundler, no `npm install`. Each `.js` file is loaded as a classic script, whi
 
 ## Maintainer build step
 
-`web-app/index.html` is generated from the dashboard template at
+`web-app/acr.html` is generated from the dashboard template at
 `docs/defender_for_cloud_dashboard (2).html`. Regenerate it after any change
 to the template, the JS model (`web-app/js/acr-model.js`), or the Python
 helpers it reuses (`src/defender_acr_dashboard/static_dashboard.py`):
