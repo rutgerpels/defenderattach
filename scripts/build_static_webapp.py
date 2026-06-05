@@ -6,8 +6,8 @@ Docker dashboard 1:1) and then layers on a small number of static-only
 patches:
 
 * swap CDN SheetJS for the vendored copy
-* add a vendored PptxGenJS + ``js/acr-model.js`` + ``js/pptx-acr.js`` +
-  ``js/app-nav.js`` (so the page is fully usable offline)
+* add ``js/acr-model.js`` + ``js/app-nav.js`` (so the page is fully usable
+  offline)
 * replace the template's home-grown ``parseAndScore`` call with
   ``AcrModel.build`` (the existing JS port of ``dashboard_model.py``) so the
   Sales Action Queue / heatmap / KPI cards get all the fields they expect
@@ -16,7 +16,6 @@ patches:
 * prefix risky leading characters in ``csvCell`` (CSV formula injection)
 * clear the bundled DATA so the static distribution ships with no customer
   rows; the dashboard shows an empty state until a file is picked
-* add an Export to PowerPoint button wired to ``PptxAcr.exportDeck``
 * insert the shared ``<div id="app-nav" ...>`` placeholder
 
 Usage:
@@ -111,24 +110,6 @@ def build_html() -> str:
     )
     html = _replace_once(html, "<body>\n", nav_block, "opening body tag")
 
-    export_button = (
-        '    <button class="import-btn" id="import-btn">📂 Import new Excel</button>\n'
-        '    <button class="import-btn" id="export-pptx-btn" style="margin-left:8px">📑 Export to PowerPoint</button>'
-    )
-    html = _replace_once(
-        html,
-        '    <button class="import-btn" id="import-btn">📂 Import new Excel</button>',
-        export_button,
-        "import button",
-    )
-
-    html = _replace_once(
-        html,
-        '    <div class="import-status" id="import-status">Showing data from initial export</div>',
-        '    <div class="import-status" id="import-status">Pick an Excel export to load the dashboard. Your data stays on this machine.</div>',
-        "import status message",
-    )
-
     html = _strip_bundled_data(html)
     html = _inject_app_nav_css(html)
     html = _inject_splash(html)
@@ -159,10 +140,7 @@ def build_html() -> str:
         '<script src="./js/sl-parser.js"></script>\n'
         '<script src="./js/sl-engine.js"></script>\n'
         '<script src="./js/acr-model.js"></script>\n'
-        '<script src="./vendor/pptxgen.bundle.js"></script>\n'
-        '<script src="./js/pptx-acr.js"></script>\n'
         '<script src="./js/app-nav.js"></script>\n'
-        f"{_export_handler_script()}\n"
         f"{closing_body}"
     )
     html = _replace_once(html, closing_body, extra_scripts, "closing body tag")
@@ -170,8 +148,6 @@ def build_html() -> str:
     _assert_absent(html, "cdn.sheetjs.com", "CDN SheetJS URL")
     _assert_absent(html, "= parseAndScore(", "stale parseAndScore call")
     _assert_contains(html, "AcrModel.build(rows, file.name)", "AcrModel.build wiring")
-    _assert_contains(html, 'id="export-pptx-btn"', "export PPT button")
-    _assert_contains(html, "PptxAcr.exportDeck", "export PPT handler")
     _assert_contains(html, "function renderOpportunityHeatmap()", "heatmap function")
     _assert_contains(html, 'id="action-queue-search"', "service opportunity search input")
     _assert_contains(html, "No opportunities match the current filters.", "service opportunity search empty state")
@@ -248,12 +224,12 @@ def build_html() -> str:
     _assert_contains(html, "Service-level summary", "priority modal service summary")
     _assert_contains(html, "Suggested seller conversation", "priority modal seller prompt")
     _assert_contains(html, './vendor/xlsx.full.min.js', "vendored SheetJS")
-    _assert_contains(html, './vendor/pptxgen.bundle.js', "vendored PptxGenJS")
     _assert_contains(html, './js/acr-model.js', "acr-model.js script")
     _assert_contains(html, './js/sl-mapping.js', "sl-mapping.js script")
     _assert_contains(html, './js/sl-parser.js', "sl-parser.js script")
     _assert_contains(html, './js/sl-engine.js', "sl-engine.js script")
-    _assert_contains(html, './js/pptx-acr.js', "pptx-acr.js script")
+    _assert_absent(html, './vendor/pptxgen.bundle.js', "retired ACR PowerPoint vendor bundle")
+    _assert_absent(html, './js/pptx-acr.js', "retired ACR PowerPoint export script")
     _assert_contains(html, "#app-nav .app-menu", "app-nav inline CSS")
     _assert_contains(html, 'id="app-nav"', "app-nav placeholder")
     _assert_contains(html, 'id="splash"', "splash overlay")
@@ -412,40 +388,40 @@ def _inject_splash(html: str) -> str:
         "\n/* empty-state splash (visible until first import) */\n"
         "#splash {\n"
         "  position: fixed; inset: 0; z-index: 9999;\n"
-        "  background: rgba(243, 242, 241, 0.96);\n"
+        "  background: rgba(238, 243, 247, 0.96);\n"
         "  display: flex; align-items: center; justify-content: center;\n"
         "  font-family: 'Segoe UI', system-ui, sans-serif;\n"
         "}\n"
         "#splash[hidden] { display: none; }\n"
         "#splash .splash-card {\n"
-        "  background: #ffffff; border: 1px solid #edebe9;\n"
-        "  border-radius: 8px; padding: 36px 44px; max-width: 520px;\n"
-        "  box-shadow: 0 8px 32px rgba(0,0,0,0.12); text-align: center;\n"
+        "  background: #ffffff; border: 1px solid #dbe6ee;\n"
+        "  border-radius: 2px; padding: 40px 46px; max-width: 540px;\n"
+        "  box-shadow: 0 22px 48px rgba(42,61,82,0.14); text-align: center;\n"
         "}\n"
-        "#splash h2 { margin: 0 0 8px; color: #0078d4; font-size: 22px; }\n"
-        "#splash p { margin: 0 0 20px; color: #605e5c; font-size: 14px; line-height: 1.5; }\n"
+        "#splash h2 { margin: 0 0 8px; color: #26364a; font-size: 28px; font-weight: 300; letter-spacing: -0.02em; }\n"
+        "#splash p { margin: 0 0 22px; color: #738093; font-size: 14px; line-height: 1.55; }\n"
         "#splash-dropzone {\n"
-        "  border: 2px dashed #c8c6c4; border-radius: 6px;\n"
+        "  border: 2px dashed #a8bac9; border-radius: 2px;\n"
         "  padding: 28px 20px; margin-bottom: 16px;\n"
-        "  background: #faf9f8; transition: all 0.15s ease;\n"
+        "  background: #f6f9fc; transition: all 0.15s ease;\n"
         "  cursor: pointer;\n"
         "}\n"
-        "#splash-dropzone:hover { border-color: #0078d4; background: #f3f9fd; }\n"
+        "#splash-dropzone:hover { border-color: #399bd8; background: #edf7fd; }\n"
         "#splash-dropzone.dragover {\n"
-        "  border-color: #0078d4; background: #deecf9;\n"
+        "  border-color: #399bd8; background: #d9eefb;\n"
         "  border-style: solid;\n"
         "}\n"
         "#splash-dropzone .dz-icon { font-size: 32px; line-height: 1; margin-bottom: 8px; }\n"
-        "#splash-dropzone .dz-main { color: #323130; font-weight: 600; font-size: 14px; margin-bottom: 4px; }\n"
-        "#splash-dropzone .dz-sub { color: #605e5c; font-size: 12px; }\n"
+        "#splash-dropzone .dz-main { color: #26364a; font-weight: 800; font-size: 14px; margin-bottom: 4px; }\n"
+        "#splash-dropzone .dz-sub { color: #738093; font-size: 12px; }\n"
         "#splash button {\n"
-        "  background: #0078d4; color: #ffffff; border: 0;\n"
-        "  padding: 12px 28px; border-radius: 4px; font-size: 15px;\n"
-        "  font-weight: 600; cursor: pointer;\n"
+        "  background: #2fb0a8; color: #ffffff; border: 0;\n"
+        "  padding: 12px 28px; border-radius: 999px; font-size: 15px;\n"
+        "  font-weight: 800; cursor: pointer;\n"
         "}\n"
-        "#splash button:hover { background: #106ebe; }\n"
-        "#splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a8886; }\n"
-        "#splash .splash-error { margin-top: 12px; font-size: 13px; color: #a4262c; min-height: 18px; }\n"
+        "#splash button:hover { background: #239892; }\n"
+        "#splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a95a3; }\n"
+        "#splash .splash-error { margin-top: 12px; font-size: 13px; color: #c94f43; min-height: 18px; }\n"
         "#splash .splash-progress {\n"
         "  margin-top: 16px; height: 6px; border-radius: 999px;\n"
         "  background: #e6e9ef; overflow: hidden; display: none;\n"
@@ -453,11 +429,11 @@ def _inject_splash(html: str) -> str:
         "#splash .splash-progress.active { display: block; }\n"
         "#splash .splash-progress .bar {\n"
         "  height: 100%; width: 0%; border-radius: 999px;\n"
-        "  background: linear-gradient(90deg, #0078d4, #4aa3e8);\n"
+        "  background: linear-gradient(90deg, #399bd8, #2fb0a8);\n"
         "  transition: width 0.28s ease;\n"
         "}\n"
         "#splash .splash-progress-label {\n"
-        "  margin-top: 8px; font-size: 12px; color: #605e5c; min-height: 16px;\n"
+        "  margin-top: 8px; font-size: 12px; color: #738093; min-height: 16px;\n"
         "}\n"
     )
     html = _replace_once(html, "</style>\n</head>", splash_css + "</style>\n</head>", "closing style/head tags (splash)")
@@ -633,50 +609,68 @@ def _inject_splash(html: str) -> str:
 
 
 def _inject_app_nav_css(html: str) -> str:
-    """Inject `.app-menu` styles into the template's <style> block.
+    """Inject the shared shell styles into the template's <style> block.
 
-    The Docker template scopes its own CSS variables; ``web-app/css/app.css``
-    references different ones (``--cp-link``, ``--cp-dashboard-muted``…) that
-    are not defined in the template. We therefore inline the nav-only rules
-    with concrete colors so the menu renders identically to the milestones
-    page without dragging in the rest of ``app.css`` (which would clobber the
-    template's body / shell styles).
+    The generated dashboard does not load ``web-app/css/app.css``. Keep the
+    shell CSS here in sync with ``app.css`` so the ACR and milestone pages feel
+    like the same app while preserving the no-build static output.
     """
 
     nav_css = (
-        "\n/* shared app nav (matches web-app/css/app.css .app-menu rules) */\n"
-        "#app-nav .app-menu {\n"
-        "  display: flex; gap: 12px; align-items: center;\n"
-        "  padding: 10px 18px 0;\n"
-        "  background: #f3f2f1;\n"
-        "  border-bottom: 1px solid #edebe9;\n"
+        "\n/* shared Trackado-inspired app shell (matches web-app/css/app.css) */\n"
+        "body.shell-ready {\n"
+        "  min-height: 100vh;\n"
+        "  padding: calc(var(--da-topbar, 48px) + 26px) 28px 32px calc(var(--da-sidebar, 212px) + 28px);\n"
         "}\n"
+        "#app-nav .app-topbar {\n"
+        "  position: fixed; top: 0; left: var(--da-sidebar, 212px); right: 0; z-index: 900;\n"
+        "  min-height: var(--da-topbar, 48px); display: flex; align-items: center; justify-content: space-between;\n"
+        "  gap: 18px; padding: 0 28px; background: linear-gradient(90deg, var(--da-blue, #399bd8), #42a6df);\n"
+        "  color: #ffffff; box-shadow: 0 2px 8px rgba(42, 61, 82, 0.12);\n"
+        "}\n"
+        "#app-nav .topbar-actions { display: flex; align-items: center; gap: 12px; min-width: 0; }\n"
+        "#app-nav .topbar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }\n"
+        "#app-nav .app-sidebar {\n"
+        "  position: fixed; inset: 0 auto 0 0; z-index: 910; width: var(--da-sidebar, 212px);\n"
+        "  padding: 24px 0; background: linear-gradient(180deg, var(--da-navy, #34465d), var(--da-navy-dark, #2d3d52));\n"
+        "  color: #d7e2ec; box-shadow: 8px 0 26px rgba(42, 61, 82, 0.14);\n"
+        "}\n"
+        "#app-nav .sidebar-meta span { display: block; color: #9fb0c0; font-size: 11px; margin-top: 3px; }\n"
+        "#app-nav .app-menu { display: grid; gap: 2px; }\n"
         "#app-nav .app-menu a {\n"
-        "  color: #605e5c; text-decoration: none; font-weight: 700;\n"
-        "  padding: 12px 14px 10px; border-bottom: 4px solid transparent;\n"
-        "  font-size: 14px;\n"
+        "  display: flex; align-items: center; gap: 10px; color: #d7e2ec; text-decoration: none; font-weight: 700;\n"
+        "  padding: 14px 22px; border-left: 4px solid transparent; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em;\n"
         "}\n"
-        "#app-nav .app-menu a.active {\n"
-        "  color: #0078d4; border-bottom-color: #0078d4;\n"
+        "#app-nav .app-menu a.active { color: #ffffff; background: rgba(255,255,255,0.08); border-left-color: var(--da-blue, #399bd8); }\n"
+        "#app-nav .app-menu a:not(.active):hover { color: #ffffff; background: rgba(255,255,255,0.06); }\n"
+        "#app-nav .app-menu a:focus-visible, #app-nav button.menu-action:focus-visible { outline: 3px solid rgba(57,155,216,0.38); outline-offset: 2px; }\n"
+        "#app-nav .sidebar-meta { position: absolute; left: 22px; right: 22px; bottom: 24px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); }\n"
+        "#app-nav .sidebar-meta strong { display: block; margin-top: 4px; color: #ffffff; font-size: 11px; line-height: 1.35; }\n"
+        "#app-nav .source-pill {\n"
+        "  font-size: 11px; color: #ffffff; padding: 6px 12px; background: rgba(255,255,255,0.16);\n"
+        "  border: 1px solid rgba(255,255,255,0.24); border-radius: 999px; max-width: 320px; overflow: hidden;\n"
+        "  text-overflow: ellipsis; white-space: nowrap; font-weight: 600;\n"
         "}\n"
-        "#app-nav .app-menu a:not(.active):hover {\n"
-        "  color: #0078d4; border-bottom-color: #0078d4;\n"
+        "#app-nav button.menu-action {\n"
+        "  font-size: 12px; padding: 7px 15px; background: #ffffff; border: 0; border-radius: 999px;\n"
+        "  color: var(--da-blue, #399bd8); cursor: pointer; font-weight: 800; box-shadow: 0 2px 6px rgba(42,61,82,0.12);\n"
         "}\n"
-        "#app-nav .app-menu .spacer { flex: 1; }\n"
-        "#app-nav .app-menu .source-pill {\n"
-        "  font-size: 11px; color: #605e5c;\n"
-        "  padding: 4px 10px; background: #ffffff;\n"
-        "  border: 1px solid #edebe9; border-radius: 12px;\n"
-        "  max-width: 320px; overflow: hidden; text-overflow: ellipsis;\n"
-        "  white-space: nowrap; font-weight: 400;\n"
+        "#app-nav button.menu-action:hover { background: #f6f9fc; }\n"
+        "#app-nav button.menu-action.sales-plan-action { color: #ffffff; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.24); }\n"
+        "#app-nav button.menu-action.sales-plan-action:hover { background: rgba(255,255,255,0.22); }\n"
+        "#app-nav button.menu-action.sales-plan-action:disabled { cursor: default; opacity: 0.78; }\n"
+        "@media (max-width: 900px) {\n"
+        "  body.shell-ready { padding: calc(var(--da-topbar, 48px) + 58px) 16px 24px; }\n"
+        "  #app-nav .app-topbar { left: 0; padding: 0 16px; }\n"
+        "  #app-nav .topbar-title { max-width: 45vw; }\n"
+        "  #app-nav .app-sidebar { position: static; width: auto; padding: 0; box-shadow: none; }\n"
+        "  #app-nav .sidebar-meta { display: none; }\n"
+        "  #app-nav .app-menu { position: fixed; top: var(--da-topbar, 48px); left: 0; right: 0; z-index: 899; display: flex; overflow-x: auto; background: var(--da-navy, #34465d); }\n"
+        "  #app-nav .app-menu a { flex: 0 0 auto; border-left: 0; border-bottom: 3px solid transparent; padding: 10px 14px; }\n"
+        "  #app-nav .app-menu a.active { border-left-color: transparent; border-bottom-color: var(--da-blue, #399bd8); }\n"
+        "  #app-nav .source-pill { max-width: 160px; }\n"
         "}\n"
-        "#app-nav .app-menu button.menu-action {\n"
-        "  font-size: 12px; padding: 6px 12px;\n"
-        "  background: #ffffff; border: 1px solid #edebe9;\n"
-        "  border-radius: 4px; color: #0078d4;\n"
-        "  cursor: pointer; font-weight: 600;\n"
-        "}\n"
-        "#app-nav .app-menu button.menu-action:hover { background: #faf9f8; }\n"
+        "@media (max-width: 640px) { #app-nav .source-pill { display: none; } #app-nav .topbar-actions { gap: 8px; } }\n"
     )
     return _replace_once(html, "</style>\n</head>", nav_css + "</style>\n</head>", "closing style/head tags")
 
@@ -742,7 +736,7 @@ def _taxonomy_and_skus(html: str) -> str:
         "    .map(p => ({label: p, values: DATA.product_monthly[p], color: PRODUCT_COLORS[p]}));",
         "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
         "    .filter(p => DATA.product_monthly[p]);\n"
-        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#738093'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#738093'; };\n"
         "  const series = tracks.map(p => ({label: p, values: DATA.product_monthly[p], color: colorFor(p)}));",
         "taxonomy-aware product trend series",
     )
@@ -871,7 +865,7 @@ def _weekly_views(html: str) -> str:
         html,
         "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
         "    .filter(p => DATA.product_monthly[p]);\n"
-        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#738093'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#738093'; };\n"
         "  const series = tracks.map(p => ({label: p, values: DATA.product_monthly[p], color: colorFor(p)}));\n"
         "  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300});",
         "  const weekly = !!(DATA.weekly_enabled && DATA.product_weekly);\n"
@@ -879,7 +873,7 @@ def _weekly_views(html: str) -> str:
         "  const labels = weekly ? DATA.week_labels : DATA.month_labels;\n"
         "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
         "    .filter(p => src[p]);\n"
-        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+        "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#738093'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#738093'; };\n"
         "  const series = tracks.map(p => ({label: p, values: src[p], color: colorFor(p)}));\n"
         "  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300, labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});",
         "weekly product trend series",
@@ -893,7 +887,7 @@ def _weekly_views(html: str) -> str:
         "  const weekly = !!(DATA.weekly_enabled && DATA.dfc_total_weekly);\n"
         "  const values = weekly ? DATA.dfc_total_weekly : DATA.dfc_total_monthly;\n"
         "  const labels = weekly ? DATA.week_labels : DATA.month_labels;\n"
-        "  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#0078d4'}], {labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});\n"
+        "  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#399bd8'}], {labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});\n"
         "}\n\n"
         "function renderProductTrend() {",
         "weekly-preferring overview DfC trend",
@@ -1021,7 +1015,7 @@ def _product_mix_donut(html: str) -> str:
             "  const labels = weekly ? DATA.week_labels : DATA.month_labels;\n"
             "  const tracks = (DATA.track_products && DATA.track_products.length ? DATA.track_products : TRACK_PRODUCTS)\n"
             "    .filter(p => src[p]);\n"
-            "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#605e5c'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#605e5c'; };\n"
+            "  const colorFor = p => { const c = (DATA.product_colors && DATA.product_colors[p]) || PRODUCT_COLORS[p] || '#738093'; return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#738093'; };\n"
             "  const series = tracks.map(p => ({label: p, values: src[p], color: colorFor(p)}));\n"
             "  lineChart('chart-product-trend', series, {indexed: mode === 'indexed', width: 1600, height: 300, labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});\n"
             "  document.getElementById('legend-product-trend').innerHTML = tracks.map(p =>\n"
@@ -1047,10 +1041,10 @@ def _product_mix_donut(html: str) -> str:
             "  const p = (typeof partial === 'number') ? partial : -1;\n"
             "  const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== p); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };\n"
             "  const isHex = c => /^#[0-9a-fA-F]{6}$/.test(c);\n"
-            "  // Deterministic palette by rank; DfC (#0078d4) and Sentinel (#005a9e) keep their\n"
+            "  // Deterministic palette by rank; DfC (#399bd8) and Sentinel (#2b89c6) keep their\n"
             "  // brand colours and are intentionally excluded from the rotation to avoid collisions.\n"
-            "  const PALETTE = ['#107c10','#5c2d91','#d83b01','#008272','#a4262c','#c19c00','#004e8c','#874800','#5d5a58','#018574','#8764b8','#e3008c'];\n"
-            "  const colorFor = (label, rank) => { if (label === DFC) return '#0078d4'; if (label === 'Sentinel') return '#005a9e'; const c = PALETTE[rank % PALETTE.length]; return isHex(c) ? c : '#605e5c'; };\n"
+            "  const PALETTE = ['#2fb0a8','#7c68b8','#ffb04f','#40bfd6','#f36b5d','#c79d32','#5c6f8f','#b56a2f','#8a95a3','#2d9fc3','#8764b8','#d95aa6'];\n"
+            "  const colorFor = (label, rank) => { if (label === DFC) return '#399bd8'; if (label === 'Sentinel') return '#2b89c6'; const c = PALETTE[rank % PALETTE.length]; return isHex(c) ? c : '#738093'; };\n"
             "  const all = Object.keys(src).filter(k => k !== 'Total')\n"
             "    .map(k => ({label: k, value: avgOf(src[k])}))\n"
             "    .filter(d => d.value > 0)\n"
@@ -1070,7 +1064,7 @@ def _product_mix_donut(html: str) -> str:
             "  const tailSum = tail.reduce((s, d) => s + d.value, 0);\n"
             "  const otherCats = tail.map(d => ({label: d.label, value: d.value}));\n"
             "  if (otherVal - tailSum > 1) otherCats.push({label: 'Unmapped / residual', value: otherVal - tailSum});\n"
-            "  if (otherVal > 1) items.push({label: 'Other services', value: otherVal, color: '#c8c6c4'});\n"
+            "  if (otherVal > 1) items.push({label: 'Other services', value: otherVal, color: '#a7b0bc'});\n"
             "  return {items: items, otherCats: otherCats, totalAvg: totalAvg, otherVal: otherVal};\n"
             "}\n"
             "function renderProductMix() {\n"
@@ -1094,12 +1088,12 @@ def _product_mix_donut(html: str) -> str:
             "function donutChart(containerId, items, opts = {}) {\n"
             "  const el = document.getElementById(containerId);\n"
             "  if (!el) return;\n"
-            "  const W = opts.width || 600, H = opts.height || 260;\n"
+            "  const W = opts.width || 600, H = opts.height || 320;\n"
             "  const cx = W / 2, cy = H / 2;\n"
-            "  const rOuter = Math.min(W, H) / 2 - 14, rInner = rOuter * 0.6;\n"
+            "  const rOuter = Math.min(W, H) / 2 - 18, rInner = rOuter * 0.58;\n"
             "  const total = items.reduce((a, d) => a + (Number(d.value) || 0), 0);\n"
             "  if (!(total > 0)) {\n"
-            "    el.innerHTML = '<div style=\"padding:40px;text-align:center;color:#a19f9d;font-size:12px;\">No service ACR to display</div>';\n"
+            "    el.innerHTML = '<div style=\"padding:40px;text-align:center;color:#8a95a3;font-size:12px;\">No service ACR to display</div>';\n"
             "    return;\n"
             "  }\n"
             "  const totalLbl = total >= 1e6 ? '$' + (total / 1e6).toFixed(2) + 'M' : total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);\n"
@@ -1123,8 +1117,8 @@ def _product_mix_donut(html: str) -> str:
             "      a0 = a1;\n"
             "    });\n"
             "  }\n"
-            "  svg += `<text x=\"${cx}\" y=\"${cy - 2}\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"700\" fill=\"#323130\">${totalLbl}</text>`;\n"
-            "  svg += `<text x=\"${cx}\" y=\"${cy + 15}\" text-anchor=\"middle\" font-size=\"10\" fill=\"#605e5c\">avg monthly ACR</text>`;\n"
+            "  svg += `<text x=\"${cx}\" y=\"${cy - 2}\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"700\" fill=\"#26364a\">${totalLbl}</text>`;\n"
+            "  svg += `<text x=\"${cx}\" y=\"${cy + 15}\" text-anchor=\"middle\" font-size=\"10\" fill=\"#738093\">avg monthly ACR</text>`;\n"
             "  svg += `</svg>`;\n"
             "  el.innerHTML = svg;\n"
             "  el.querySelectorAll('[data-label]').forEach(seg => {\n"
@@ -2313,43 +2307,6 @@ document.addEventListener('keydown', function (e) {
         "function renderAll() {",
         script + "\nfunction renderAll() {",
         "category modal injection point",
-    )
-
-
-def _export_handler_script() -> str:
-    return (
-        "<script>\n"
-        "(function () {\n"
-        "  const btn = document.getElementById('export-pptx-btn');\n"
-        "  if (!btn) return;\n"
-        "  btn.addEventListener('click', async () => {\n"
-        "    if (!window.PptxAcr || typeof window.PptxAcr.exportDeck !== 'function') {\n"
-        "      setStatus('PowerPoint export module is not loaded.', 'error');\n"
-        "      return;\n"
-        "    }\n"
-        "    if (!DATA || !Array.isArray(DATA.opportunity) || DATA.opportunity.length === 0) {\n"
-        "      setStatus('Load an Excel export before exporting to PowerPoint.', 'error');\n"
-        "      return;\n"
-        "    }\n"
-        "    btn.disabled = true;\n"
-        "    const originalLabel = btn.textContent;\n"
-        "    btn.textContent = 'Building deck…';\n"
-        "    try {\n"
-        "      const threshold = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;\n"
-        "      if (typeof reclassifyOpportunities === 'function') reclassifyOpportunities(threshold);\n"
-        "      const sourceName = DATA.source_name || 'Imported workbook';\n"
-        "      await window.PptxAcr.exportDeck(DATA, sourceName, threshold);\n"
-        "      setStatus('PowerPoint deck downloaded.', 'success');\n"
-        "    } catch (err) {\n"
-        "      console.error('PPTX export failed', err);\n"
-        "      setStatus('PowerPoint export failed: ' + (err && err.message ? err.message : err), 'error');\n"
-        "    } finally {\n"
-        "      btn.disabled = false;\n"
-        "      btn.textContent = originalLabel;\n"
-        "    }\n"
-        "  });\n"
-        "})();\n"
-        "</script>"
     )
 
 

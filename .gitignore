@@ -11,6 +11,9 @@
 *.tsv
 *.pptx
 *.ppt
+*.bak
+*.log
+*.tmp
 
 # Test golden oracles derived from customer data (regenerate locally via
 # scripts/gen_sl_golden.py). Never commit — they contain customer names + ACR.

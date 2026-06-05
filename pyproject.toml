@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "defender-acr-dashboard"
+version = "0.1.0"
+description = "Local Defender for Cloud ACR attach opportunity dashboards."
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]

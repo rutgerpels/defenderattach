@@ -4,9 +4,9 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/src
-ENV DASH_HOST=0.0.0.0
-ENV DASH_PORT=8050
-ENV DASH_DEBUG=false
+ENV APP_HOST=0.0.0.0
+ENV APP_PORT=8050
+ENV APP_DEBUG=false
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

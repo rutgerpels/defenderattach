@@ -6,206 +6,348 @@
 <script src="./vendor/xlsx.full.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --da-bg: #eef3f7;
+  --da-surface: #ffffff;
+  --da-surface-soft: #f6f9fc;
+  --da-border: #dbe6ee;
+  --da-text: #26364a;
+  --da-muted: #738093;
+  --da-blue: #399bd8;
+  --da-blue-dark: #2b89c6;
+  --da-navy: #34465d;
+  --da-navy-dark: #2d3d52;
+  --da-teal: #2fb0a8;
+  --da-coral: #f36b5d;
+  --da-amber: #ffb04f;
+  --da-shadow: 0 12px 28px rgba(42, 61, 82, 0.08);
+  --da-shadow-strong: 0 22px 48px rgba(42, 61, 82, 0.14);
+  --da-radius: 2px;
+  --da-sidebar: 212px;
+  --da-topbar: 48px;
+}
 body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #f3f2f1; color: #201f1e; padding: 20px; line-height: 1.4;
+  background: var(--da-bg);
+  color: var(--da-text);
+  padding: calc(var(--da-topbar) + 26px) 28px 32px calc(var(--da-sidebar) + 28px);
+  line-height: 1.45;
 }
-h1 { font-size: 22px; color: #201f1e; }
-h2 { font-size: 16px; margin: 24px 0 12px 0; color: #323130; }
-h3 { font-size: 14px; margin: 16px 0 8px 0; color: #605e5c; font-weight: 600; }
-.subtle { color: #605e5c; font-size: 12px; }
+h1 { font-size: 28px; color: var(--da-text); letter-spacing: -0.02em; }
+h2 { font-size: 18px; margin: 24px 0 12px 0; color: var(--da-text); letter-spacing: -0.01em; }
+h3 { font-size: 14px; margin: 16px 0 8px 0; color: var(--da-muted); font-weight: 700; }
+.subtle { color: var(--da-muted); font-size: 12px; }
 
-.header {
-  background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
-  color: white; padding: 20px 28px; border-radius: 8px; margin-bottom: 20px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
-}
-.header h1 { color: white; }
-.header .meta { color: #d4e8f7; font-size: 12px; margin-top: 6px; }
-.header .header-left { flex: 1; min-width: 280px; }
-
-.import-panel { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .import-btn {
-  background: white; color: #0078d4; border: none; padding: 8px 16px;
-  font-size: 13px; font-weight: 600; border-radius: 4px; cursor: pointer;
-  font-family: inherit; box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  background: white; color: var(--da-blue); border: none; padding: 9px 17px;
+  font-size: 12px; font-weight: 800; border-radius: 999px; cursor: pointer;
+  font-family: inherit; box-shadow: 0 2px 8px rgba(42, 61, 82, 0.14);
 }
-.import-btn:hover { background: #faf9f8; }
+.import-btn:hover { background: var(--da-surface-soft); }
 .import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.import-status { font-size: 11px; color: #d4e8f7; }
+.import-status { font-size: 11px; color: #d9eefb; font-weight: 600; }
 .import-status.error { color: #ffd1d4; }
 .import-status.success { color: #c5f0c5; }
 
-.tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #d2d0ce; }
-.tab {
-  padding: 10px 18px; cursor: pointer; border: none; background: transparent;
-  font-size: 13px; font-weight: 600; color: #605e5c; border-bottom: 2px solid transparent;
+.tabs {
+  display: flex; gap: 8px; margin-bottom: 18px; border-bottom: none;
+  background: var(--da-surface); padding: 8px; border: 1px solid var(--da-border);
+  border-radius: var(--da-radius); box-shadow: var(--da-shadow);
 }
-.tab.active { color: #0078d4; border-bottom-color: #0078d4; }
-.tab:hover:not(.active) { color: #323130; background: #faf9f8; }
+.tab {
+  padding: 9px 16px; cursor: pointer; border: none; background: transparent;
+  font-size: 12px; font-weight: 800; color: var(--da-muted); border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.04em; font-family: inherit;
+}
+.tab.active { color: white; background: var(--da-blue); box-shadow: 0 4px 10px rgba(57,155,216,0.22); }
+.tab:hover:not(.active) { color: var(--da-text); background: var(--da-surface-soft); }
+.tab:focus-visible, .import-btn:focus-visible {
+  outline: 3px solid rgba(57,155,216,0.34);
+  outline-offset: 2px;
+}
 
 .panel { display: none; }
 .panel.active { display: block; }
 
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 16px; margin-bottom: 22px; }
 .card {
-  background: white; padding: 16px 18px; border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05); border-left: 4px solid #0078d4;
+  position: relative;
+  background: var(--da-surface); padding: 18px 20px 18px 24px; border-radius: var(--da-radius);
+  box-shadow: var(--da-shadow); border: 1px solid var(--da-border); border-left: 4px solid var(--da-blue);
+  min-height: 104px;
 }
-.card .label { color: #605e5c; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-.card .val { font-size: 26px; font-weight: 600; margin-top: 4px; color: #201f1e; }
-.card .delta { font-size: 12px; margin-top: 2px; }
-.card.high { border-left-color: #d13438; }
-.card.medium { border-left-color: #ff8c00; }
-.card.low { border-left-color: #107c10; }
-.card.small { border-left-color: #8a8886; }
+.card .label { color: var(--da-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 800; max-width: 72%; }
+.card .val { font-size: 30px; font-weight: 300; margin-top: 10px; color: var(--da-text); letter-spacing: -0.03em; }
+.card .delta { font-size: 12px; margin-top: 3px; color: var(--da-muted); font-weight: 600; }
+.card.high { border-left-color: var(--da-coral); color: var(--da-coral); }
+.card.medium { border-left-color: var(--da-amber); color: var(--da-amber); }
+.card.low { border-left-color: var(--da-teal); color: var(--da-teal); }
+.card.small { border-left-color: #a7b0bc; color: #a7b0bc; }
 
 .chart-box {
-  background: white; border-radius: 6px; padding: 16px 18px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05); margin-bottom: 16px;
+  background: var(--da-surface); border-radius: var(--da-radius); padding: 24px 26px;
+  box-shadow: var(--da-shadow); border: 1px solid var(--da-border); margin-bottom: 20px;
 }
-.chart-box .title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-.chart-box .sub { font-size: 11px; color: #605e5c; margin-bottom: 12px; }
+.chart-box .title { font-size: 24px; font-weight: 300; margin-bottom: 6px; color: var(--da-text); letter-spacing: -0.02em; }
+.chart-box .sub { font-size: 12px; color: var(--da-muted); margin-bottom: 16px; font-weight: 600; }
 
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr); gap: 20px; }
 @media (max-width: 1100px) { .grid-2 { grid-template-columns: 1fr; } }
 
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
-th { background: #faf9f8; padding: 8px 10px; text-align: left; font-weight: 600; color: #323130;
-     border-bottom: 1px solid #d2d0ce; cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 1; }
-th:hover { background: #f3f2f1; }
-td { padding: 8px 10px; border-bottom: 1px solid #edebe9; }
+th { background: var(--da-surface-soft); padding: 10px 12px; text-align: left; font-weight: 800; color: var(--da-text);
+     border-bottom: 1px solid var(--da-border); cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 1;
+     text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+th:hover { background: #edf4f9; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--da-border); }
 tr.clickable { cursor: pointer; }
-tr.clickable:hover { background: #f3f2f1; }
+tr.clickable:hover { background: var(--da-surface-soft); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
-.pos { color: #107c10; }
-.neg { color: #d13438; }
-.zero { color: #8a8886; }
-.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-.tag.high { background: #fde7e9; color: #a4262c; }
-.tag.medium { background: #fff4ce; color: #8e562e; }
-.tag.low { background: #dff6dd; color: #107c10; }
-.tag.small-tag { background: #f3f2f1; color: #605e5c; }
+.pos { color: #16877f; }
+.neg { color: #c94f43; }
+.zero { color: #8a95a3; }
+.tag { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.tag.high { background: #fff0ee; color: #c94f43; }
+.tag.medium { background: #fff6df; color: #a45d00; }
+.tag.low { background: #e8f7f5; color: #16877f; }
+.tag.small-tag { background: var(--da-surface-soft); color: var(--da-muted); }
 
 .controls { display: flex; gap: 10px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
 .controls input, .controls select {
-  padding: 6px 10px; font-size: 13px; border: 1px solid #c8c6c4; border-radius: 4px;
-  font-family: inherit;
+  padding: 8px 12px; font-size: 13px; border: 1px solid var(--da-border); border-radius: 999px;
+  font-family: inherit; background: var(--da-surface); color: var(--da-text);
 }
-.controls input:focus, .controls select:focus { outline: 2px solid #0078d4; border-color: #0078d4; }
-.controls label { font-size: 12px; color: #605e5c; }
+.controls input:focus, .controls select:focus { outline: 2px solid rgba(57,155,216,0.32); border-color: var(--da-blue); }
+.controls label { font-size: 12px; color: var(--da-muted); font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
 
 .svg-container { width: 100%; overflow: visible; }
 .svg-container svg { width: 100%; height: auto; display: block; }
 
-.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; margin-top: 8px; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; margin-top: 12px; color: var(--da-muted); font-weight: 600; }
 .legend-item { display: flex; align-items: center; gap: 4px; }
-.legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+.legend-swatch { width: 12px; height: 12px; border-radius: 999px; }
 
 .tooltip {
-  position: absolute; background: #201f1e; color: white; padding: 6px 10px;
-  font-size: 11px; border-radius: 4px; pointer-events: none; opacity: 0; transition: opacity 0.15s;
-  z-index: 100; max-width: 280px;
+  position: absolute; background: var(--da-navy); color: white; padding: 8px 11px;
+  font-size: 11px; border-radius: var(--da-radius); pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  z-index: 1000; max-width: 280px; box-shadow: var(--da-shadow-strong);
 }
 .tooltip.show { opacity: 0.97; }
 
-.scroll-table { max-height: 500px; overflow-y: auto; border: 1px solid #edebe9; border-radius: 4px; }
+.scroll-table { max-height: 500px; overflow-y: auto; border: 1px solid var(--da-border); border-radius: var(--da-radius); }
 
-.product-row { padding: 8px 10px; border-bottom: 1px solid #edebe9; display: grid;
+.product-row { padding: 10px 12px; border-bottom: 1px solid var(--da-border); display: grid;
   grid-template-columns: minmax(260px, 1.8fr) 110px 90px 90px minmax(140px, 1fr); align-items: center; gap: 12px; }
 .product-row[hidden] { display: none; }
 .product-row:last-child { border-bottom: none; }
 .product-row .name { font-size: 12px; font-weight: 500; }
-.product-row.product-header { background: #faf9f8; color: #605e5c; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; position: sticky; top: 0; z-index: 1; }
+.product-row.product-header { background: var(--da-surface-soft); color: var(--da-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; position: sticky; top: 0; z-index: 1; }
 .product-row.category-row[data-sku-toggle] { cursor: pointer; }
-.product-row.category-row[data-sku-toggle]:hover { background: #f3f2f1; }
-.product-row.sku-row { background: #faf9f8; border-left: 3px solid #c8c6c4; }
-.product-row.sku-row .name { padding-left: 28px; color: #605e5c; font-weight: 400; }
-.sku-caret { display: inline-block; width: 14px; margin-right: 6px; color: #605e5c; user-select: none; }
-.sku-meta { display: block; color: #605e5c; font-size: 11px; font-weight: 400; margin-top: 2px; }
+.product-row.category-row[data-sku-toggle]:hover { background: var(--da-surface-soft); }
+.product-row.sku-row { background: var(--da-surface-soft); border-left: 3px solid #a7b0bc; }
+.product-row.sku-row .name { padding-left: 28px; color: var(--da-muted); font-weight: 400; }
+.sku-caret { display: inline-block; width: 14px; margin-right: 6px; color: var(--da-muted); user-select: none; }
+.sku-meta { display: block; color: var(--da-muted); font-size: 11px; font-weight: 400; margin-top: 2px; }
 
 .spark { display: inline-block; vertical-align: middle; }
 
-.note { background: #fffaf0; border-left: 3px solid #ff8c00; padding: 8px 12px;
-  border-radius: 4px; font-size: 12px; color: #5d3a00; margin: 12px 0; }
+.note { background: #fff7eb; border-left: 4px solid var(--da-amber); padding: 12px 16px;
+  border-radius: var(--da-radius); font-size: 12px; color: #5d3a00; margin: 14px 0 20px; box-shadow: 0 6px 16px rgba(42, 61, 82, 0.05); }
 
-.legend-strip { display: flex; gap: 16px; padding: 8px 12px; background: #faf9f8; border-radius: 4px;
-  margin-bottom: 12px; font-size: 12px; flex-wrap: wrap; }
+.guide-note {
+  display: block;
+  width: 100%;
+  margin: 0 0 16px;
+  padding: 16px 18px;
+  text-align: left;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  cursor: pointer;
+  border-top: 1px solid #ffe2b8;
+  border-right: 1px solid #ffe2b8;
+  border-bottom: 1px solid #ffe2b8;
+}
+.guide-note strong { font-size: 15px; }
+.guide-note .guide-cta {
+  display: inline-block;
+  margin-left: 6px;
+  color: #a45d00;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.guide-note:hover { background: #fff3dd; box-shadow: 0 10px 24px rgba(42, 61, 82, 0.08); }
+.guide-note:focus-visible { outline: 3px solid rgba(57,155,216,0.34); outline-offset: 2px; }
+
+.guide-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(38, 54, 74, 0.56);
+}
+.guide-modal[hidden] { display: none; }
+.guide-modal-card {
+  width: min(860px, 100%);
+  max-height: min(82vh, 760px);
+  overflow: auto;
+  background: var(--da-surface);
+  border: 1px solid var(--da-border);
+  border-radius: var(--da-radius);
+  box-shadow: var(--da-shadow-strong);
+  padding: 28px;
+}
+.guide-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.guide-modal h2 { font-size: 28px; font-weight: 300; letter-spacing: -0.03em; color: var(--da-text); }
+.guide-modal .guide-subtitle { margin-top: 6px; color: var(--da-muted); font-size: 14px; }
+.guide-close {
+  border: 0;
+  background: var(--da-surface-soft);
+  color: var(--da-text);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.guide-close:hover { background: #edf4f9; }
+.guide-close:focus-visible { outline: 3px solid rgba(57,155,216,0.34); outline-offset: 2px; }
+.guide-modal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+.guide-modal-section {
+  border: 1px solid var(--da-border);
+  border-left: 4px solid var(--da-blue);
+  border-radius: var(--da-radius);
+  padding: 18px;
+  background: var(--da-surface-soft);
+}
+.guide-modal-section.drift { border-left-color: var(--da-teal); }
+.guide-modal-section h3 { margin: 0 0 10px; color: var(--da-text); font-size: 17px; }
+.guide-modal-section p, .guide-modal li { color: var(--da-text); font-size: 14px; line-height: 1.55; }
+.guide-modal ul { margin: 10px 0 0 20px; }
+.guide-rule {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: var(--da-radius);
+  background: #eaf6fb;
+  color: var(--da-text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+@media (max-width: 760px) {
+  .guide-modal { padding: 14px; align-items: flex-start; }
+  .guide-modal-card { max-height: calc(100vh - 28px); padding: 20px; }
+  .guide-modal-head { flex-direction: column; }
+  .guide-modal-grid { grid-template-columns: 1fr; }
+}
+
+.legend-strip { display: flex; gap: 16px; padding: 12px 14px; background: var(--da-surface); border: 1px solid var(--da-border); border-radius: var(--da-radius);
+  margin-bottom: 16px; font-size: 12px; flex-wrap: wrap; box-shadow: var(--da-shadow); }
 
 .import-help { font-size: 10px; color: #d4e8f7; max-width: 240px; text-align: right; line-height: 1.3; }
+@media (max-width: 900px) {
+  body { padding: calc(var(--da-topbar) + 58px) 16px 24px; }
+}
+@media (max-width: 640px) {
+  .tabs { overflow-x: auto; }
+  .tab { flex: 0 0 auto; }
+}
 
-/* shared app nav (matches web-app/css/app.css .app-menu rules) */
-#app-nav .app-menu {
-  display: flex; gap: 12px; align-items: center;
-  padding: 10px 18px 0;
-  background: #f3f2f1;
-  border-bottom: 1px solid #edebe9;
+/* shared Trackado-inspired app shell (matches web-app/css/app.css) */
+body.shell-ready {
+  min-height: 100vh;
+  padding: calc(var(--da-topbar, 48px) + 26px) 28px 32px calc(var(--da-sidebar, 212px) + 28px);
 }
+#app-nav .app-topbar {
+  position: fixed; top: 0; left: var(--da-sidebar, 212px); right: 0; z-index: 900;
+  min-height: var(--da-topbar, 48px); display: flex; align-items: center; justify-content: space-between;
+  gap: 18px; padding: 0 28px; background: linear-gradient(90deg, var(--da-blue, #399bd8), #42a6df);
+  color: #ffffff; box-shadow: 0 2px 8px rgba(42, 61, 82, 0.12);
+}
+#app-nav .topbar-actions { display: flex; align-items: center; gap: 12px; min-width: 0; }
+#app-nav .topbar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+#app-nav .app-sidebar {
+  position: fixed; inset: 0 auto 0 0; z-index: 910; width: var(--da-sidebar, 212px);
+  padding: 24px 0; background: linear-gradient(180deg, var(--da-navy, #34465d), var(--da-navy-dark, #2d3d52));
+  color: #d7e2ec; box-shadow: 8px 0 26px rgba(42, 61, 82, 0.14);
+}
+#app-nav .sidebar-meta span { display: block; color: #9fb0c0; font-size: 11px; margin-top: 3px; }
+#app-nav .app-menu { display: grid; gap: 2px; }
 #app-nav .app-menu a {
-  color: #605e5c; text-decoration: none; font-weight: 700;
-  padding: 12px 14px 10px; border-bottom: 4px solid transparent;
-  font-size: 14px;
+  display: flex; align-items: center; gap: 10px; color: #d7e2ec; text-decoration: none; font-weight: 700;
+  padding: 14px 22px; border-left: 4px solid transparent; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em;
 }
-#app-nav .app-menu a.active {
-  color: #0078d4; border-bottom-color: #0078d4;
+#app-nav .app-menu a.active { color: #ffffff; background: rgba(255,255,255,0.08); border-left-color: var(--da-blue, #399bd8); }
+#app-nav .app-menu a:not(.active):hover { color: #ffffff; background: rgba(255,255,255,0.06); }
+#app-nav .app-menu a:focus-visible, #app-nav button.menu-action:focus-visible { outline: 3px solid rgba(57,155,216,0.38); outline-offset: 2px; }
+#app-nav .sidebar-meta { position: absolute; left: 22px; right: 22px; bottom: 24px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); }
+#app-nav .sidebar-meta strong { display: block; margin-top: 4px; color: #ffffff; font-size: 11px; line-height: 1.35; }
+#app-nav .source-pill {
+  font-size: 11px; color: #ffffff; padding: 6px 12px; background: rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.24); border-radius: 999px; max-width: 320px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-weight: 600;
 }
-#app-nav .app-menu a:not(.active):hover {
-  color: #0078d4; border-bottom-color: #0078d4;
+#app-nav button.menu-action {
+  font-size: 12px; padding: 7px 15px; background: #ffffff; border: 0; border-radius: 999px;
+  color: var(--da-blue, #399bd8); cursor: pointer; font-weight: 800; box-shadow: 0 2px 6px rgba(42,61,82,0.12);
 }
-#app-nav .app-menu .spacer { flex: 1; }
-#app-nav .app-menu .source-pill {
-  font-size: 11px; color: #605e5c;
-  padding: 4px 10px; background: #ffffff;
-  border: 1px solid #edebe9; border-radius: 12px;
-  max-width: 320px; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; font-weight: 400;
+#app-nav button.menu-action:hover { background: #f6f9fc; }
+#app-nav button.menu-action.sales-plan-action { color: #ffffff; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.24); }
+#app-nav button.menu-action.sales-plan-action:hover { background: rgba(255,255,255,0.22); }
+#app-nav button.menu-action.sales-plan-action:disabled { cursor: default; opacity: 0.78; }
+@media (max-width: 900px) {
+  body.shell-ready { padding: calc(var(--da-topbar, 48px) + 58px) 16px 24px; }
+  #app-nav .app-topbar { left: 0; padding: 0 16px; }
+  #app-nav .topbar-title { max-width: 45vw; }
+  #app-nav .app-sidebar { position: static; width: auto; padding: 0; box-shadow: none; }
+  #app-nav .sidebar-meta { display: none; }
+  #app-nav .app-menu { position: fixed; top: var(--da-topbar, 48px); left: 0; right: 0; z-index: 899; display: flex; overflow-x: auto; background: var(--da-navy, #34465d); }
+  #app-nav .app-menu a { flex: 0 0 auto; border-left: 0; border-bottom: 3px solid transparent; padding: 10px 14px; }
+  #app-nav .app-menu a.active { border-left-color: transparent; border-bottom-color: var(--da-blue, #399bd8); }
+  #app-nav .source-pill { max-width: 160px; }
 }
-#app-nav .app-menu button.menu-action {
-  font-size: 12px; padding: 6px 12px;
-  background: #ffffff; border: 1px solid #edebe9;
-  border-radius: 4px; color: #0078d4;
-  cursor: pointer; font-weight: 600;
-}
-#app-nav .app-menu button.menu-action:hover { background: #faf9f8; }
+@media (max-width: 640px) { #app-nav .source-pill { display: none; } #app-nav .topbar-actions { gap: 8px; } }
 
 /* empty-state splash (visible until first import) */
 #splash {
   position: fixed; inset: 0; z-index: 9999;
-  background: rgba(243, 242, 241, 0.96);
+  background: rgba(238, 243, 247, 0.96);
   display: flex; align-items: center; justify-content: center;
   font-family: 'Segoe UI', system-ui, sans-serif;
 }
 #splash[hidden] { display: none; }
 #splash .splash-card {
-  background: #ffffff; border: 1px solid #edebe9;
-  border-radius: 8px; padding: 36px 44px; max-width: 520px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.12); text-align: center;
+  background: #ffffff; border: 1px solid #dbe6ee;
+  border-radius: 2px; padding: 40px 46px; max-width: 540px;
+  box-shadow: 0 22px 48px rgba(42,61,82,0.14); text-align: center;
 }
-#splash h2 { margin: 0 0 8px; color: #0078d4; font-size: 22px; }
-#splash p { margin: 0 0 20px; color: #605e5c; font-size: 14px; line-height: 1.5; }
+#splash h2 { margin: 0 0 8px; color: #26364a; font-size: 28px; font-weight: 300; letter-spacing: -0.02em; }
+#splash p { margin: 0 0 22px; color: #738093; font-size: 14px; line-height: 1.55; }
 #splash-dropzone {
-  border: 2px dashed #c8c6c4; border-radius: 6px;
+  border: 2px dashed #a8bac9; border-radius: 2px;
   padding: 28px 20px; margin-bottom: 16px;
-  background: #faf9f8; transition: all 0.15s ease;
+  background: #f6f9fc; transition: all 0.15s ease;
   cursor: pointer;
 }
-#splash-dropzone:hover { border-color: #0078d4; background: #f3f9fd; }
+#splash-dropzone:hover { border-color: #399bd8; background: #edf7fd; }
 #splash-dropzone.dragover {
-  border-color: #0078d4; background: #deecf9;
+  border-color: #399bd8; background: #d9eefb;
   border-style: solid;
 }
 #splash-dropzone .dz-icon { font-size: 32px; line-height: 1; margin-bottom: 8px; }
-#splash-dropzone .dz-main { color: #323130; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
-#splash-dropzone .dz-sub { color: #605e5c; font-size: 12px; }
+#splash-dropzone .dz-main { color: #26364a; font-weight: 800; font-size: 14px; margin-bottom: 4px; }
+#splash-dropzone .dz-sub { color: #738093; font-size: 12px; }
 #splash button {
-  background: #0078d4; color: #ffffff; border: 0;
-  padding: 12px 28px; border-radius: 4px; font-size: 15px;
-  font-weight: 600; cursor: pointer;
+  background: #2fb0a8; color: #ffffff; border: 0;
+  padding: 12px 28px; border-radius: 999px; font-size: 15px;
+  font-weight: 800; cursor: pointer;
 }
-#splash button:hover { background: #106ebe; }
-#splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a8886; }
-#splash .splash-error { margin-top: 12px; font-size: 13px; color: #a4262c; min-height: 18px; }
+#splash button:hover { background: #239892; }
+#splash .splash-hint { margin-top: 16px; font-size: 12px; color: #8a95a3; }
+#splash .splash-error { margin-top: 12px; font-size: 13px; color: #c94f43; min-height: 18px; }
 #splash .splash-progress {
   margin-top: 16px; height: 6px; border-radius: 999px;
   background: #e6e9ef; overflow: hidden; display: none;
@@ -213,11 +355,11 @@ tr.clickable:hover { background: #f3f2f1; }
 #splash .splash-progress.active { display: block; }
 #splash .splash-progress .bar {
   height: 100%; width: 0%; border-radius: 999px;
-  background: linear-gradient(90deg, #0078d4, #4aa3e8);
+  background: linear-gradient(90deg, #399bd8, #2fb0a8);
   transition: width 0.28s ease;
 }
 #splash .splash-progress-label {
-  margin-top: 8px; font-size: 12px; color: #605e5c; min-height: 16px;
+  margin-top: 8px; font-size: 12px; color: #738093; min-height: 16px;
 }
 </style>
 </head>
@@ -240,19 +382,14 @@ tr.clickable:hover { background: #f3f2f1; }
 </div>
 <div id="app-nav" data-active="acr"></div>
 
-<div class="header">
-  <div class="header-left">
-    <h1>Defender for Cloud — Customer Opportunity Dashboard</h1>
-    <div class="meta" id="header-meta">FY26 &nbsp;•&nbsp; <span id="meta-customers">–</span> customers &nbsp;•&nbsp; Monthly ACR basis &nbsp;•&nbsp; Last full month: <span id="meta-month">–</span></div>
-  </div>
-  <div class="import-panel">
-    <input type="file" id="file-input" accept=".xlsx,.xls" style="display:none">
-    <button class="import-btn" id="import-btn">📂 Import new Excel</button>
-    <button class="import-btn" id="export-pptx-btn" style="margin-left:8px">📑 Export to PowerPoint</button>
-    <div class="import-status" id="import-status">Pick an Excel export to load the dashboard. Your data stays on this machine.</div>
-    <div class="import-help">Upload a fresh "ACR Details by … Month" export to refresh the entire dashboard.</div>
-  </div>
-</div>
+<input type="file" id="file-input" accept=".xlsx,.xls" style="display:none">
+<button class="import-btn" id="import-btn" type="button" hidden>Import new Excel</button>
+<div class="import-status" id="import-status" hidden></div>
+
+<button class="note guide-note" id="overview-guide-trigger" type="button" aria-haspopup="dialog" aria-controls="view-guide-modal">
+  <span class="guide-summary"><strong>How to read this:</strong> Each account buys Azure workloads (containers, SQL, App Service, storage, and more) without the matching Defender for Cloud plan switched on. Use <em>Service Attach Opportunities</em> for workloads customers buy but do not protect, and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart.</span>
+  <span class="guide-cta">Learn when to use each view</span>
+</button>
 
 <div class="tabs">
   <button class="tab active" data-tab="overview">Overview</button>
@@ -270,10 +407,6 @@ tr.clickable:hover { background: #f3f2f1; }
     <div class="card small"><div class="label">Too Small</div><div class="val" id="kpi-small">–</div><div class="delta">&lt; $1,500/month total ACR</div></div>
     <div class="card"><div class="label">DfC Monthly ACR</div><div class="val" id="kpi-dfc-acr">–</div><div class="delta" id="kpi-dfc-mom">–</div></div>
     <div class="card"><div class="label">DfC % of Portfolio</div><div class="val" id="kpi-dfc-pct">–</div><div class="delta">share of total ACR</div></div>
-  </div>
-
-  <div class="note">
-    <strong>How to read this:</strong> "Opportunity" flags customers where Defender for Cloud is flat or shrinking while their other Azure workloads grow — a signal that DfC is underused relative to their footprint. To refresh with the latest data, click <em>Import new Excel</em> and pick your latest export.
   </div>
 
   <div class="grid-2">
@@ -349,6 +482,41 @@ tr.clickable:hover { background: #f3f2f1; }
 
 <div class="tooltip" id="tooltip"></div>
 
+<div class="guide-modal" id="view-guide-modal" role="dialog" aria-modal="true" aria-labelledby="view-guide-title" hidden>
+  <div class="guide-modal-card" role="document">
+    <div class="guide-modal-head">
+      <div>
+        <h2 id="view-guide-title">Which view should I use?</h2>
+        <p class="guide-subtitle">A plain-English guide for sales follow-up conversations.</p>
+      </div>
+      <button type="button" class="guide-close" id="view-guide-close">Got it</button>
+    </div>
+    <div class="guide-modal-grid">
+      <section class="guide-modal-section">
+        <h3>Service Attach Opportunities</h3>
+        <p>Use this when you want to know what protection to attach next. It finds customers who already buy Azure services but do not appear to have the matching Defender plan turned on.</p>
+        <ul>
+          <li><strong>Sales example:</strong> The customer spends on SQL databases, containers, or App Service, but the matching Defender coverage is missing or much lower than expected.</li>
+          <li><strong>Use it for:</strong> building account call lists, attach motions, and concrete "you already run this, let's protect it" conversations.</li>
+          <li><strong>Question it answers:</strong> "What should we sell or attach next?"</li>
+        </ul>
+      </section>
+      <section class="guide-modal-section drift">
+        <h3>Defender Coverage Drift</h3>
+        <p>Use this when you want to understand whether protection is keeping pace as the customer's Azure footprint changes over time.</p>
+        <ul>
+          <li><strong>Sales example:</strong> Azure usage is growing month over month, but Defender for Cloud is flat, shrinking, or growing much more slowly.</li>
+          <li><strong>Use it for:</strong> account health reviews, renewal conversations, and explaining why security coverage may be falling behind cloud growth.</li>
+          <li><strong>Question it answers:</strong> "Where is protection not keeping up with Azure growth?"</li>
+        </ul>
+      </section>
+    </div>
+    <div class="guide-rule">
+      <strong>Simple rule:</strong> Start with <em>Service Attach Opportunities</em> when you need a sales action list. Use <em>Defender Coverage Drift</em> when you need a trend story that explains why an account may be under-protected over time.
+    </div>
+  </div>
+</div>
+
 <script>
 let DATA = {
   months: [], month_labels: [], partial_month_idx: -1,
@@ -389,6 +557,38 @@ document.querySelectorAll('.tab').forEach(btn => {
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
   });
 });
+
+// ============ Sales guide modal ============
+(function initGuideModal() {
+  const trigger = document.getElementById('overview-guide-trigger');
+  const modal = document.getElementById('view-guide-modal');
+  const close = document.getElementById('view-guide-close');
+  let returnFocusTo = null;
+
+  if (!trigger || !modal || !close) return;
+
+  function openGuide() {
+    returnFocusTo = document.activeElement;
+    modal.hidden = false;
+    close.focus();
+  }
+
+  function closeGuide() {
+    modal.hidden = true;
+    if (returnFocusTo && typeof returnFocusTo.focus === 'function') {
+      returnFocusTo.focus();
+    }
+  }
+
+  trigger.addEventListener('click', openGuide);
+  close.addEventListener('click', closeGuide);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeGuide();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !modal.hidden) closeGuide();
+  });
+})();
 
 // ============ Excel import & recompute ============
 document.getElementById('import-btn').addEventListener('click', () => {
@@ -437,6 +637,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
 
 function setStatus(msg, kind) {
   const el = document.getElementById('import-status');
+  if (!el) return;
   el.textContent = msg;
   el.className = 'import-status' + (kind ? ' ' + kind : '');
 }
@@ -630,12 +831,12 @@ function parseAndScore(rows) {
 function donutChart(containerId, items, opts = {}) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  const W = opts.width || 600, H = opts.height || 260;
+  const W = opts.width || 600, H = opts.height || 320;
   const cx = W / 2, cy = H / 2;
-  const rOuter = Math.min(W, H) / 2 - 14, rInner = rOuter * 0.6;
+  const rOuter = Math.min(W, H) / 2 - 18, rInner = rOuter * 0.58;
   const total = items.reduce((a, d) => a + (Number(d.value) || 0), 0);
   if (!(total > 0)) {
-    el.innerHTML = '<div style="padding:40px;text-align:center;color:#a19f9d;font-size:12px;">No service ACR to display</div>';
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#8a95a3;font-size:12px;">No service ACR to display</div>';
     return;
   }
   const totalLbl = total >= 1e6 ? '$' + (total / 1e6).toFixed(2) + 'M' : total >= 1000 ? '$' + (total / 1000).toFixed(1) + 'k' : '$' + total.toFixed(0);
@@ -659,8 +860,8 @@ function donutChart(containerId, items, opts = {}) {
       a0 = a1;
     });
   }
-  svg += `<text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="15" font-weight="700" fill="#323130">${totalLbl}</text>`;
-  svg += `<text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10" fill="#605e5c">avg monthly ACR</text>`;
+  svg += `<text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="15" font-weight="700" fill="#26364a">${totalLbl}</text>`;
+  svg += `<text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10" fill="#738093">avg monthly ACR</text>`;
   svg += `</svg>`;
   el.innerHTML = svg;
   el.querySelectorAll('[data-label]').forEach(seg => {
@@ -713,18 +914,18 @@ function lineChart(containerId, series, opts = {}) {
   for (let t = 0; t <= yTicks; t++) {
     const yv = yMin + (yMax - yMin) * t / yTicks;
     const yp = y(yv);
-    svg += `<line x1="${M.left}" y1="${yp}" x2="${W - M.right}" y2="${yp}" stroke="#edebe9" stroke-width="1"/>`;
+    svg += `<line x1="${M.left}" y1="${yp}" x2="${W - M.right}" y2="${yp}" stroke="#dbe6ee" stroke-width="1"/>`;
     const lbl = indexed ? yv.toFixed(0) : (yv >= 1000 ? '$' + (yv/1000).toFixed(1) + 'k' : '$' + yv.toFixed(0));
-    svg += `<text x="${M.left - 6}" y="${yp + 3}" text-anchor="end" font-size="10" fill="#605e5c">${lbl}</text>`;
+    svg += `<text x="${M.left - 6}" y="${yp + 3}" text-anchor="end" font-size="10" fill="#738093">${lbl}</text>`;
   }
   const partialIdx = (opts.partialIdx != null) ? opts.partialIdx : DATA.partial_month_idx;
   labels.forEach((l, i) => {
     const isPartial = i === partialIdx;
-    svg += `<text x="${x(i)}" y="${H - M.bottom + 14}" text-anchor="middle" font-size="10" fill="${isPartial ? '#a4262c' : '#605e5c'}">${l}${isPartial ? '*' : ''}</text>`;
+    svg += `<text x="${x(i)}" y="${H - M.bottom + 14}" text-anchor="middle" font-size="10" fill="${isPartial ? '#c94f43' : '#738093'}">${l}${isPartial ? '*' : ''}</text>`;
   });
 
   processed.forEach(s => {
-    const color = s.color || '#0078d4';
+    const color = s.color || '#399bd8';
     let pathD = '';
     s.vals.forEach((v, i) => {
       const yp = y(v); if (yp == null) return;
@@ -763,10 +964,10 @@ function barChartHorizontal(containerId, items) {
   items.forEach((d, i) => {
     const yp = M.top + i * rowH;
     const w = (d.value / maxV) * innerW;
-    const color = d.color || '#0078d4';
-    svg += `<text x="${M.left - 8}" y="${yp + rowH/2 + 4}" text-anchor="end" font-size="12" fill="#323130">${escapeHtml(d.label.length > 28 ? d.label.slice(0, 28) + '…' : d.label)}</text>`;
+    const color = d.color || '#399bd8';
+    svg += `<text x="${M.left - 8}" y="${yp + rowH/2 + 4}" text-anchor="end" font-size="12" fill="#26364a">${escapeHtml(d.label.length > 28 ? d.label.slice(0, 28) + '…' : d.label)}</text>`;
     svg += `<rect x="${M.left}" y="${yp + 4}" width="${w}" height="${rowH - 8}" fill="${color}" data-customer="${escapeHtml(d.label)}" data-val="${d.value}" style="cursor:pointer"/>`;
-    svg += `<text x="${M.left + w + 8}" y="${yp + rowH/2 + 4}" font-size="11" fill="#605e5c">$${d.value.toLocaleString('en-US', {maximumFractionDigits: 0})}</text>`;
+    svg += `<text x="${M.left + w + 8}" y="${yp + rowH/2 + 4}" font-size="11" fill="#738093">$${d.value.toLocaleString('en-US', {maximumFractionDigits: 0})}</text>`;
   });
   svg += `</svg>`;
   document.getElementById(containerId).innerHTML = svg;
@@ -812,29 +1013,29 @@ function quadrantChart(containerId, allPoints) {
   svg += `<rect x="${x0}" y="${y0}" width="${W - M.right - x0}" height="${H - M.bottom - y0}" fill="#fde7e9" opacity="0.4"/>`;
   svg += `<rect x="${x0}" y="${M.top}" width="${W - M.right - x0}" height="${y0 - M.top}" fill="#dff6dd" opacity="0.4"/>`;
   svg += `<rect x="${M.left}" y="${M.top}" width="${x0 - M.left}" height="${y0 - M.top}" fill="#fff4ce" opacity="0.4"/>`;
-  svg += `<rect x="${M.left}" y="${y0}" width="${x0 - M.left}" height="${H - M.bottom - y0}" fill="#f3f2f1" opacity="0.6"/>`;
+  svg += `<rect x="${M.left}" y="${y0}" width="${x0 - M.left}" height="${H - M.bottom - y0}" fill="#eef3f7" opacity="0.6"/>`;
 
   // Gridlines & tick labels at clean intervals
   const xTicks = [-0.6, -0.3, 0, 0.3, 0.6];
   const yTicks = [-1.0, -0.5, 0, 0.5, 1.0];
   xTicks.forEach(xv => {
-    svg += `<line x1="${xScale(xv)}" y1="${M.top}" x2="${xScale(xv)}" y2="${H - M.bottom}" stroke="#edebe9"/>`;
-    svg += `<text x="${xScale(xv)}" y="${H - M.bottom + 14}" text-anchor="middle" font-size="10" fill="#605e5c">${(xv*100).toFixed(0)}%</text>`;
+    svg += `<line x1="${xScale(xv)}" y1="${M.top}" x2="${xScale(xv)}" y2="${H - M.bottom}" stroke="#dbe6ee"/>`;
+    svg += `<text x="${xScale(xv)}" y="${H - M.bottom + 14}" text-anchor="middle" font-size="10" fill="#738093">${(xv*100).toFixed(0)}%</text>`;
   });
   yTicks.forEach(yv => {
-    svg += `<line x1="${M.left}" y1="${yScale(yv)}" x2="${W - M.right}" y2="${yScale(yv)}" stroke="#edebe9"/>`;
-    svg += `<text x="${M.left - 6}" y="${yScale(yv) + 3}" text-anchor="end" font-size="10" fill="#605e5c">${(yv*100).toFixed(0)}%</text>`;
+    svg += `<line x1="${M.left}" y1="${yScale(yv)}" x2="${W - M.right}" y2="${yScale(yv)}" stroke="#dbe6ee"/>`;
+    svg += `<text x="${M.left - 6}" y="${yScale(yv) + 3}" text-anchor="end" font-size="10" fill="#738093">${(yv*100).toFixed(0)}%</text>`;
   });
 
-  svg += `<line x1="${x0}" y1="${M.top}" x2="${x0}" y2="${H - M.bottom}" stroke="#a19f9d" stroke-width="1.5"/>`;
-  svg += `<line x1="${M.left}" y1="${y0}" x2="${W - M.right}" y2="${y0}" stroke="#a19f9d" stroke-width="1.5"/>`;
-  svg += `<text x="${M.left + innerW/2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#323130" font-weight="600">Growth gap → growing</text>`;
-  svg += `<text x="18" y="${M.top + innerH/2}" text-anchor="middle" font-size="11" fill="#323130" font-weight="600" transform="rotate(-90 18 ${M.top + innerH/2})">DfC penetration → growing</text>`;
+  svg += `<line x1="${x0}" y1="${M.top}" x2="${x0}" y2="${H - M.bottom}" stroke="#a7b0bc" stroke-width="1.5"/>`;
+  svg += `<line x1="${M.left}" y1="${y0}" x2="${W - M.right}" y2="${y0}" stroke="#a7b0bc" stroke-width="1.5"/>`;
+  svg += `<text x="${M.left + innerW/2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#26364a" font-weight="600">Growth gap → growing</text>`;
+  svg += `<text x="18" y="${M.top + innerH/2}" text-anchor="middle" font-size="11" fill="#26364a" font-weight="600" transform="rotate(-90 18 ${M.top + innerH/2})">DfC penetration → growing</text>`;
   // Zone labels — pinned to corners so bubbles never sit on top of them
-  svg += `<text x="${W - M.right - 8}" y="${H - M.bottom - 8}" text-anchor="end" font-size="11" fill="#a4262c" font-weight="700" opacity="0.85">⚠ HIGH OPPORTUNITY</text>`;
-  svg += `<text x="${W - M.right - 8}" y="${M.top + 14}" text-anchor="end" font-size="11" fill="#107c10" font-weight="700" opacity="0.85">✓ Healthy alignment</text>`;
-  svg += `<text x="${M.left + 8}" y="${M.top + 14}" text-anchor="start" font-size="11" fill="#8e562e" font-weight="700" opacity="0.7">DfC outpacing rest</text>`;
-  svg += `<text x="${M.left + 8}" y="${H - M.bottom - 8}" text-anchor="start" font-size="11" fill="#605e5c" font-weight="700" opacity="0.7">Both shrinking</text>`;
+  svg += `<text x="${W - M.right - 8}" y="${H - M.bottom - 8}" text-anchor="end" font-size="11" fill="#c94f43" font-weight="700" opacity="0.85">⚠ HIGH OPPORTUNITY</text>`;
+  svg += `<text x="${W - M.right - 8}" y="${M.top + 14}" text-anchor="end" font-size="11" fill="#16877f" font-weight="700" opacity="0.85">✓ Healthy alignment</text>`;
+  svg += `<text x="${M.left + 8}" y="${M.top + 14}" text-anchor="start" font-size="11" fill="#a45d00" font-weight="700" opacity="0.7">DfC outpacing rest</text>`;
+  svg += `<text x="${M.left + 8}" y="${H - M.bottom - 8}" text-anchor="start" font-size="11" fill="#738093" font-weight="700" opacity="0.7">Both shrinking</text>`;
 
   // Axis-edge note for clipped customers
   let clippedHigh = 0, clippedLow = 0;
@@ -843,7 +1044,7 @@ function quadrantChart(containerId, allPoints) {
     if (p.y < -Y_LIMIT) clippedLow++;
   });
 
-  const colorMap = {High: '#d13438', Medium: '#ff8c00', Low: '#107c10', 'Too small': '#a19f9d'};
+  const colorMap = {High: '#f36b5d', Medium: '#ffb04f', Low: '#2fb0a8', 'Too small': '#a7b0bc'};
   const opacityMap = {High: 0.78, Medium: 0.7, Low: 0.32, 'Too small': 0.25};
   // Sort so high-priority bubbles render on top of low-priority ones
   const oppRank = {High: 3, Medium: 2, Low: 1, 'Too small': 0};
@@ -867,16 +1068,16 @@ function quadrantChart(containerId, allPoints) {
     const isClippedX = p.x > xMax || p.x < xMin;
     let cx = xScale(visualX), cy = yScale(visualY);
     const r = sScale(p.size || 1);
-    const fill = colorMap[p.opportunity] || '#0078d4';
+    const fill = colorMap[p.opportunity] || '#399bd8';
     const op = opacityMap[p.opportunity] != null ? opacityMap[p.opportunity] : 0.65;
-    const stroke = (isClippedY || isClippedX) ? '#201f1e' : 'white';
+    const stroke = (isClippedY || isClippedX) ? '#26364a' : 'white';
     const strokeWidth = (isClippedY || isClippedX) ? 2 : 1.5;
     svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" opacity="${op}" stroke="${stroke}" stroke-width="${strokeWidth}" data-customer="${escapeHtml(p.label)}" data-x="${p.x}" data-y="${p.y}" data-size="${p.size}" data-opp="${p.opportunity}" data-clipped="${isClippedY || isClippedX ? '1' : '0'}" style="cursor:pointer"/>`;
     // arrow indicator for clipped points
     if (isClippedY && p.y > yMax) {
-      svg += `<text x="${cx}" y="${cy - r - 2}" text-anchor="middle" font-size="11" fill="#201f1e" font-weight="700">▲</text>`;
+      svg += `<text x="${cx}" y="${cy - r - 2}" text-anchor="middle" font-size="11" fill="#26364a" font-weight="700">▲</text>`;
     } else if (isClippedY && p.y < yMin) {
-      svg += `<text x="${cx}" y="${cy + r + 10}" text-anchor="middle" font-size="11" fill="#201f1e" font-weight="700">▼</text>`;
+      svg += `<text x="${cx}" y="${cy + r + 10}" text-anchor="middle" font-size="11" fill="#26364a" font-weight="700">▼</text>`;
     }
 
     // Direct customer label for the top N high/medium opportunity bubbles
@@ -904,7 +1105,7 @@ function quadrantChart(containerId, allPoints) {
         }
       }
       if (chosen) {
-        svg += `<text x="${chosen.x}" y="${chosen.y}" text-anchor="${chosen.align}" font-size="10" fill="#201f1e" font-weight="600" style="paint-order:stroke; stroke:#ffffff; stroke-width:3px; stroke-linejoin:round;">${escapeHtml(truncated)}</text>`;
+        svg += `<text x="${chosen.x}" y="${chosen.y}" text-anchor="${chosen.align}" font-size="10" fill="#26364a" font-weight="600" style="paint-order:stroke; stroke:#ffffff; stroke-width:3px; stroke-linejoin:round;">${escapeHtml(truncated)}</text>`;
       }
     }
   });
@@ -935,7 +1136,7 @@ function quadrantChart(containerId, allPoints) {
   });
 }
 
-function sparkline(values, w=120, h=24, color='#0078d4') {
+function sparkline(values, w=120, h=24, color='#399bd8') {
   const max = Math.max(...values, 0.01);
   const min = Math.min(...values, 0);
   const range = max - min || 1;
@@ -953,17 +1154,19 @@ function sparkline(values, w=120, h=24, color='#0078d4') {
 // ============ Renderers ============
 const TRACK_PRODUCTS = ['Defender for Cloud', 'Azure Virtual Desktop', 'General Purpose Compute', 'AI Services', 'Network Security', 'Sentinel'];
 const PRODUCT_COLORS = {
-  'Defender for Cloud': '#0078d4',
-  'Azure Virtual Desktop': '#107c10',
-  'General Purpose Compute': '#ff8c00',
-  'AI Services': '#8764b8',
-  'Network Security': '#d13438',
-  'Sentinel': '#005a9e',
+  'Defender for Cloud': '#399bd8',
+  'Azure Virtual Desktop': '#2fb0a8',
+  'General Purpose Compute': '#ffb04f',
+  'AI Services': '#7c68b8',
+  'Network Security': '#f36b5d',
+  'Sentinel': '#2b89c6',
 };
 
 function renderKpis() {
-  document.getElementById('meta-customers').textContent = DATA.customers.length;
-  document.getElementById('meta-month').textContent = (DATA.last_full_month || '').replace(/^FY\d+-/, '');
+  const metaCustomers = document.getElementById('meta-customers');
+  const metaMonth = document.getElementById('meta-month');
+  if (metaCustomers) metaCustomers.textContent = DATA.customers.length;
+  if (metaMonth) metaMonth.textContent = (DATA.last_full_month || '').replace(/^FY\d+-/, '');
   document.getElementById('kpi-high').textContent = DATA.counts.high;
   document.getElementById('kpi-med').textContent = DATA.counts.medium;
   document.getElementById('kpi-low').textContent = DATA.counts.low;
@@ -989,7 +1192,7 @@ function renderDfcTrend() {
   const weekly = !!(DATA.weekly_enabled && DATA.dfc_total_weekly);
   const values = weekly ? DATA.dfc_total_weekly : DATA.dfc_total_monthly;
   const labels = weekly ? DATA.week_labels : DATA.month_labels;
-  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#0078d4'}], {labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});
+  lineChart('chart-dfc-trend', [{label: 'Defender for Cloud', values, color: '#399bd8'}], {labels, partialIdx: weekly ? -1 : DATA.partial_month_idx});
 }
 
 // Pure selection + reconciliation math for the product-mix donut. Kept separate from
@@ -1010,10 +1213,10 @@ function computeDonutSlices(src, partial) {
   const p = (typeof partial === 'number') ? partial : -1;
   const avgOf = a => { const arr = Array.isArray(a) ? a : []; const vals = arr.filter((_, i) => i !== p); if (!vals.length) return 0; return vals.reduce((s, v) => s + (Number(v) || 0), 0) / vals.length; };
   const isHex = c => /^#[0-9a-fA-F]{6}$/.test(c);
-  // Deterministic palette by rank; DfC (#0078d4) and Sentinel (#005a9e) keep their
+  // Deterministic palette by rank; DfC (#399bd8) and Sentinel (#2b89c6) keep their
   // brand colours and are intentionally excluded from the rotation to avoid collisions.
-  const PALETTE = ['#107c10','#5c2d91','#d83b01','#008272','#a4262c','#c19c00','#004e8c','#874800','#5d5a58','#018574','#8764b8','#e3008c'];
-  const colorFor = (label, rank) => { if (label === DFC) return '#0078d4'; if (label === 'Sentinel') return '#005a9e'; const c = PALETTE[rank % PALETTE.length]; return isHex(c) ? c : '#605e5c'; };
+  const PALETTE = ['#2fb0a8','#7c68b8','#ffb04f','#40bfd6','#f36b5d','#c79d32','#5c6f8f','#b56a2f','#8a95a3','#2d9fc3','#8764b8','#d95aa6'];
+  const colorFor = (label, rank) => { if (label === DFC) return '#399bd8'; if (label === 'Sentinel') return '#2b89c6'; const c = PALETTE[rank % PALETTE.length]; return isHex(c) ? c : '#738093'; };
   const all = Object.keys(src).filter(k => k !== 'Total')
     .map(k => ({label: k, value: avgOf(src[k])}))
     .filter(d => d.value > 0)
@@ -1033,7 +1236,7 @@ function computeDonutSlices(src, partial) {
   const tailSum = tail.reduce((s, d) => s + d.value, 0);
   const otherCats = tail.map(d => ({label: d.label, value: d.value}));
   if (otherVal - tailSum > 1) otherCats.push({label: 'Unmapped / residual', value: otherVal - tailSum});
-  if (otherVal > 1) items.push({label: 'Other services', value: otherVal, color: '#c8c6c4'});
+  if (otherVal > 1) items.push({label: 'Other services', value: otherVal, color: '#a7b0bc'});
   return {items: items, otherCats: otherCats, totalAvg: totalAvg, otherVal: otherVal};
 }
 function renderProductMix() {
@@ -3013,13 +3216,13 @@ function slDecorateOverview() {
     topPlan ? fmt.money(topPlanGap) : '\u2013',
     topPlan ? topPlan + ' / mo across the book' : 'no quantified service gap');
 
-  const note = document.querySelector('#panel-overview .note');
-  if (note) {
-    note.innerHTML = '<strong>How to read this:</strong> Each account buys Azure workloads '
+  const guideSummary = document.querySelector('#overview-guide-trigger .guide-summary');
+  if (guideSummary) {
+    guideSummary.innerHTML = '<strong>How to read this:</strong> Each account buys Azure workloads '
       + '(containers, SQL, App Service, storage, and more) without the matching Defender for Cloud plan switched on. '
       + 'The cards size the total monthly and annualized attach gap across the book, how many accounts are affected, '
       + 'and which Defender service carries the largest gap. Use <em>Service Attach Opportunities</em> for workloads customers buy but do not protect, '
-      + 'and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart. To refresh, click <em>Import new Excel</em> and pick your latest export.';
+      + 'and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart.';
   }
 
   // Chart 1: attach gap by Defender service (non-clickable plan bars).
@@ -3746,40 +3949,6 @@ document.addEventListener('DOMContentLoaded', function() {
 <script src="./js/sl-parser.js"></script>
 <script src="./js/sl-engine.js"></script>
 <script src="./js/acr-model.js"></script>
-<script src="./vendor/pptxgen.bundle.js"></script>
-<script src="./js/pptx-acr.js"></script>
 <script src="./js/app-nav.js"></script>
-<script>
-(function () {
-  const btn = document.getElementById('export-pptx-btn');
-  if (!btn) return;
-  btn.addEventListener('click', async () => {
-    if (!window.PptxAcr || typeof window.PptxAcr.exportDeck !== 'function') {
-      setStatus('PowerPoint export module is not loaded.', 'error');
-      return;
-    }
-    if (!DATA || !Array.isArray(DATA.opportunity) || DATA.opportunity.length === 0) {
-      setStatus('Load an Excel export before exporting to PowerPoint.', 'error');
-      return;
-    }
-    btn.disabled = true;
-    const originalLabel = btn.textContent;
-    btn.textContent = 'Building deck…';
-    try {
-      const threshold = (typeof dfcShareThreshold === 'number') ? dfcShareThreshold : 6;
-      if (typeof reclassifyOpportunities === 'function') reclassifyOpportunities(threshold);
-      const sourceName = DATA.source_name || 'Imported workbook';
-      await window.PptxAcr.exportDeck(DATA, sourceName, threshold);
-      setStatus('PowerPoint deck downloaded.', 'success');
-    } catch (err) {
-      console.error('PPTX export failed', err);
-      setStatus('PowerPoint export failed: ' + (err && err.message ? err.message : err), 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = originalLabel;
-    }
-  });
-})();
-</script>
 </body>
 </html>

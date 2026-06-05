@@ -33,6 +33,7 @@ from defender_acr_dashboard.service_attach.parser import (  # noqa: E402
 from defender_acr_dashboard.service_attach import export  # noqa: E402
 
 DEFAULT_FILE = ROOT / "inputfolder" / "ACR Details SL2-SL4.xlsx"
+UPLOAD_TMP_STATE_KEY = "_defender_attach_upload_tmp"
 
 st.set_page_config(
     page_title="Defender Attach — Service Level", page_icon="🛡️", layout="wide"
@@ -57,6 +58,30 @@ def _build_cached(path: str, sig: str, cfg_key: tuple) -> BookModel:
         use_cohort_median=cfg_key[6],
     )
     return build_model(parsed, config)
+
+
+def _cleanup_uploaded_temp(except_path: Path | None = None) -> None:
+    previous = st.session_state.get(UPLOAD_TMP_STATE_KEY)
+    if not previous:
+        return
+    previous_path = Path(previous)
+    if except_path is not None and previous_path == except_path:
+        return
+    try:
+        previous_path.unlink(missing_ok=True)
+    except OSError as exc:
+        st.sidebar.warning(f"Could not remove previous uploaded workbook temp file: {exc}")
+        return
+    st.session_state.pop(UPLOAD_TMP_STATE_KEY, None)
+
+
+def _write_uploaded_temp(raw: bytes, sig: str) -> Path:
+    tmp = Path(tempfile.gettempdir()) / f"defender_attach_{sig}.xlsx"
+    _cleanup_uploaded_temp(except_path=tmp)
+    if not tmp.exists() or tmp.stat().st_size != len(raw):
+        tmp.write_bytes(raw)
+    st.session_state[UPLOAD_TMP_STATE_KEY] = str(tmp)
+    return tmp
 
 
 def _money(value: float | None) -> str:
@@ -85,8 +110,7 @@ if uploaded is not None:
     try:
         raw = uploaded.getbuffer()
         sig = hashlib.md5(raw).hexdigest()  # content-based key so re-uploads bust the cache
-        tmp = Path(tempfile.gettempdir()) / f"defender_attach_{sig}.xlsx"
-        tmp.write_bytes(raw)
+        tmp = _write_uploaded_temp(bytes(raw), sig)
     except Exception as exc:  # noqa: BLE001
         st.sidebar.error(f"❌ Could not read the uploaded file: {exc}")
         st.stop()
@@ -94,6 +118,7 @@ if uploaded is not None:
     using_uploaded = True
     source_label = uploaded.name
 elif DEFAULT_FILE.exists():
+    _cleanup_uploaded_temp()
     data_path = DEFAULT_FILE
     stat = DEFAULT_FILE.stat()
     sig = f"{stat.st_mtime_ns}:{stat.st_size}"

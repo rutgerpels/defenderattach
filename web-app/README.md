@@ -9,7 +9,7 @@ This folder is a self-contained, zero-install version of the Defender for Cloud 
 3. Click **Pick an Excel file** (or drag and drop) and choose your `ACR Details by … Month` export. It stays on your machine.
 4. Use the **Milestones** link in the top nav to switch to the milestone attach-gap view. There you pick **two** workbooks — one Migration export, one Defender export.
 
-That's it. Both pages have **Export to PowerPoint** and the milestone page also has **Download CSV**.
+That's it. The ACR page includes a **Build sales plan** placeholder for the next sales workflow. The milestone page has **Export to PowerPoint** and **Download CSV**.
 
 ## Why a static app
 
@@ -23,7 +23,8 @@ That's it. Both pages have **Export to PowerPoint** and the milestone page also 
 |---|---|
 | ACR opportunity dashboard (Sales Action Queue, Opportunity Heatmap, KPI cards, threshold slider, All Customers table) | `index.html` is generated from `docs/defender_for_cloud_dashboard (2).html` by `scripts/build_static_webapp.py`, with the Python model swapped for the JS port (`js/acr-model.js`). |
 | Milestone attach-gap analysis | Two file pickers, same model as `milestone_analysis.py`. |
-| PowerPoint export (both pages) | [PptxGenJS](https://gitbrent.github.io/PptxGenJS/) (vendored under `vendor/`). |
+| ACR sales plan placeholder | Top-bar **Build sales plan** button reserved for the next sales workflow. |
+| PowerPoint export (milestone gaps) | [PptxGenJS](https://gitbrent.github.io/PptxGenJS/) (vendored under `vendor/`). |
 | CSV export (milestone gaps) | Browser `Blob` download with UTF-8 BOM. |
 | Theme | Light + dark via `?theme=dark` or system preference. |
 | "Re-open last file" (milestones page) | Chrome / Edge File System Access API. Falls back to a one-click file picker on Firefox / Safari. |
@@ -31,7 +32,7 @@ That's it. Both pages have **Export to PowerPoint** and the milestone page also 
 ## What's different from the Flask/Docker app
 
 - Browsers can't auto-scan a local folder without a user gesture, so there is no `inputfolder/` auto-pick. On Chrome / Edge the app remembers the last file you picked and offers a one-click **Re-open last file** button. On Firefox / Safari you re-pick once per session.
-- PowerPoint slide layout may differ slightly from the Python deck (different rendering engine). Data and content are identical.
+- Milestone PowerPoint slide layout may differ slightly from the Python deck (different rendering engine). Data and content are identical.
 - The Flask + Docker path still works for anyone who prefers it — see the top-level [README.md](../README.md).
 
 ## Browser support
@@ -63,11 +64,11 @@ web-app/
     milestone-model.js    # port of milestone_analysis.py
     milestone-view.js     # milestone page renderers
     milestone-app.js      # milestone page bootstrap
-    pptx-acr.js           # ACR PowerPoint export
     pptx-milestones.js    # milestone PowerPoint export
   vendor/
     xlsx.full.min.js      # SheetJS 0.20.2 (MIT)
     pptxgen.bundle.js     # PptxGenJS 3.12.0 (MIT)
+    MANIFEST.md           # vendored-library source and checksum notes
   tests/
     regression.cjs        # Node-based regression suite
 ```
@@ -97,7 +98,7 @@ so upstream drift fails loud and fast.
 ## Troubleshooting
 
 - **"Import failed: missing $ ACR column"** — make sure you exported with the right view. The header row containing `$ ACR` must sit directly under the `FY##-Mon` row in the `Export` sheet.
-- **PowerPoint export takes a few seconds for large workbooks** — that's expected, the deck is built fully client-side.
+- **Milestone PowerPoint export takes a few seconds for large workbooks** — that's expected, the deck is built fully client-side.
 - **Charts look blank after import** — open DevTools → Console and check for parsing errors. Most issues are caused by an unusual export schema (renamed columns, hidden rows).
 - **"Browser blocked the file picker on this page"** — some Chromium builds disable the modern file picker on `file://`. The app automatically falls back to the basic picker, so you can still load a workbook.
 
@@ -112,4 +113,3 @@ node web-app\tests\regression.cjs
 ```
 
 Exits with a non-zero status if any check fails. No `npm install` required.
-

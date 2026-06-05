@@ -68,8 +68,8 @@
   const DEFENDER_NEW_S2 = 'Microsoft Defender for Cloud';
   const SENTINEL_S2 = 'Sentinel';
   // Deterministic, hex-validated palette for trend lines (DfC/Sentinel pinned).
-  const TREND_PALETTE = ['#107c10', '#ff8c00', '#8764b8', '#d13438', '#00b294',
-                         '#5c2d91', '#e3008c', '#0099bc', '#498205', '#c19c00'];
+  const TREND_PALETTE = ['#2fb0a8', '#ffb04f', '#7c68b8', '#f36b5d', '#40bfd6',
+                         '#5c6f8f', '#d95aa6', '#2d9fc3', '#779455', '#c79d32'];
   const MAX_TRACK_PRODUCTS = 8;
 
   // Detect which workbook layout we were handed by inspecting header rows.
@@ -575,7 +575,7 @@
     const productColors = {};
     let pi = 0;
     for (const p of trackProducts) {
-      const c = p === DEFENDER_SERVICE ? '#0078d4' : (p === 'Sentinel' ? '#005a9e' : TREND_PALETTE[pi++ % TREND_PALETTE.length]);
+      const c = p === DEFENDER_SERVICE ? '#399bd8' : (p === 'Sentinel' ? '#2b89c6' : TREND_PALETTE[pi++ % TREND_PALETTE.length]);
       if (isHexColor(c)) productColors[p] = c;
     }
 

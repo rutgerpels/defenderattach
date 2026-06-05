@@ -9,3 +9,4 @@
 *.png  binary
 *.jpg  binary
 web-app/vendor/** binary
+web-app/vendor/MANIFEST.md text eol=lf
