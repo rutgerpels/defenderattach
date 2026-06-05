@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Defender Attach - Dashboard Home</title>
+  <script src="js/theme.js"></script>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <style>
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 24px;
+    }
+    .home-shell {
+      width: min(1120px, 100%);
+    }
+    .home-hero {
+      margin-bottom: 28px;
+      padding: 32px;
+      background: linear-gradient(135deg, var(--cp-dashboard-hero), #42a6df);
+      color: var(--cp-dashboard-on-hero);
+      border-radius: var(--cp-radius-card, 2px);
+      box-shadow: var(--cp-dashboard-card-shadow);
+    }
+    .home-hero h1 {
+      margin: 0 0 10px;
+      font-size: clamp(30px, 5vw, 52px);
+      line-height: 1;
+      letter-spacing: -0.04em;
+      font-weight: 300;
+    }
+    .home-hero p {
+      max-width: 720px;
+      margin: 0;
+      color: rgba(255, 255, 255, 0.88);
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }
+    .dashboard-card {
+      display: flex;
+      min-height: 280px;
+      flex-direction: column;
+      gap: 18px;
+      padding: 28px;
+      color: var(--cp-dashboard-text);
+      text-decoration: none;
+      background: var(--cp-dashboard-surface);
+      border: 1px solid var(--cp-dashboard-border);
+      border-left: 5px solid var(--cp-dashboard-hero);
+      border-radius: var(--cp-radius-card, 2px);
+      box-shadow: var(--cp-dashboard-card-shadow);
+      transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+    }
+    .dashboard-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 22px 48px rgba(42, 61, 82, 0.14);
+      border-left-color: var(--cp-accent, #2fb0a8);
+    }
+    .dashboard-card:focus-visible {
+      outline: 3px solid rgba(57, 155, 216, 0.38);
+      outline-offset: 4px;
+    }
+    .dashboard-card h2 {
+      margin: 0;
+      font-size: 25px;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      color: var(--cp-dashboard-text);
+    }
+    .dashboard-card p {
+      margin: 0;
+      color: var(--cp-dashboard-muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .card-meta {
+      display: grid;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 18px;
+      border-top: 1px solid var(--cp-dashboard-border);
+      color: var(--cp-dashboard-muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .card-cta {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      color: var(--cp-accent-fg, #fff);
+      background: var(--cp-accent, #2fb0a8);
+      border-radius: var(--cp-radius-control, 18px);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .home-note {
+      margin-top: 22px;
+      color: var(--cp-dashboard-muted);
+      text-align: center;
+      font-size: 12px;
+    }
+    @media (max-width: 820px) {
+      body {
+        align-items: flex-start;
+        padding: 24px 16px;
+      }
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+      .home-hero,
+      .dashboard-card {
+        padding: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="home-shell">
+    <section class="home-hero" aria-labelledby="home-title">
+      <h1 id="home-title">Defender Attach dashboards</h1>
+      <p>Choose the analysis you want to run. Each dashboard loads only the Excel files it needs, and workbook processing stays in your browser.</p>
+    </section>
+
+    <section class="dashboard-grid" aria-label="Available dashboards">
+      <a class="dashboard-card" href="acr.html">
+        <span class="card-cta">Open ACR dashboard</span>
+        <h2>ACR Opportunity Dashboard</h2>
+        <p>Compare total customer ACR with Defender for Cloud ACR, find under-protected accounts, and drill into service attach opportunities.</p>
+        <span class="card-meta">
+          <span>Input: ACR Details Excel export.</span>
+          <span>Best for: account prioritization, Defender attach gaps, and customer drill-downs.</span>
+        </span>
+      </a>
+
+      <a class="dashboard-card" href="milestones.html">
+        <span class="card-cta">Open milestone dashboard</span>
+        <h2>Milestone Gaps Dashboard</h2>
+        <p>Compare Migration milestones with Defender for Cloud milestones to surface attach gaps and build export-ready follow-up views.</p>
+        <span class="card-meta">
+          <span>Input: one Migration workbook and one Defender workbook.</span>
+          <span>Best for: milestone attach gaps, priority queues, CSV export, and PowerPoint export.</span>
+        </span>
+      </a>
+    </section>
+
+    <p class="home-note">Local-first analytics: Excel data is parsed client-side and is not uploaded by this static app.</p>
+  </main>
+</body>
+</html>
