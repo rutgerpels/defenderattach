@@ -23,7 +23,12 @@
     owner:              ['Owner'],
   };
 
-  const TEXT_COLUMNS = ['account','opportunity_id','milestone_id','milestone_name','milestone_workload','workload','status','commitment','category','owner_role','owner'];
+  const OPTIONAL_COLUMNS = {
+    sales_stage: ['SalesStageName', 'Sales Stage Name', 'Sales Stage'],
+  };
+
+  const TEXT_COLUMNS = ['account','opportunity_id','milestone_id','milestone_name','milestone_workload','workload','status','commitment','category','owner_role','owner','sales_stage'];
+  const TARGET_SALES_STAGE_KEYS = new Set(['inspire and design', 'listen and consult']);
 
   function loadMilestoneRecords(rows, datasetType, sourceFileName) {
     if (!Array.isArray(rows) || !rows.length) {
@@ -44,6 +49,12 @@
         throw new Error(`${sourceFileName}: required column "${candidates.join('" or "')}" was not found.`);
       }
       indexMap[target] = foundIdx;
+    }
+    for (const [target, candidates] of Object.entries(OPTIONAL_COLUMNS)) {
+      for (const name of candidates) {
+        const k = normaliseKey(name);
+        if (k in columnLookup) { indexMap[target] = columnLookup[k]; break; }
+      }
     }
 
     const records = [];
@@ -68,6 +79,9 @@
         } else {
           rec[target] = cleanText(raw);
         }
+      }
+      for (const target of Object.keys(OPTIONAL_COLUMNS)) {
+        if (!(target in rec)) rec[target] = '';
       }
       rec.account_key      = key(rec.account);
       rec.opportunity_key  = key(rec.opportunity_id);
@@ -132,7 +146,6 @@
     const priorityRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
     gaps.sort((a, b) =>
       priorityRank[a.priority] - priorityRank[b.priority] ||
-      Number(!a.has_committed) - Number(!b.has_committed) ||
       cmp(a.estimated_date || '9999-12-31', b.estimated_date || '9999-12-31') ||
       (b.acr_pipeline - a.acr_pipeline)
     );
@@ -189,13 +202,14 @@
       const milestoneLoads = uniqueText(group.map(r => r.milestone_workload));
       const commitments    = uniqueText(group.map(r => r.commitment));
       const statuses       = uniqueText(group.map(r => r.status));
+      const salesStages    = uniqueText(group.map(r => r.sales_stage));
       const owners         = uniqueText(group.map(r => r.owner));
       const ownerRoles     = uniqueText(group.map(r => r.owner_role));
       const dueDates = group.map(r => r.due_date).filter(Boolean).sort((a, b) => a - b);
       const earliestDue = dueDates.length ? dueDates[0] : null;
       const hasCommitted = group.some(r => key(r.commitment) === 'committed');
       const hasValidWorkload = workloads.some(isValidWorkload);
-      const [priority, reason] = priorityFor({ hasCommitted, earliestDue, hasValidWorkload, reference, nearTermDays });
+      const [priority, reason] = priorityFor({ salesStages, hasValidWorkload });
       const milestoneIds = new Set(group.map(r => r.milestone_id).filter(Boolean));
       output.push({
         account_key: group[0].account_key,
@@ -208,6 +222,7 @@
         priority,
         commitment: commitments.join('; '),
         status: statuses.join('; '),
+        sales_stage: salesStages.join('; '),
         acr_pipeline: round2(group.reduce((s, r) => s + (r.acr_pipeline || 0), 0)),
         owner_role: ownerRoles.join('; '),
         owner: owners.join('; '),
@@ -220,14 +235,16 @@
     return output;
   }
 
-  function priorityFor({ hasCommitted, earliestDue, hasValidWorkload, reference, nearTermDays }) {
-    if (hasCommitted) return ['HIGH', 'Committed milestone'];
-    if (earliestDue) {
-      const cutoff = new Date(reference); cutoff.setUTCDate(cutoff.getUTCDate() + nearTermDays);
-      if (earliestDue <= cutoff) return ['HIGH', `Estimated date within ${nearTermDays} days`];
-    }
-    if (hasValidWorkload) return ['MEDIUM', 'Uncommitted milestone with a valid workload'];
-    return ['LOW', 'Unclear or edge-case workload'];
+  function priorityFor({ salesStages, hasValidWorkload }) {
+    const targetStage = salesStages.find(stage => TARGET_SALES_STAGE_KEYS.has(salesStageKey(stage)));
+    if (targetStage) return ['HIGH', `Target sales stage: ${targetStage}`];
+    if (salesStages.length) return ['MEDIUM', `Other sales stage: ${salesStages.join('; ')}`];
+    if (hasValidWorkload) return ['MEDIUM', 'No sales stage provided; valid workload'];
+    return ['LOW', 'No target sales stage and unclear workload'];
+  }
+
+  function salesStageKey(value) {
+    return key(value).replace(/&/g, ' and ').replace(/\s+/g, ' ').trim();
   }
 
   function isValidWorkload(text) {

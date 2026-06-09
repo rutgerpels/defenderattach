@@ -12,7 +12,7 @@
     document.getElementById('defender-btn').addEventListener('click', () => document.getElementById('defender-input').click());
     document.getElementById('csv-btn').addEventListener('click', exportCsv);
     document.getElementById('pptx-btn').addEventListener('click', exportPptx);
-    document.getElementById('near-term').addEventListener('change', () => { rebuildIfReady(); persist(); });
+    document.getElementById('print-btn').addEventListener('click', () => window.print());
     AppNav.onReload(() => {
       state.migrationRows = state.defenderRows = state.model = null;
       state.migrationName = state.defenderName = '';
@@ -35,7 +35,6 @@
         defenderRows: state.defenderRows,
         migrationName: state.migrationName,
         defenderName: state.defenderName,
-        nearTerm: document.getElementById('near-term').value,
       });
       // 4.5 MB ceiling — leaves headroom under the 5 MB sessionStorage quota.
       if (payload.length < 4500000) sessionStorage.setItem(CACHE_KEY, payload);
@@ -60,7 +59,6 @@
       document.getElementById('migration-status').className = 'file-status success';
       document.getElementById('defender-status').textContent = '✓ ' + state.defenderName + ' — restored from session';
       document.getElementById('defender-status').className = 'file-status success';
-      if (parsed.nearTerm) document.getElementById('near-term').value = parsed.nearTerm;
       rebuildIfReady();
     } catch (err) {
       console.warn('Could not restore cached milestone data:', err);
@@ -93,9 +91,7 @@
   function rebuildIfReady() {
     if (!state.migrationRows || !state.defenderRows) return;
     try {
-      const nearTerm = parseInt(document.getElementById('near-term').value, 10);
       const model = MilestoneModel.build(state.migrationRows, state.defenderRows, {
-        near_term_days: nearTerm,
         migration_name: state.migrationName,
         defender_name: state.defenderName,
       });
@@ -104,6 +100,7 @@
       MilestoneView.render(model);
       document.getElementById('csv-btn').disabled = false;
       document.getElementById('pptx-btn').disabled = false;
+      document.getElementById('print-btn').disabled = false;
     } catch (err) {
       console.error(err);
       const empty = document.getElementById('milestone-empty');
@@ -123,11 +120,13 @@
       { key: 'priority',       label: 'priority' },
       { key: 'commitment',     label: 'commitment' },
       { key: 'status',         label: 'status' },
+      { key: 'sales_stage',    label: 'sales_stage' },
       { key: 'acr_pipeline',   label: 'acr_pipeline' },
       { key: 'owner_role',     label: 'owner_role' },
       { key: 'owner',          label: 'owner' },
       { key: 'milestone_count', label: 'milestone_count' },
       { key: 'priority_reason', label: 'priority_reason' },
+      { key: 'milestones', label: 'milestones', value: row => (row.milestones || []).join('; ') },
     ];
     const today = new Date().toISOString().slice(0, 10);
     CsvExport.download(`milestone-gaps-${today}.csv`, columns, state.model.gaps || []);

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from .excel_io import read_excel_sheet
 
 MIGRATION_KIND = "migration"
 DEFENDER_KIND = "defender"
+TARGET_SALES_STAGE_KEYS = {"inspire and design", "listen and consult"}
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,6 @@ def build_milestone_gap_model(
     gaps.sort(
         key=lambda row: (
             priority_order[row["priority"]],
-            not row["has_committed"],
             row["estimated_date"] or "9999-12-31",
             -row["acr_pipeline"],
         )
@@ -188,6 +188,7 @@ def gaps_to_dataframe(model: dict[str, Any]) -> pd.DataFrame:
         "priority",
         "commitment",
         "status",
+        "sales_stage",
         "acr_pipeline",
         "owner_role",
         "owner",
@@ -218,10 +219,17 @@ def _load_milestone_records(path: Path, dataset_type: str) -> pd.DataFrame:
         "owner_role": ("Owner Role",),
         "owner": ("Owner",),
     }
+    optional = {
+        "sales_stage": ("SalesStageName", "Sales Stage Name", "Sales Stage"),
+    }
     source_columns = {
         target: _find_source_column(columns, names, path)
         for target, names in required.items()
     }
+    for target, names in optional.items():
+        source = _find_optional_source_column(columns, names)
+        if source:
+            source_columns[target] = source
 
     frame = raw[list(source_columns.values())].copy()
     frame.columns = list(source_columns.keys())
@@ -241,7 +249,11 @@ def _load_milestone_records(path: Path, dataset_type: str) -> pd.DataFrame:
         "category",
         "owner_role",
         "owner",
+        "sales_stage",
     ]
+    for column in text_columns:
+        if column not in frame.columns:
+            frame[column] = ""
     for column in text_columns:
         frame[column] = frame[column].map(_clean_text)
 
@@ -279,6 +291,7 @@ def _aggregate_gap_rows(
         milestone_workloads = _unique_text(group["milestone_workload"])
         commitments = _unique_text(group["commitment"])
         statuses = _unique_text(group["status"])
+        sales_stages = _unique_text(group["sales_stage"])
         owners = _unique_text(group["owner"])
         owner_roles = _unique_text(group["owner_role"])
         due_dates = group["due_date"].dropna().sort_values()
@@ -286,11 +299,8 @@ def _aggregate_gap_rows(
         has_committed = any(_key(value) == "committed" for value in group["commitment"])
         has_valid_workload = any(_is_valid_workload(value) for value in workloads)
         priority, reason = _priority(
-            has_committed=has_committed,
-            due_date=earliest_due_date,
+            sales_stages=sales_stages,
             has_valid_workload=has_valid_workload,
-            reference_date=reference_date,
-            near_term_days=near_term_days,
         )
         gaps.append(
             {
@@ -304,6 +314,7 @@ def _aggregate_gap_rows(
                 "priority": priority,
                 "commitment": "; ".join(commitments),
                 "status": "; ".join(statuses),
+                "sales_stage": "; ".join(sales_stages),
                 "acr_pipeline": round(float(group["acr_pipeline"].sum()), 2),
                 "owner_role": "; ".join(owner_roles),
                 "owner": "; ".join(owners),
@@ -318,19 +329,24 @@ def _aggregate_gap_rows(
 
 def _priority(
     *,
-    has_committed: bool,
-    due_date: date | None,
+    sales_stages: list[str],
     has_valid_workload: bool,
-    reference_date: date,
-    near_term_days: int,
 ) -> tuple[str, str]:
-    if has_committed:
-        return "HIGH", "Committed milestone"
-    if due_date and due_date <= reference_date + timedelta(days=near_term_days):
-        return "HIGH", f"Estimated date within {near_term_days} days"
+    target_stage = next(
+        (stage for stage in sales_stages if _sales_stage_key(stage) in TARGET_SALES_STAGE_KEYS),
+        "",
+    )
+    if target_stage:
+        return "HIGH", f"Target sales stage: {target_stage}"
+    if sales_stages:
+        return "MEDIUM", f"Other sales stage: {'; '.join(sales_stages)}"
     if has_valid_workload:
-        return "MEDIUM", "Uncommitted milestone with a valid workload"
-    return "LOW", "Unclear or edge-case workload"
+        return "MEDIUM", "No sales stage provided; valid workload"
+    return "LOW", "No target sales stage and unclear workload"
+
+
+def _sales_stage_key(value: object) -> str:
+    return " ".join(_key(value).replace("&", " and ").split())
 
 
 def _is_valid_workload(value: str) -> bool:
@@ -371,6 +387,14 @@ def _find_source_column(columns: dict[str, str], names: tuple[str, ...], path: P
             return columns[key]
     expected = " or ".join(names)
     raise ValueError(f"Required column '{expected}' was not found in {path.name}")
+
+
+def _find_optional_source_column(columns: dict[str, str], names: tuple[str, ...]) -> str | None:
+    for name in names:
+        key = _key(name)
+        if key in columns:
+            return columns[key]
+    return None
 
 
 def _dedupe_key(row: pd.Series) -> str:

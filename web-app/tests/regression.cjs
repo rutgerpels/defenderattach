@@ -235,11 +235,123 @@ console.log('\nmilestone-app.js');
     assert(/CACHE_KEY = 'defenderattach:milestones:v1'/.test(ms),
       'versioned sessionStorage key must be defined');
     assert(/sessionStorage\.setItem\(CACHE_KEY, payload\)/.test(ms),
-      'must cache rows + filenames + nearTerm after each successful file load');
+      'must cache rows + filenames after each successful file load');
     assert(/sessionStorage\.getItem\(CACHE_KEY\)/.test(ms),
       'must attempt restore on init');
     assert(/sessionStorage\.removeItem\(CACHE_KEY\)/.test(ms),
       'reload handler must clear the cache');
+  });
+  test('milestone page exposes print/PDF export action', () => {
+    assert(/getElementById\('print-btn'\)\.addEventListener\('click', \(\) => window\.print\(\)\)/.test(ms),
+      'print button must call window.print');
+    assert(/getElementById\('print-btn'\)\.disabled = false/.test(ms),
+      'print button must enable after the model is built');
+  });
+}
+
+// ---- milestone page drilldown ----
+console.log('\nmilestones.html + milestone-view.js');
+{
+  const html = fs.readFileSync(path.join(WEBAPP, 'milestones.html'), 'utf8');
+  const view = fs.readFileSync(path.join(WEBAPP, 'js', 'milestone-view.js'), 'utf8');
+  test('milestone page includes filters, all-gaps table, details panel, and methodology', () => {
+    for (const id of ['milestone-search', 'gap-filter', 'priority-filter', 'workload-filter', 'gap-table', 'details-panel']) {
+      assert(html.includes(`id="${id}"`), `missing ${id}`);
+    }
+    assert(/Click a row to drill into priority rationale/.test(html), 'row drilldown guidance must be visible');
+    assert(/Account-level gap:<\/strong> account has Migration milestones/.test(html), 'methodology must explain account-level gaps');
+  });
+  test('milestone view filters by search, gap type, priority, and workload', () => {
+    assert(/function filteredRows\(\)/.test(view), 'filteredRows helper must exist');
+    assert(/document\.getElementById\('milestone-search'\)\?\.value/.test(view), 'search input must be read');
+    assert(/row\.gap_type !== gapType/.test(view), 'gap type filter must be applied');
+    assert(/row\.priority !== priority/.test(view), 'priority filter must be applied');
+    assert(/!workloadParts\(row\)\.includes\(workload\)/.test(view), 'workload filter must be applied');
+    assert(/No gaps match the current filters\./.test(view), 'empty filter state must be rendered');
+  });
+  test('milestone view renders escaped row drilldown with milestone names', () => {
+    assert(/function showDetails\(index\)/.test(view), 'showDetails helper must exist');
+    assert(/data-gap-index/.test(view), 'rows must carry a stable data index');
+    assert(/escapeHtml\(row\.priority_reason/.test(view), 'priority reason must be escaped');
+    assert(/row\.milestones \|\| \[\]\)\.map\(name => `<li>\$\{escapeHtml\(name\)\}<\/li>`/.test(view),
+      'milestone names must be escaped in the detail panel');
+    assert(/panel\.scrollIntoView/.test(view), 'details panel should be brought into view after row click');
+  });
+  test('milestone view renders a model without browser runtime errors', () => {
+    const sb = makeSandbox();
+    const elements = new Map();
+    function el(id, value = '') {
+      const item = {
+        id,
+        value,
+        hidden: false,
+        innerHTML: '',
+        textContent: '',
+        dataset: {},
+        listeners: {},
+        addEventListener(type, fn) { this.listeners[type] = fn; },
+        scrollIntoView() {},
+      };
+      elements.set(id, item);
+      return item;
+    }
+    for (const id of [
+      'milestone-shell', 'milestone-empty', 'summary-cards', 'priority-chart',
+      'gap-type-chart', 'workload-chart', 'top-gaps-tbody', 'result-count',
+      'gap-table', 'details-panel', 'quality-notes',
+    ]) el(id);
+    el('milestone-search', '');
+    el('gap-filter', 'all');
+    el('priority-filter', 'all');
+    el('workload-filter', 'all');
+    sb.document.getElementById = id => elements.get(id);
+    sb.document.querySelectorAll = () => [];
+    loadInto(sb, 'js/milestone-view.js');
+    const gap = {
+      account_key: 'contoso',
+      account: 'Contoso',
+      opportunity_id: 'OPP-1',
+      gap_type: 'Opportunity-level gap',
+      workload: 'Azure VMware Solution',
+      milestone_workload: 'Migrate',
+      estimated_date: '2026-06-30',
+      priority: 'HIGH',
+      commitment: 'Committed',
+      status: 'Open',
+      sales_stage: 'Inspire & Design',
+      acr_pipeline: 120000,
+      owner_role: 'Specialist',
+      owner: 'Avery',
+      milestone_count: 1,
+      has_committed: true,
+      priority_reason: 'Target sales stage: Inspire & Design',
+      milestones: ['Migrate AVS pilot'],
+    };
+    sb.MilestoneView.render({
+      summary: {
+        migration_accounts: 1,
+        defender_accounts: 1,
+        attached_accounts: 1,
+        account_level_gap_accounts: 0,
+        total_accounts_with_gaps: 1,
+        total_opportunities_with_gaps: 1,
+        account_level_gaps: 0,
+        opportunity_level_gaps: 1,
+        total_gap_rows: 1,
+      },
+      priority_counts: { HIGH: 1, MEDIUM: 0, LOW: 0 },
+      gap_type_counts: { 'Account-level gap': 0, 'Opportunity-level gap': 1 },
+      workload_counts: [{ workload: 'Azure VMware Solution', count: 1 }],
+      gaps: [gap],
+      top_gaps: [gap],
+      data_quality: { migration_rows: 1, defender_rows: 0, migration_invalid_dates: 0, defender_invalid_dates: 0 },
+      sources: { migration: 'migration.xlsx', defender: 'defender.xlsx' },
+      near_term_days: 60,
+      reference_date: '2026-06-05',
+    });
+    assert(elements.get('gap-table').innerHTML.includes('Contoso'), 'all-gaps table should render account');
+    assert(elements.get('result-count').textContent === '1 visible gap rows', 'result count should update');
+    assert(elements.get('workload-filter').innerHTML.includes('Azure VMware Solution'), 'workload filter should populate');
   });
 }
 
@@ -283,37 +395,39 @@ console.log('\ncsv-export.js');
   });
 }
 
-// ---- milestone-model: timezone boundary ----
+// ---- milestone-model: sales-stage priority ----
 console.log('\nmilestone-model.js');
 {
-  // Force JS interpreter to do TZ math in PST so the old bug would surface.
+  // Force JS interpreter to do TZ math in PST so date-ordering boundary bugs surface.
   process.env.TZ = 'America/Los_Angeles';
   const sb = makeSandbox();
   loadInto(sb, 'js/milestone-model.js');
 
   const headers = ['Translated Account Name','Opportunity ID','Milestone ID','Milestone Name','Milestone Workload','Workload','ACR Pipeline $','Status','Commitment','Due Date','Category','Owner Role','Owner'];
-  const REF = '2024-03-15';
-  const NEAR_TERM = 60;
-  // 60 days after 2024-03-15 = 2024-05-14
-  const onBoundary = '2024-05-14';
-  const oneDayPast = '2024-05-15';
+  const stageHeaders = [...headers, 'SalesStageName'];
+  const stageRows = [
+    stageHeaders,
+    ['Target Later','OPP-1','MS-1','Pilot','Compute','Compute',1000,'Open','No','2026-12-01','Discover','AE','Alice','Inspire & Design'],
+    ['Target Earlier','OPP-2','MS-2','Pilot','Compute','Compute',1000,'Open','No','2026-09-01','Discover','AE','Bob','Listen and Consult'],
+    ['Other Earlier','OPP-3','MS-3','Pilot','Compute','Compute',1000,'Open','No','2026-06-01','Discover','AE','Cara','Empower & Achieve'],
+  ];
+  const stagedModel = sb.MilestoneModel.build(stageRows, [stageHeaders], { reference_date: '2026-06-05' });
 
-  const migA = [headers, ['Acme Corp','OPP-1','MS-1','Pilot','Compute','Compute',1000,'Open','No',onBoundary,'Discover','AE','Alice']];
-  const modelA = sb.MilestoneModel.build(migA, [headers], { near_term_days: NEAR_TERM, reference_date: REF });
-  const gapA = modelA.gaps.find(g => g.account === 'Acme Corp');
-
-  test('account with due date exactly nearTermDays out is HIGH (boundary)', () => {
-    assert(gapA, 'expected a gap row for Acme Corp');
-    assertEqual(gapA.priority, 'HIGH', 'priority on the boundary');
+  test('target sales stages are HIGH and sorted by earliest due date before other stages', () => {
+    assertEqual(stagedModel.gaps.map(g => g.account).join('|'), 'Target Earlier|Target Later|Other Earlier',
+      'target stages should rank before non-target rows, then sort by due date');
+    assertEqual(stagedModel.gaps[0].priority, 'HIGH', 'Listen and Consult should be HIGH');
+    assertEqual(stagedModel.gaps[0].priority_reason, 'Target sales stage: Listen and Consult', 'target reason');
+    assertEqual(stagedModel.gaps[2].priority, 'MEDIUM', 'other stage should be MEDIUM');
+    assertEqual(stagedModel.gaps[2].sales_stage, 'Empower & Achieve', 'sales stage should be retained');
   });
 
-  const migB = [headers, ['Beta Inc','OPP-2','MS-2','Pilot','Compute','Compute',1000,'Open','No',oneDayPast,'Discover','AE','Bob']];
-  const modelB = sb.MilestoneModel.build(migB, [headers], { near_term_days: NEAR_TERM, reference_date: REF });
-  const gapB = modelB.gaps.find(g => g.account === 'Beta Inc');
+  const legacyRows = [headers, ['Legacy Co','OPP-4','MS-4','Pilot','Compute','Compute',1000,'Open','No','2026-06-01','Discover','AE','Dana']];
+  const legacyModel = sb.MilestoneModel.build(legacyRows, [headers], { reference_date: '2026-06-05' });
 
-  test('account with due date one day past nearTermDays is MEDIUM', () => {
-    assert(gapB, 'expected a gap row for Beta Inc');
-    assertEqual(gapB.priority, 'MEDIUM', 'priority one day past the boundary');
+  test('legacy milestone workbooks without SalesStageName still load', () => {
+    assertEqual(legacyModel.gaps[0].priority, 'MEDIUM', 'legacy valid workload priority');
+    assertEqual(legacyModel.gaps[0].priority_reason, 'No sales stage provided; valid workload', 'legacy reason');
   });
 }
 
