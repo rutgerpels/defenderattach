@@ -46,7 +46,7 @@ def _title_slide(prs: Presentation, model: dict[str, Any]) -> None:
     _add_text(slide, "Migration milestones compared with Defender for Cloud milestones", 0.62, 1.24, 7.5, 0.35, 15, "C7E0F4")
     _add_text(
         slide,
-        f"Reference date: {model.get('reference_date', '-')} | Near-term window: {model.get('near_term_days', '-')} days",
+        f"Reference date: {model.get('reference_date', '-')} | Sorted by priority, earliest due date, then pipeline size",
         0.62,
         6.55,
         7.8,
@@ -121,7 +121,7 @@ def _summary_slide(prs: Presentation, model: dict[str, Any]) -> None:
 
     _add_text(
         slide,
-        "High priority means at least one committed migration milestone or an estimated date inside the near-term window.",
+        "High priority means the migration opportunity is in Inspire & Design or Listen and Consult. Rows are sorted by earliest due date inside each priority.",
         0.75,
         6.55,
         11.4,
@@ -166,9 +166,10 @@ def _methodology_slide(prs: Presentation, model: dict[str, Any]) -> None:
         "Account-level gap: an account has Migration milestones but no Defender for Cloud milestones in the Defender workbook.",
         "Attached account: an account appears in both Migration and Defender milestone workbooks.",
         "Opportunity-level gap: for attached accounts, a Migration Opportunity ID has no Defender milestone with the same Opportunity ID.",
-        f"HIGH priority: committed migration milestone or estimated date within {model.get('near_term_days', '-')} days of the reference date.",
-        "MEDIUM priority: uncommitted migration milestone with a recognized workload.",
-        "LOW priority: unclear or edge-case workload.",
+        "HIGH priority: SalesStageName is Inspire & Design or Listen and Consult.",
+        "MEDIUM priority: other known sales stage, or no sales stage but a recognized workload.",
+        "LOW priority: no target sales stage and unclear or edge-case workload.",
+        "Rows are sorted by priority first, then earliest due date, then migration pipeline size.",
         "Strict Opportunity ID matching may overstate gaps if Migration and Defender work are tracked under separate CRM opportunities.",
     ]
     _add_bullets(slide, bullets, 0.75, 1.2, 11.8, 4.8)
