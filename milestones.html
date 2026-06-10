@@ -34,16 +34,6 @@
         </div>
       </div>
 
-      <div class="controls" style="justify-content:center;margin-top:12px;">
-        <label for="near-term">Near-term window (days):</label>
-        <select id="near-term">
-          <option value="30">30</option>
-          <option value="60" selected>60</option>
-          <option value="90">90</option>
-          <option value="120">120</option>
-        </select>
-      </div>
-
       <p class="error-msg" style="color:var(--color-danger);margin-top:8px;"></p>
       <p class="empty-meta">Supported: <code>.xlsx</code>, <code>.xls</code> · Sheet named "Export"</p>
     </div>
@@ -56,12 +46,45 @@
         <p class="subtitle" id="page-subtitle">Migration milestones missing matching Defender for Cloud milestones.</p>
       </div>
       <div class="header-actions">
+        <button class="secondary-btn" id="print-btn" disabled>🖨️ Print / PDF</button>
         <button class="secondary-btn" id="csv-btn" disabled>⬇️ Download CSV</button>
         <button class="primary-btn" id="pptx-btn" disabled>📑 Export to PowerPoint</button>
       </div>
     </header>
 
     <section class="metric-grid" id="summary-cards"></section>
+
+    <section class="chart-box milestone-guide">
+      <strong>How to read this:</strong>
+      Account-level gaps show customers with Migration milestones but no Defender milestones.
+      Opportunity-level gaps show attached accounts where the same Migration Opportunity ID has no Defender milestone.
+    </section>
+
+    <section class="chart-box milestone-toolbar" aria-label="Milestone gap filters">
+      <label>Search
+        <input id="milestone-search" type="search" placeholder="Account, opportunity, workload, owner" />
+      </label>
+      <label>Gap type
+        <select id="gap-filter">
+          <option value="all">All gaps</option>
+          <option value="Account-level gap">Account-level gaps</option>
+          <option value="Opportunity-level gap">Opportunity-level gaps</option>
+        </select>
+      </label>
+      <label>Priority
+        <select id="priority-filter">
+          <option value="all">All priorities</option>
+          <option value="HIGH">HIGH</option>
+          <option value="MEDIUM">MEDIUM</option>
+          <option value="LOW">LOW</option>
+        </select>
+      </label>
+      <label>Workload
+        <select id="workload-filter">
+          <option value="all">All workloads</option>
+        </select>
+      </label>
+    </section>
 
     <section class="chart-grid">
       <div class="chart-box">
@@ -97,9 +120,26 @@
       </div>
     </section>
 
+    <section class="chart-box" id="all-gaps-section">
+      <h2>All milestone gaps</h2>
+      <p class="section-note">Click a row to drill into priority rationale, owners, and migration milestone names.</p>
+      <div id="result-count" class="result-count"></div>
+      <div id="gap-table" class="scroll-table"></div>
+    </section>
+
+    <section id="details-panel" class="chart-box details-panel" hidden></section>
+
     <section class="chart-box">
       <h2>Data quality notes</h2>
       <div id="quality-notes"></div>
+    </section>
+
+    <section class="chart-box methodology">
+      <h2>Methodology</h2>
+      <p><strong>Account-level gap:</strong> account has Migration milestones but no Defender for Cloud milestones.</p>
+      <p><strong>Attached account:</strong> account appears in both workbooks.</p>
+      <p><strong>Opportunity-level gap:</strong> for attached accounts, a Migration Opportunity ID has no Defender milestone with the same account and Opportunity ID.</p>
+      <p><strong>Priority:</strong> HIGH = SalesStageName is Inspire &amp; Design or Listen and Consult; MEDIUM = other known sales stage or valid workload; LOW = no target sales stage and unclear workload. Rows are then sorted by the earliest due date.</p>
     </section>
   </section>
 

@@ -73,7 +73,7 @@
     slide.addText('Defender milestone attach gaps', { x: 0.6, y: 0.55, w: 8.8, h: 0.65, fontSize: 32, color: C.WHITE, bold: true, fontFace: 'Segoe UI' });
     slide.addText('Migration milestones compared with Defender for Cloud milestones',
       { x: 0.62, y: 1.24, w: 7.5, h: 0.35, fontSize: 15, color: C.PALE_BLUE, fontFace: 'Segoe UI' });
-    slide.addText(`Reference date: ${model.reference_date || '-'} | Near-term window: ${model.near_term_days || '-'} days`,
+    slide.addText(`Reference date: ${model.reference_date || '-'} | Sorted by priority, earliest due date, then pipeline size`,
       { x: 0.62, y: 6.55, w: 7.8, h: 0.3, fontSize: 10, color: C.PALE_BLUE, fontFace: 'Segoe UI' });
     slide.addText(`Sources: ${sources.migration || '-'} + ${sources.defender || '-'}`,
       { x: 0.62, y: 6.85, w: 10.8, h: 0.25, fontSize: 9, color: C.PALE_BLUE, fontFace: 'Segoe UI' });
@@ -111,7 +111,7 @@
       ['Opportunity-level gap', gt['Opportunity-level gap'] || 0, C.ORANGE],
     ], 6.8, 3.05, 5.4, 1.1);
 
-    slide.addText('High priority means at least one committed migration milestone or an estimated date inside the near-term window.',
+    slide.addText('High priority means the migration opportunity is in Inspire & Design or Listen and Consult. Rows are sorted by earliest due date inside each priority.',
       { x: 0.75, y: 6.55, w: 11.4, h: 0.3, fontSize: 10, color: C.MUTED, fontFace: 'Segoe UI' });
   }
 
@@ -138,9 +138,10 @@
       'Account-level gap: an account has Migration milestones but no Defender for Cloud milestones in the Defender workbook.',
       'Attached account: an account appears in both Migration and Defender milestone workbooks.',
       'Opportunity-level gap: for attached accounts, a Migration Opportunity ID has no Defender milestone with the same Opportunity ID.',
-      `HIGH priority: committed migration milestone or estimated date within ${model.near_term_days || '-'} days of the reference date.`,
-      'MEDIUM priority: uncommitted migration milestone with a recognized workload.',
-      'LOW priority: unclear or edge-case workload.',
+      'HIGH priority: SalesStageName is Inspire & Design or Listen and Consult.',
+      'MEDIUM priority: other known sales stage, or no sales stage but a recognized workload.',
+      'LOW priority: no target sales stage and unclear or edge-case workload.',
+      'Rows are sorted by priority first, then earliest due date, then migration pipeline size.',
       'Strict Opportunity ID matching may overstate gaps if Migration and Defender work are tracked under separate CRM opportunities.',
     ];
     addBullets(slide, bullets, 0.75, 1.2, 11.8, 4.8);

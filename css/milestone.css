@@ -18,6 +18,53 @@
   flex-wrap: wrap;
   gap: 12px;
 }
+.milestone-shell .empty {
+  padding: 14px;
+  color: var(--cp-dashboard-muted);
+  font-size: 12px;
+}
+.milestone-page tr.clickable { cursor: pointer; }
+.milestone-page tr.clickable:hover { background: var(--cp-dashboard-surface-soft); }
+.details-panel { border: 1px solid var(--cp-dashboard-border); }
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.detail-grid > div {
+  background: var(--cp-dashboard-surface-soft);
+  border: 1px solid var(--cp-dashboard-border);
+  border-radius: 4px;
+  padding: 10px;
+}
+.detail-grid span {
+  color: var(--cp-dashboard-muted);
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.detail-grid strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--cp-dashboard-text);
+}
+.detail-grid small {
+  display: block;
+  color: var(--cp-dashboard-muted);
+  margin-top: 2px;
+  font-size: 11px;
+}
+.milestone-list { margin-left: 18px; }
+.milestone-list li { margin-bottom: 4px; font-size: 12px; }
+.methodology p {
+  color: var(--cp-dashboard-muted);
+  margin-bottom: 8px;
+  font-size: 12px;
+}
 .hero > div:first-child { flex: 1; min-width: 280px; }
 .hero h1 { color: var(--cp-dashboard-on-hero); margin: 0; }
 .eyebrow {
@@ -104,9 +151,10 @@ button, a.primary-button, a.secondary-button {
   .source-card { align-items: flex-start; text-align: left; }
 }
 @media print {
-  .toolbar, .app-menu { display: none; }
+  .milestone-toolbar, #app-nav, .app-menu, .header-actions, .empty-state { display: none !important; }
   body { background: var(--cp-dashboard-surface); padding: 0; }
   .card, .hero { break-inside: avoid; box-shadow: none; }
+  .milestone-shell .chart-box, .metric-card { break-inside: avoid; box-shadow: none; }
 }
 
 /* ---- Static-app milestone shell additions ---- */
@@ -125,6 +173,45 @@ button, a.primary-button, a.secondary-button {
   margin: 4px 0 0;
 }
 .milestone-shell .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.milestone-guide {
+  background: var(--cp-dashboard-callout);
+  border-left: 4px solid var(--cp-warning);
+  font-size: 12px;
+  color: var(--cp-dashboard-text);
+}
+.milestone-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+.milestone-toolbar label {
+  display: grid;
+  gap: 4px;
+  min-width: 170px;
+  font-size: 12px;
+  color: var(--cp-dashboard-muted);
+}
+.milestone-toolbar input,
+.milestone-toolbar select {
+  padding: 8px 12px;
+  border: 1px solid var(--cp-dashboard-border);
+  border-radius: var(--cp-radius-control, 18px);
+  background: var(--cp-dashboard-surface);
+  color: var(--cp-dashboard-text);
+  font: inherit;
+  font-size: 13px;
+}
+.milestone-toolbar input:focus,
+.milestone-toolbar select:focus {
+  outline: 2px solid var(--cp-link);
+  border-color: var(--cp-link);
+}
+.section-note {
+  color: var(--cp-dashboard-muted);
+  font-size: 12px;
+  margin: -6px 0 12px;
+}
 
 .metric-grid {
   display: grid;
