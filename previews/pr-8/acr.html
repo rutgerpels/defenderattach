@@ -179,6 +179,38 @@ tr.clickable:hover { background: var(--da-surface-soft); }
 .guide-note:hover { background: #fff3dd; box-shadow: 0 10px 24px rgba(42, 61, 82, 0.08); }
 .guide-note:focus-visible { outline: 3px solid rgba(57,155,216,0.34); outline-offset: 2px; }
 
+/* Attach-gap urgency split (re-segments the SAME total gap, never additive) */
+.gap-urgency {
+  background: var(--da-surface); border: 1px solid var(--da-border);
+  border-radius: var(--da-radius); box-shadow: var(--da-shadow);
+  padding: 16px 20px; margin: 0 0 16px;
+}
+.gap-urgency .gu-head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 12px;
+  font-size: 11px; font-weight: 800; color: var(--da-text);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.gap-urgency .gu-bar { display: flex; height: 18px; border-radius: 999px; overflow: hidden; background: var(--da-surface-soft); }
+.gap-urgency .gu-seg { height: 100%; transition: width .35s ease; }
+.gap-urgency .gu-seg.accel { background: var(--da-coral); }
+.gap-urgency .gu-seg.stable { background: #b9c9d8; }
+.gap-urgency .gu-legend { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 12px; font-size: 12px; color: var(--da-text); font-weight: 600; }
+.gap-urgency .gu-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: middle; }
+.gap-urgency .gu-legend .dot.accel { background: var(--da-coral); }
+.gap-urgency .gu-legend .dot.stable { background: #b9c9d8; }
+.gap-urgency .gu-legend .amt { font-weight: 800; }
+.gap-urgency .gu-legend .pct { color: var(--da-muted); font-weight: 600; }
+.gu-drift-chip {
+  margin-top: 14px; display: inline-flex; align-items: center; gap: 8px;
+  background: #fff6df; color: #a45d00; border: 1px solid #ffe2b8;
+  border-radius: 999px; padding: 7px 14px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.gu-drift-chip:hover { background: #fff0cf; box-shadow: 0 6px 16px rgba(42, 61, 82, 0.08); }
+.gu-drift-chip:focus-visible { outline: 3px solid rgba(57,155,216,0.34); outline-offset: 2px; }
+.gu-drift-chip .gu-chip-arrow { font-weight: 800; }
+.gap-urgency .gu-note { margin-top: 12px; font-size: 11px; color: var(--da-muted); line-height: 1.5; }
+.gap-urgency .prio-badge-i { cursor: help; }
+
 .guide-modal {
   position: fixed;
   inset: 0;
@@ -237,6 +269,16 @@ tr.clickable:hover { background: var(--da-surface-soft); }
   font-size: 14px;
   line-height: 1.55;
 }
+.howto-card { width: min(960px, 100%); }
+.howto-toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 6px; padding-bottom: 16px; border-bottom: 1px solid var(--da-border); }
+.howto-toc a { font-size: 12px; font-weight: 700; color: var(--da-blue); background: var(--da-surface-soft); border: 1px solid var(--da-border); border-radius: 999px; padding: 6px 12px; text-decoration: none; }
+.howto-toc a:hover { background: #eaf6fb; }
+.howto-toc a:focus-visible { outline: 3px solid rgba(57,155,216,0.34); outline-offset: 2px; }
+.guide-topic { margin-top: 26px; scroll-margin-top: 12px; }
+.guide-topic > h3 { font-size: 20px; font-weight: 600; color: var(--da-text); margin: 0 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--da-blue); }
+.guide-topic > p { color: var(--da-text); font-size: 14px; line-height: 1.55; }
+.guide-topic > ul { margin: 10px 0 0 20px; }
+.guide-topic > ul li { color: var(--da-text); font-size: 14px; line-height: 1.55; }
 @media (max-width: 760px) {
   .guide-modal { padding: 14px; align-items: flex-start; }
   .guide-modal-card { max-height: calc(100vh - 28px); padding: 20px; }
@@ -386,11 +428,6 @@ body.shell-ready {
 <button class="import-btn" id="import-btn" type="button" hidden>Import new Excel</button>
 <div class="import-status" id="import-status" hidden></div>
 
-<button class="note guide-note" id="overview-guide-trigger" type="button" aria-haspopup="dialog" aria-controls="view-guide-modal">
-  <span class="guide-summary"><strong>How to read this:</strong> Each account buys Azure workloads (containers, SQL, App Service, storage, and more) without the matching Defender for Cloud plan switched on. Use <em>Service Attach Opportunities</em> for workloads customers buy but do not protect, and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart.</span>
-  <span class="guide-cta">Learn when to use each view</span>
-</button>
-
 <div class="tabs">
   <button class="tab active" data-tab="overview">Overview</button>
   <button class="tab" data-tab="opportunity">Service Attach Opportunities</button>
@@ -409,10 +446,19 @@ body.shell-ready {
     <div class="card"><div class="label">DfC % of Portfolio</div><div class="val" id="kpi-dfc-pct">–</div><div class="delta">share of total ACR</div></div>
   </div>
 
-  <button class="note guide-note" id="estimate-guide-trigger" type="button" aria-haspopup="dialog" aria-controls="estimate-guide-modal">
-    <span class="guide-summary"><strong>How is the gap estimated for Servers &amp; Storage?</strong> Defender for Servers and Defender for Storage are priced per unit, not as a percentage of Azure spend, so their attach gap is benchmarked against peers who already protect the same workload.</span>
-    <span class="guide-cta">See how it's calculated</span>
-  </button>
+  <div id="gap-urgency" class="gap-urgency" hidden>
+    <div class="gu-head">
+      Where is the attach gap heading?
+      <span class="prio-badge-i" id="gu-info" tabindex="0" role="img" aria-label="How this split is calculated">&#9432;</span>
+    </div>
+    <div class="gu-bar" id="gu-bar" role="img" aria-label="Attach gap split by momentum">
+      <div class="gu-seg accel" id="gu-seg-accel" style="width:0%"></div>
+      <div class="gu-seg stable" id="gu-seg-stable" style="width:0%"></div>
+    </div>
+    <div class="gu-legend" id="gu-legend"></div>
+    <button type="button" class="gu-drift-chip" id="gu-drift-chip" hidden></button>
+    <div class="gu-note" id="gu-note"></div>
+  </div>
 
   <div class="grid-2">
     <div class="chart-box">
@@ -487,76 +533,99 @@ body.shell-ready {
 
 <div class="tooltip" id="tooltip"></div>
 
-<div class="guide-modal" id="view-guide-modal" role="dialog" aria-modal="true" aria-labelledby="view-guide-title" hidden>
-  <div class="guide-modal-card" role="document">
+<div class="guide-modal" id="howto-modal" role="dialog" aria-modal="true" aria-labelledby="howto-title" hidden>
+  <div class="guide-modal-card howto-card" role="document">
     <div class="guide-modal-head">
       <div>
-        <h2 id="view-guide-title">Which view should I use?</h2>
-        <p class="guide-subtitle">A plain-English guide for sales follow-up conversations.</p>
+        <h2 id="howto-title">How to use this dashboard</h2>
+        <p class="guide-subtitle">A plain-English field guide for sales follow-up conversations &mdash; everything the dashboard calculates, in one place.</p>
       </div>
-      <button type="button" class="guide-close" id="view-guide-close">Got it</button>
+      <button type="button" class="guide-close" id="howto-close">Got it</button>
     </div>
-    <div class="guide-modal-grid">
-      <section class="guide-modal-section">
-        <h3>Service Attach Opportunities</h3>
-        <p>Use this when you want to know what protection to attach next. It finds customers who already buy Azure services but do not appear to have the matching Defender plan turned on.</p>
-        <ul>
-          <li><strong>Sales example:</strong> The customer spends on SQL databases, containers, or App Service, but the matching Defender coverage is missing or much lower than expected.</li>
-          <li><strong>Use it for:</strong> building account call lists, attach motions, and concrete "you already run this, let's protect it" conversations.</li>
-          <li><strong>Question it answers:</strong> "What should we sell or attach next?"</li>
-        </ul>
-      </section>
-      <section class="guide-modal-section drift">
-        <h3>Defender Coverage Drift</h3>
-        <p>Use this when you want to understand whether protection is keeping pace as the customer's Azure footprint changes over time.</p>
-        <ul>
-          <li><strong>Sales example:</strong> Azure usage is growing month over month, but Defender for Cloud is flat, shrinking, or growing much more slowly.</li>
-          <li><strong>Use it for:</strong> account health reviews, renewal conversations, and explaining why security coverage may be falling behind cloud growth.</li>
-          <li><strong>Question it answers:</strong> "Where is protection not keeping up with Azure growth?"</li>
-        </ul>
-      </section>
-    </div>
-    <div class="guide-rule">
-      <strong>Simple rule:</strong> Start with <em>Service Attach Opportunities</em> when you need a sales action list. Use <em>Defender Coverage Drift</em> when you need a trend story that explains why an account may be under-protected over time.
-    </div>
-  </div>
-</div>
 
-<div class="guide-modal" id="estimate-guide-modal" role="dialog" aria-modal="true" aria-labelledby="estimate-guide-title" hidden>
-  <div class="guide-modal-card" role="document">
-    <div class="guide-modal-head">
-      <div>
-        <h2 id="estimate-guide-title">How the Servers &amp; Storage gap is estimated</h2>
-        <p class="guide-subtitle">A plain-English guide for sales follow-up conversations.</p>
+    <nav class="howto-toc" aria-label="Contents">
+      <a href="#howto-what">What it shows</a>
+      <a href="#howto-views">Which view to use</a>
+      <a href="#howto-urgency">Urgency split</a>
+      <a href="#howto-estimate">Servers &amp; Storage gap</a>
+      <a href="#howto-priority">Low-priority workloads</a>
+    </nav>
+
+    <section class="guide-topic" id="howto-what">
+      <h3>What this dashboard shows</h3>
+      <p>Each account buys Azure workloads &mdash; containers, SQL, App Service, storage, servers and more &mdash; without always having the matching Defender for Cloud plan switched on. The Overview cards size the <strong>total monthly and annualized attach gap</strong> across the book, how many accounts are affected, and which Defender service carries the largest gap. Use the tabs to move from the book-level picture to a single-account story in Customer Drill-Down.</p>
+    </section>
+
+    <section class="guide-topic" id="howto-views">
+      <h3>Which view should I use?</h3>
+      <div class="guide-modal-grid">
+        <section class="guide-modal-section">
+          <h3>Service Attach Opportunities</h3>
+          <p>Use this when you want to know what protection to attach next. It finds customers who already buy Azure services but do not appear to have the matching Defender plan turned on.</p>
+          <ul>
+            <li><strong>Sales example:</strong> The customer spends on SQL databases, containers, or App Service, but the matching Defender coverage is missing or much lower than expected.</li>
+            <li><strong>Use it for:</strong> building account call lists, attach motions, and concrete "you already run this, let's protect it" conversations.</li>
+            <li><strong>Question it answers:</strong> "What should we sell or attach next?"</li>
+          </ul>
+        </section>
+        <section class="guide-modal-section drift">
+          <h3>Defender Coverage Drift</h3>
+          <p>Use this when you want to understand whether protection is keeping pace as the customer's Azure footprint changes over time.</p>
+          <ul>
+            <li><strong>Sales example:</strong> Azure usage is growing month over month, but Defender for Cloud is flat, shrinking, or growing much more slowly.</li>
+            <li><strong>Use it for:</strong> account health reviews, renewal conversations, and explaining why security coverage may be falling behind cloud growth.</li>
+            <li><strong>Question it answers:</strong> "Where is protection not keeping up with Azure growth?"</li>
+          </ul>
+        </section>
       </div>
-      <button type="button" class="guide-close" id="estimate-guide-close">Got it</button>
-    </div>
-    <div class="guide-modal-grid">
-      <section class="guide-modal-section">
-        <h3>Why these two are different</h3>
-        <p>Most Defender plans (SQL, Containers, App Service, Key Vault&hellip;) are billed roughly as a percentage of the Azure service they protect, so we compare actual Defender spend to that expected percentage directly.</p>
-        <ul>
-          <li><strong>Defender for Servers</strong> is priced <em>per server, per hour</em> &mdash; not as a share of your VM bill.</li>
-          <li><strong>Defender for Storage</strong> is priced <em>per storage account plus per million transactions</em> &mdash; not as a share of your storage bill.</li>
-          <li>Because there is no fixed percentage, an earlier version left these out of the dollar gap, which made the headline look lower than reality.</li>
-        </ul>
-      </section>
-      <section class="guide-modal-section drift">
-        <h3>How we estimate the gap now</h3>
-        <p>We benchmark each account against peers who already protect the same workload:</p>
-        <ul>
-          <li>Take every customer who already buys the plan and work out what share of their VM (or Storage) spend goes to that Defender plan.</li>
-          <li>Use the <strong>typical (median) peer ratio</strong> &mdash; usually in the low-to-mid single digits of percent. If there are too few peers, we fall back to a conservative <strong>6%</strong> benchmark.</li>
-          <li>Apply that ratio to this customer's VM or Storage spend to get an <em>expected</em> Defender spend, then <strong>gap = expected &minus; what they actually spend</strong> (never below zero).</li>
-        </ul>
-      </section>
-    </div>
-    <div class="guide-rule">
-      <strong>Worked example:</strong> A customer spends <strong>$27,000/mo</strong> on Storage with <strong>$0</strong> Defender for Storage. At a ~5.7% peer benchmark, expected Defender spend is about <strong>$1,540/mo</strong>, so the estimated attach gap is roughly <strong>$1,540/mo</strong> (about $18.5k/yr). This is a <strong>directional, medium-confidence</strong> estimate to prioritise the conversation &mdash; confirm the actual server and storage counts before quoting.
-    </div>
-    <div class="guide-rule">
-      <strong>Why some small workloads show as Low priority:</strong> when a workload has no measurable Defender coverage we still flag it, but we only escalate it to <strong>High/Medium</strong> once the spend is big enough to be worth a call. That bar is tuned per service&rsquo;s cost: roughly <strong>$500/mo</strong> for big-ticket services (Servers, Storage, Containers, SQL), <strong>$250/mo</strong> for mid-tier data &amp; app services, and just <strong>$50/mo</strong> for inherently cheap services like Key Vault. Below its threshold a service stays <strong>Low</strong> (monitor only) so the High list reflects real, sizeable opportunities. This only affects prioritisation &mdash; it never changes the dollar gap.
-    </div>
+      <div class="guide-rule">
+        <strong>Simple rule:</strong> Start with <em>Service Attach Opportunities</em> when you need a sales action list. Use <em>Defender Coverage Drift</em> when you need a trend story that explains why an account may be under-protected over time.
+      </div>
+    </section>
+
+    <section class="guide-topic" id="howto-urgency">
+      <h3>Reading the urgency split (Accelerating vs Stable)</h3>
+      <p>The urgency bar on the Overview splits the <strong>same</strong> total attach gap by momentum &mdash; it does not add anything on top:</p>
+      <ul>
+        <li><strong>Accelerating</strong> &mdash; the share of the gap on workloads growing faster than Defender is keeping up (drawn from Defender Coverage Drift). These are the most time-sensitive dollars.</li>
+        <li><strong>Stable</strong> &mdash; the remaining gap on workloads that are flat.</li>
+      </ul>
+      <div class="guide-rule">
+        <strong>No double counting:</strong> Accelerating + Stable always equals the single headline total. Coverage drift <em>re-segments</em> that total by urgency; it is never summed on top of it. The amber drift-risk chip flags services that already meet the benchmark (so they carry no current dollar gap) but where Defender is shrinking or lagging the workload &mdash; a watch list, not part of the dollar total.
+      </div>
+    </section>
+
+    <section class="guide-topic" id="howto-estimate">
+      <h3>How the Servers &amp; Storage gap is estimated</h3>
+      <div class="guide-modal-grid">
+        <section class="guide-modal-section">
+          <h3>Why these two are different</h3>
+          <p>Most Defender plans (SQL, Containers, App Service, Key Vault&hellip;) are billed roughly as a percentage of the Azure service they protect, so we compare actual Defender spend to that expected percentage directly.</p>
+          <ul>
+            <li><strong>Defender for Servers</strong> is priced <em>per server, per hour</em> &mdash; not as a share of your VM bill.</li>
+            <li><strong>Defender for Storage</strong> is priced <em>per storage account plus per million transactions</em> &mdash; not as a share of your storage bill.</li>
+            <li>Because there is no fixed percentage, an earlier version left these out of the dollar gap, which made the headline look lower than reality.</li>
+          </ul>
+        </section>
+        <section class="guide-modal-section drift">
+          <h3>How we estimate the gap now</h3>
+          <p>We benchmark each account against peers who already protect the same workload:</p>
+          <ul>
+            <li>Take every customer who already buys the plan and work out what share of their VM (or Storage) spend goes to that Defender plan.</li>
+            <li>Use the <strong>typical (median) peer ratio</strong> &mdash; usually in the low-to-mid single digits of percent. If there are too few peers, we fall back to a conservative <strong>6%</strong> benchmark.</li>
+            <li>Apply that ratio to this customer's VM or Storage spend to get an <em>expected</em> Defender spend, then <strong>gap = expected &minus; what they actually spend</strong> (never below zero).</li>
+          </ul>
+        </section>
+      </div>
+      <div class="guide-rule">
+        <strong>Worked example:</strong> A customer spends <strong>$27,000/mo</strong> on Storage with <strong>$0</strong> Defender for Storage. At a ~5.7% peer benchmark, expected Defender spend is about <strong>$1,540/mo</strong>, so the estimated attach gap is roughly <strong>$1,540/mo</strong> (about $18.5k/yr). This is a <strong>directional, medium-confidence</strong> estimate to prioritise the conversation &mdash; confirm the actual server and storage counts before quoting.
+      </div>
+    </section>
+
+    <section class="guide-topic" id="howto-priority">
+      <h3>Why some small workloads show as Low priority</h3>
+      <p>When a workload has no measurable Defender coverage we still flag it, but we only escalate it to <strong>High/Medium</strong> once the spend is big enough to be worth a call. That bar is tuned per service&rsquo;s cost: roughly <strong>$500/mo</strong> for big-ticket services (Servers, Storage, Containers, SQL), <strong>$250/mo</strong> for mid-tier data &amp; app services, and just <strong>$50/mo</strong> for inherently cheap services like Key Vault. Below its threshold a service stays <strong>Low</strong> (monitor only) so the High list reflects real, sizeable opportunities. This only affects prioritisation &mdash; it never changes the dollar gap.</p>
+    </section>
   </div>
 </div>
 
@@ -601,18 +670,22 @@ document.querySelectorAll('.tab').forEach(btn => {
   });
 });
 
-// ============ Sales guide modal ============
-(function initGuideModal() {
-  const trigger = document.getElementById('overview-guide-trigger');
-  const modal = document.getElementById('view-guide-modal');
-  const close = document.getElementById('view-guide-close');
+// ============ How-to-use dashboard modal ============
+// The trigger button lives in the shared topbar (js/app-nav.js), which may be
+// injected before or after this script runs — so opening is delegated off document.
+(function initHowToModal() {
+  const modal = document.getElementById('howto-modal');
+  const close = document.getElementById('howto-close');
   let returnFocusTo = null;
 
-  if (!trigger || !modal || !close) return;
+  if (!modal || !close) return;
 
   function openGuide() {
     returnFocusTo = document.activeElement;
     modal.hidden = false;
+    modal.scrollTop = 0;
+    const card = modal.querySelector('.guide-modal-card');
+    if (card) card.scrollTop = 0;
     close.focus();
   }
 
@@ -623,7 +696,10 @@ document.querySelectorAll('.tab').forEach(btn => {
     }
   }
 
-  trigger.addEventListener('click', openGuide);
+  document.addEventListener('click', (event) => {
+    const t = event.target.closest && event.target.closest('#howto-trigger');
+    if (t) { event.preventDefault(); openGuide(); }
+  });
   close.addEventListener('click', closeGuide);
   modal.addEventListener('click', (event) => {
     if (event.target === modal) closeGuide();
@@ -631,37 +707,14 @@ document.querySelectorAll('.tab').forEach(btn => {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !modal.hidden) closeGuide();
   });
-})();
 
-// ============ Servers/Storage estimate modal ============
-(function initEstimateGuideModal() {
-  const trigger = document.getElementById('estimate-guide-trigger');
-  const modal = document.getElementById('estimate-guide-modal');
-  const close = document.getElementById('estimate-guide-close');
-  let returnFocusTo = null;
-
-  if (!trigger || !modal || !close) return;
-
-  function openGuide() {
-    returnFocusTo = document.activeElement;
-    modal.hidden = false;
-    close.focus();
-  }
-
-  function closeGuide() {
-    modal.hidden = true;
-    if (returnFocusTo && typeof returnFocusTo.focus === 'function') {
-      returnFocusTo.focus();
-    }
-  }
-
-  trigger.addEventListener('click', openGuide);
-  close.addEventListener('click', closeGuide);
-  modal.addEventListener('click', (event) => {
-    if (event.target === modal) closeGuide();
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !modal.hidden) closeGuide();
+  // In-modal contents: scroll within the card instead of jumping the page.
+  modal.querySelectorAll('.howto-toc a').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      const target = document.getElementById(link.getAttribute('href').slice(1));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   });
 })();
 
@@ -3219,6 +3272,42 @@ function slPlanBars(containerId, rows) {
   }).join('');
 }
 
+function slSegmentAttachGap(totalGap, stories) {
+  // Pure, self-contained split of the headline attach gap by momentum.
+  // Defender Coverage Drift stories reuse their opportunity's gap_dollars, so a
+  // drift story on a gap-eligible service is ALREADY inside totalGap. This
+  // re-segments (never adds): Accelerating = drift on gap-eligible services,
+  // Stable = the remainder, and drift on $0-gap services is a separate count.
+  const pick = (s, camel, snake) => {
+    if (!s || typeof s !== 'object') return undefined;
+    if (s[camel] !== undefined && s[camel] !== null) return s[camel];
+    if (s[snake] !== undefined && s[snake] !== null) return s[snake];
+    return undefined;
+  };
+  const total = (typeof totalGap === 'number' && totalGap > 0) ? totalGap : 0;
+  const list = Array.isArray(stories) ? stories : [];
+  let acceleratingGap = 0;
+  let driftRiskCount = 0;
+  let driftRiskWorkload = 0;
+  list.forEach(s => {
+    const hasGap = pick(s, 'hasDollarGap', 'has_dollar_gap') === true;
+    const g = Number(pick(s, 'gapDollars', 'gap_dollars')) || 0;
+    if (hasGap && g > 0) {
+      acceleratingGap += g;
+    } else {
+      driftRiskCount += 1;
+      driftRiskWorkload += Number(pick(s, 'latestWorkloadAcr', 'latest_workload_acr')) || 0;
+    }
+  });
+  if (acceleratingGap > total) acceleratingGap = total;
+  const stableGap = Math.max(0, total - acceleratingGap);
+  const accelPct = total > 0 ? (acceleratingGap / total) : 0;
+  return {
+    total: total, acceleratingGap: acceleratingGap, stableGap: stableGap,
+    accelPct: accelPct, driftRiskCount: driftRiskCount, driftRiskWorkload: driftRiskWorkload,
+  };
+}
+
 function slDecorateOverview() {
   if (!hasServiceAttachData()) return;
   const sa = DATA.service_attach || {};
@@ -3291,14 +3380,65 @@ function slDecorateOverview() {
     topPlan ? fmt.money(topPlanGap) : '\u2013',
     topPlan ? topPlan + ' / mo across the book' : 'no quantified service gap');
 
-  const guideSummary = document.querySelector('#overview-guide-trigger .guide-summary');
-  if (guideSummary) {
-    guideSummary.innerHTML = '<strong>How to read this:</strong> Each account buys Azure workloads '
-      + '(containers, SQL, App Service, storage, and more) without the matching Defender for Cloud plan switched on. '
-      + 'The cards size the total monthly and annualized attach gap across the book, how many accounts are affected, '
-      + 'and which Defender service carries the largest gap. Use <em>Service Attach Opportunities</em> for workloads customers buy but do not protect, '
-      + 'and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart.';
-  }
+  // --- Urgency split of the SAME total gap (re-segments, never additive) ---
+  // Defender Coverage Drift stories are derived from the opportunities and
+  // reuse their gap_dollars, so a drift story on a gap-eligible service is
+  // ALREADY inside totalGap. We slice the headline into Accelerating vs Stable
+  // (no double counting) and surface coverage-only drift (gap = $0) as a
+  // separate, non-additive risk chip.
+  (function segmentGapByUrgency() {
+    const host = document.getElementById('gap-urgency');
+    if (!host) return;
+    if (!(totalGap > 0)) { host.hidden = true; return; }
+    const stories = (typeof divergenceStories === 'function') ? divergenceStories() : [];
+    const seg = slSegmentAttachGap(totalGap, stories);
+    const acceleratingGap = seg.acceleratingGap;
+    const stableGap = seg.stableGap;
+    const accelPct = seg.accelPct;
+    const driftRiskCount = seg.driftRiskCount;
+    const driftRiskWorkload = seg.driftRiskWorkload;
+
+    const accelSeg = document.getElementById('gu-seg-accel');
+    const stableSeg = document.getElementById('gu-seg-stable');
+    if (accelSeg) accelSeg.style.width = (accelPct * 100).toFixed(1) + '%';
+    if (stableSeg) stableSeg.style.width = ((1 - accelPct) * 100).toFixed(1) + '%';
+
+    const pctTxt = v => (totalGap > 0 ? Math.round((v / totalGap) * 100) : 0) + '%';
+    const legend = document.getElementById('gu-legend');
+    if (legend) {
+      legend.innerHTML =
+        '<span><span class="dot accel"></span>Accelerating <span class="amt">' + fmt.money(acceleratingGap) + '/mo</span> <span class="pct">' + pctTxt(acceleratingGap) + '</span></span>' +
+        '<span><span class="dot stable"></span>Stable <span class="amt">' + fmt.money(stableGap) + '/mo</span> <span class="pct">' + pctTxt(stableGap) + '</span></span>';
+    }
+
+    const chip = document.getElementById('gu-drift-chip');
+    if (chip) {
+      if (driftRiskCount > 0) {
+        chip.hidden = false;
+        chip.innerHTML = '\u26a0 ' + driftRiskCount + ' service' + (driftRiskCount === 1 ? '' : 's') +
+          ' drifting on protected spend \u00b7 ' + fmt.money(driftRiskWorkload) + '/mo workload at risk' +
+          ' <span class="gu-chip-arrow">\u2192</span>';
+        chip.title = 'These services already meet (or sit near) the Defender benchmark, so they carry no current dollar gap \u2014 but Defender is shrinking or lagging the workload. Watch them so they do not become tomorrow\u2019s gap. Not added to the dollar total.';
+        chip.onclick = function () {
+          const tab = document.querySelector('.tab[data-tab="divergence"]');
+          if (tab) tab.click();
+        };
+      } else {
+        chip.hidden = true;
+      }
+    }
+
+    const info = document.getElementById('gu-info');
+    if (info) {
+      info.title = 'The total attach gap is split by momentum. Accelerating = the share on workloads growing faster than Defender is keeping up (from Defender Coverage Drift) \u2014 the most time-sensitive dollars. Stable = the remaining gap on workloads that are flat. Both slices are the SAME total; drift is never added on top, so there is no double counting.';
+    }
+
+    const note = document.getElementById('gu-note');
+    if (note) {
+      note.textContent = 'Accelerating and Stable are slices of the same ' + fmt.money(totalGap) + '/mo total \u2014 Defender Coverage Drift re-segments the gap by urgency, it is not added on top.';
+    }
+    host.hidden = false;
+  })();
 
   // Chart 1: attach gap by Defender service (non-clickable plan bars).
   const planRows = Array.from(byPlan.entries())
