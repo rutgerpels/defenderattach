@@ -40,7 +40,7 @@
   ];
 
   // WorkloadPlan: { planLabel, workloadSl2[], defenderSl4[], confidence,
-  //                 pricingDriver, eligibleForGap }
+  //                 pricingDriver, eligibleForGap, coveragePriorityFloor }
   const WORKLOAD_PLANS = [
     {
       planLabel: 'Defender for Containers',
@@ -59,6 +59,7 @@
       confidence: 'medium',
       pricingDriver: 'Per vCPU/core of monitored container hosts',
       eligibleForGap: true,
+      coveragePriorityFloor: 500,
     },
     {
       planLabel: 'Defender for SQL',
@@ -67,6 +68,7 @@
       confidence: 'medium',
       pricingDriver: 'Per vCore / protected database instance',
       eligibleForGap: true,
+      coveragePriorityFloor: 500,
     },
     {
       planLabel: 'Defender for App Service',
@@ -75,6 +77,7 @@
       confidence: 'medium',
       pricingDriver: 'Per App Service instance',
       eligibleForGap: true,
+      coveragePriorityFloor: 250,
     },
     {
       planLabel: 'Defender for Key Vault',
@@ -83,6 +86,7 @@
       confidence: 'medium',
       pricingDriver: 'Per 10K Key Vault transactions',
       eligibleForGap: true,
+      coveragePriorityFloor: 50,
     },
     {
       planLabel: 'Defender for PostgreSQL',
@@ -91,6 +95,7 @@
       confidence: 'medium',
       pricingDriver: 'Per protected server instance',
       eligibleForGap: true,
+      coveragePriorityFloor: 250,
     },
     {
       planLabel: 'Defender for MySQL',
@@ -99,6 +104,7 @@
       confidence: 'medium',
       pricingDriver: 'Per protected server instance',
       eligibleForGap: true,
+      coveragePriorityFloor: 250,
     },
     {
       planLabel: 'Defender for Azure Cosmos DB',
@@ -107,6 +113,7 @@
       confidence: 'medium',
       pricingDriver: 'Per 100 RU/s provisioned',
       eligibleForGap: true,
+      coveragePriorityFloor: 250,
     },
     {
       planLabel: 'Defender for APIs',
@@ -115,6 +122,7 @@
       confidence: 'medium',
       pricingDriver: 'Per API call / protected API',
       eligibleForGap: true,
+      coveragePriorityFloor: 250,
     },
     {
       planLabel: 'Defender for AI Services',
@@ -123,6 +131,7 @@
       confidence: 'medium',
       pricingDriver: 'Per AI resource / monitored model',
       eligibleForGap: true,
+      coveragePriorityFloor: 250,
     },
     // --- Unit-priced plans benchmarked from a peer-median ACR proxy --------
     // Servers and Storage are priced per unit (per server/hour; per storage
@@ -137,6 +146,7 @@
       confidence: 'medium',
       pricingDriver: 'Unit-priced per server/hour; gap estimated from the peer-median Defender-to-VM ACR ratio',
       eligibleForGap: true,
+      coveragePriorityFloor: 500,
     },
     {
       planLabel: 'Defender for Storage',
@@ -145,6 +155,7 @@
       confidence: 'medium',
       pricingDriver: 'Unit-priced per storage account + transactions; gap estimated from the peer-median Defender-to-Storage ACR ratio',
       eligibleForGap: true,
+      coveragePriorityFloor: 500,
     },
   ];
 
