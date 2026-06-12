@@ -166,7 +166,10 @@ class GapMathTests(unittest.TestCase):
         model = build_model(book, CFG)
         self.assertEqual(model.dossiers[0].opportunities, [])
 
-    def test_coverage_only_plan_has_no_dollar_benchmark(self):
+    def test_unit_priced_plan_benchmarks_from_target_ratio(self):
+        # Defender for Servers is unit-priced but now gap-eligible: it benchmarks
+        # the VM workload against the flat target_ratio (cohort median disabled
+        # in CFG), so a fully-unattached VM footprint surfaces a dollar gap.
         book = (
             _Book()
             .customer_total("VmCo", _const(50_000))
@@ -178,12 +181,13 @@ class GapMathTests(unittest.TestCase):
         model = build_model(book, CFG)
         opp = _find_opp(model.dossiers[0], "Defender for Servers")
         self.assertIsNotNone(opp)
-        self.assertFalse(opp.eligible_for_gap)
-        self.assertFalse(opp.has_dollar_gap)
-        self.assertIsNone(opp.benchmark_ratio)
-        self.assertEqual(opp.gap_dollars, 0.0)
-        # Coverage-only items are sized by workload footprint, not a fake gap.
-        self.assertAlmostEqual(opp.size_value, 50_000.0)
+        self.assertTrue(opp.eligible_for_gap)
+        self.assertTrue(opp.has_dollar_gap)
+        self.assertAlmostEqual(opp.benchmark_ratio, 0.06)
+        # expected = 50000 * 0.06 = 3000; actual 0 -> gap 3000; sized by the gap.
+        self.assertAlmostEqual(opp.expected, 3_000.0)
+        self.assertAlmostEqual(opp.gap_dollars, 3_000.0)
+        self.assertAlmostEqual(opp.size_value, 3_000.0)
         self.assertEqual(opp.signal, SIGNAL_ATTACH)
 
     def test_small_workload_suppresses_dollar_gap(self):

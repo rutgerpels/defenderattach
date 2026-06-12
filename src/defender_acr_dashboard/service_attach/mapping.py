@@ -157,22 +157,33 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         pricing_driver="Per AI resource / monitored model",
         eligible_for_gap=True,
     ),
-    # --- Coverage-only (unit priced; no honest %-of-ACR benchmark) -----------
+    # --- Unit-priced plans benchmarked from a peer-median ACR proxy ----------
+    # Servers and Storage are priced per unit (per server/hour; per storage
+    # account + transactions), not as a % of Azure ACR. We still size an attach
+    # gap by benchmarking against peers who already protect the same workload:
+    # the cohort-median Defender-to-workload ACR ratio (flat target_ratio when
+    # too few peers). Directional (medium confidence) — validate before quoting.
     WorkloadPlan(
         plan_label="Defender for Servers",
         workload_sl2=("Virtual Machines",),
         defender_sl4=("Microsoft Defender for Servers",),
-        confidence="low",
-        pricing_driver="Per server/node per hour (not a % of compute ACR)",
-        eligible_for_gap=False,
+        confidence="medium",
+        pricing_driver=(
+            "Unit-priced per server/hour; gap estimated from the peer-median "
+            "Defender-to-VM ACR ratio"
+        ),
+        eligible_for_gap=True,
     ),
     WorkloadPlan(
         plan_label="Defender for Storage",
         workload_sl2=("Storage",),
         defender_sl4=("Microsoft Defender for Storage",),
-        confidence="low",
-        pricing_driver="Per storage account + per million transactions",
-        eligible_for_gap=False,
+        confidence="medium",
+        pricing_driver=(
+            "Unit-priced per storage account + transactions; gap estimated from "
+            "the peer-median Defender-to-Storage ACR ratio"
+        ),
+        eligible_for_gap=True,
     ),
 )
 

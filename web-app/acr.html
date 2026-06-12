@@ -409,6 +409,11 @@ body.shell-ready {
     <div class="card"><div class="label">DfC % of Portfolio</div><div class="val" id="kpi-dfc-pct">–</div><div class="delta">share of total ACR</div></div>
   </div>
 
+  <button class="note guide-note" id="estimate-guide-trigger" type="button" aria-haspopup="dialog" aria-controls="estimate-guide-modal">
+    <span class="guide-summary"><strong>How is the gap estimated for Servers &amp; Storage?</strong> Defender for Servers and Defender for Storage are priced per unit, not as a percentage of Azure spend, so their attach gap is benchmarked against peers who already protect the same workload.</span>
+    <span class="guide-cta">See how it's calculated</span>
+  </button>
+
   <div class="grid-2">
     <div class="chart-box">
       <div class="title">Defender for Cloud — ACR across all customers</div>
@@ -517,6 +522,41 @@ body.shell-ready {
   </div>
 </div>
 
+<div class="guide-modal" id="estimate-guide-modal" role="dialog" aria-modal="true" aria-labelledby="estimate-guide-title" hidden>
+  <div class="guide-modal-card" role="document">
+    <div class="guide-modal-head">
+      <div>
+        <h2 id="estimate-guide-title">How the Servers &amp; Storage gap is estimated</h2>
+        <p class="guide-subtitle">A plain-English guide for sales follow-up conversations.</p>
+      </div>
+      <button type="button" class="guide-close" id="estimate-guide-close">Got it</button>
+    </div>
+    <div class="guide-modal-grid">
+      <section class="guide-modal-section">
+        <h3>Why these two are different</h3>
+        <p>Most Defender plans (SQL, Containers, App Service, Key Vault&hellip;) are billed roughly as a percentage of the Azure service they protect, so we compare actual Defender spend to that expected percentage directly.</p>
+        <ul>
+          <li><strong>Defender for Servers</strong> is priced <em>per server, per hour</em> &mdash; not as a share of your VM bill.</li>
+          <li><strong>Defender for Storage</strong> is priced <em>per storage account plus per million transactions</em> &mdash; not as a share of your storage bill.</li>
+          <li>Because there is no fixed percentage, an earlier version left these out of the dollar gap, which made the headline look lower than reality.</li>
+        </ul>
+      </section>
+      <section class="guide-modal-section drift">
+        <h3>How we estimate the gap now</h3>
+        <p>We benchmark each account against peers who already protect the same workload:</p>
+        <ul>
+          <li>Take every customer who already buys the plan and work out what share of their VM (or Storage) spend goes to that Defender plan.</li>
+          <li>Use the <strong>typical (median) peer ratio</strong> &mdash; usually in the low-to-mid single digits of percent. If there are too few peers, we fall back to a conservative <strong>6%</strong> benchmark.</li>
+          <li>Apply that ratio to this customer's VM or Storage spend to get an <em>expected</em> Defender spend, then <strong>gap = expected &minus; what they actually spend</strong> (never below zero).</li>
+        </ul>
+      </section>
+    </div>
+    <div class="guide-rule">
+      <strong>Worked example:</strong> A customer spends <strong>$27,000/mo</strong> on Storage with <strong>$0</strong> Defender for Storage. At a ~5.7% peer benchmark, expected Defender spend is about <strong>$1,540/mo</strong>, so the estimated attach gap is roughly <strong>$1,540/mo</strong> (about $18.5k/yr). This is a <strong>directional, medium-confidence</strong> estimate to prioritise the conversation &mdash; confirm the actual server and storage counts before quoting.
+    </div>
+  </div>
+</div>
+
 <script>
 let DATA = {
   months: [], month_labels: [], partial_month_idx: -1,
@@ -563,6 +603,38 @@ document.querySelectorAll('.tab').forEach(btn => {
   const trigger = document.getElementById('overview-guide-trigger');
   const modal = document.getElementById('view-guide-modal');
   const close = document.getElementById('view-guide-close');
+  let returnFocusTo = null;
+
+  if (!trigger || !modal || !close) return;
+
+  function openGuide() {
+    returnFocusTo = document.activeElement;
+    modal.hidden = false;
+    close.focus();
+  }
+
+  function closeGuide() {
+    modal.hidden = true;
+    if (returnFocusTo && typeof returnFocusTo.focus === 'function') {
+      returnFocusTo.focus();
+    }
+  }
+
+  trigger.addEventListener('click', openGuide);
+  close.addEventListener('click', closeGuide);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeGuide();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !modal.hidden) closeGuide();
+  });
+})();
+
+// ============ Servers/Storage estimate modal ============
+(function initEstimateGuideModal() {
+  const trigger = document.getElementById('estimate-guide-trigger');
+  const modal = document.getElementById('estimate-guide-modal');
+  const close = document.getElementById('estimate-guide-close');
   let returnFocusTo = null;
 
   if (!trigger || !modal || !close) return;

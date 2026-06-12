@@ -124,22 +124,27 @@
       pricingDriver: 'Per AI resource / monitored model',
       eligibleForGap: true,
     },
-    // --- Coverage-only (unit priced; no honest %-of-ACR benchmark) ---------
+    // --- Unit-priced plans benchmarked from a peer-median ACR proxy --------
+    // Servers and Storage are priced per unit (per server/hour; per storage
+    // account + transactions), not as a % of Azure ACR. We still size an attach
+    // gap by benchmarking against peers who already protect the same workload:
+    // the cohort-median Defender-to-workload ACR ratio (flat targetRatio when
+    // too few peers). Directional (medium confidence) — validate before quoting.
     {
       planLabel: 'Defender for Servers',
       workloadSl2: ['Virtual Machines'],
       defenderSl4: ['Microsoft Defender for Servers'],
-      confidence: 'low',
-      pricingDriver: 'Per server/node per hour (not a % of compute ACR)',
-      eligibleForGap: false,
+      confidence: 'medium',
+      pricingDriver: 'Unit-priced per server/hour; gap estimated from the peer-median Defender-to-VM ACR ratio',
+      eligibleForGap: true,
     },
     {
       planLabel: 'Defender for Storage',
       workloadSl2: ['Storage'],
       defenderSl4: ['Microsoft Defender for Storage'],
-      confidence: 'low',
-      pricingDriver: 'Per storage account + per million transactions',
-      eligibleForGap: false,
+      confidence: 'medium',
+      pricingDriver: 'Unit-priced per storage account + transactions; gap estimated from the peer-median Defender-to-Storage ACR ratio',
+      eligibleForGap: true,
     },
   ];
 
