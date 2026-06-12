@@ -62,6 +62,7 @@ class Opportunity:
     confidence: str
     pricing_driver: str
     eligible_for_gap: bool
+    coverage_priority_floor: float
     signal: str
 
     workload_sl2_present: List[str]
@@ -348,6 +349,7 @@ def _build_plan_candidate(
         confidence=plan.confidence,
         pricing_driver=plan.pricing_driver,
         eligible_for_gap=plan.eligible_for_gap,
+        coverage_priority_floor=plan.coverage_priority_floor,
         signal=signal,
         workload_sl2_present=present_sl2,
         workload_acr=workload_acr,
@@ -388,6 +390,19 @@ def _classify_priority(opp: Opportunity, config: AttachConfig) -> tuple:
     """
     eps = config.priority_momentum_eps
     cov_med = config.priority_coverage_medium
+
+    # Materiality gate: a coverage-only signal (no quantified dollar gap) on a
+    # sub-scale workload is not worth a High/Medium flag. The floor is tuned per
+    # service's cost gravity (mapping.py), so cheap services like Key Vault still
+    # surface while tiny VM/Storage footprints stay quiet. Quantified dollar-gap
+    # opportunities are exempt — they already cleared the $ materiality floor.
+    if not opp.has_dollar_gap and opp.workload_acr < opp.coverage_priority_floor:
+        return (
+            "Low",
+            "Workload below the materiality threshold for this service; monitor only",
+            2,
+        )
+
     growing = opp.workload_growth > 0
     divergent = opp.defender_zero_with_workload_growth or opp.momentum_raw > eps
     severe_coverage = opp.signal == SIGNAL_ATTACH or (

@@ -208,6 +208,51 @@ class GapMathTests(unittest.TestCase):
         self.assertEqual(opp.gap_dollars, 0.0)
 
 
+class PriorityFloorTests(unittest.TestCase):
+    """Per-service materiality floor for coverage-only opportunities."""
+
+    def test_subfloor_coverage_only_is_low(self):
+        # SQL's coverage_priority_floor is $500. A growing, fully-unattached SQL
+        # workload ending at $350/mo is below that floor: expected = 350*0.06 = 21
+        # (< $100) so it is coverage-only, and the growth+zero-Defender pattern
+        # would normally escalate it to High. The materiality gate caps it at Low.
+        book = (
+            _Book()
+            .customer_total("SmallSqlCo", _const(20_000))
+            .workload("SmallSqlCo", "SQL Database", [100, 150, 200, 250, 300, 350])
+            .dfc_total("SmallSqlCo", _const(0))
+            .defender_plan("SmallSqlCo", "Microsoft Defender for SQL", _const(0))
+            .parsed()
+        )
+        model = build_model(book, CFG)
+        opp = _find_opp(model.dossiers[0], "Defender for SQL")
+        self.assertIsNotNone(opp)
+        self.assertFalse(opp.has_dollar_gap)
+        self.assertLess(opp.workload_acr, opp.coverage_priority_floor)
+        self.assertEqual(opp.priority, "Low")
+        self.assertEqual(opp.priority_rank, 2)
+
+    def test_above_floor_coverage_only_still_escalates(self):
+        # Same growing, unattached pattern but ending at $800/mo (above SQL's
+        # $500 floor). Still coverage-only (expected = 48 < $100), but the gate
+        # no longer applies, so the growth divergence escalates it to High.
+        book = (
+            _Book()
+            .customer_total("BigSqlCo", _const(20_000))
+            .workload("BigSqlCo", "SQL Database", [300, 400, 500, 600, 700, 800])
+            .dfc_total("BigSqlCo", _const(0))
+            .defender_plan("BigSqlCo", "Microsoft Defender for SQL", _const(0))
+            .parsed()
+        )
+        model = build_model(book, CFG)
+        opp = _find_opp(model.dossiers[0], "Defender for SQL")
+        self.assertIsNotNone(opp)
+        self.assertFalse(opp.has_dollar_gap)
+        self.assertGreaterEqual(opp.workload_acr, opp.coverage_priority_floor)
+        self.assertEqual(opp.priority, "High")
+        self.assertEqual(opp.priority_rank, 0)
+
+
 class AttachRatioTests(unittest.TestCase):
     def test_attach_ratio_uses_eligible_denominator(self):
         book = (

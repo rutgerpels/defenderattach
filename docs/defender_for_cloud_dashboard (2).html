@@ -432,6 +432,9 @@ tr.clickable:hover { background: var(--da-surface-soft); }
     <div class="guide-rule">
       <strong>Worked example:</strong> A customer spends <strong>$27,000/mo</strong> on Storage with <strong>$0</strong> Defender for Storage. At a ~5.7% peer benchmark, expected Defender spend is about <strong>$1,540/mo</strong>, so the estimated attach gap is roughly <strong>$1,540/mo</strong> (about $18.5k/yr). This is a <strong>directional, medium-confidence</strong> estimate to prioritise the conversation &mdash; confirm the actual server and storage counts before quoting.
     </div>
+    <div class="guide-rule">
+      <strong>Why some small workloads show as Low priority:</strong> when a workload has no measurable Defender coverage we still flag it, but we only escalate it to <strong>High/Medium</strong> once the spend is big enough to be worth a call. That bar is tuned per service&rsquo;s cost: roughly <strong>$500/mo</strong> for big-ticket services (Servers, Storage, Containers, SQL), <strong>$250/mo</strong> for mid-tier data &amp; app services, and just <strong>$50/mo</strong> for inherently cheap services like Key Vault. Below its threshold a service stays <strong>Low</strong> (monitor only) so the High list reflects real, sizeable opportunities. This only affects prioritisation &mdash; it never changes the dollar gap.
+    </div>
   </div>
 </div>
 

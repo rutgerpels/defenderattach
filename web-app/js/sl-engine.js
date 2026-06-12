@@ -141,6 +141,21 @@
   function classifyPriority(opp, config) {
     const eps = config.priorityMomentumEps != null ? config.priorityMomentumEps : 0.02;
     const covMed = config.priorityCoverageMedium != null ? config.priorityCoverageMedium : 0.5;
+
+    // Materiality gate: a coverage-only signal (no quantified dollar gap) on a
+    // sub-scale workload is not worth a High/Medium flag. The floor is tuned per
+    // service's cost gravity (sl-mapping.js), so cheap services like Key Vault
+    // still surface while tiny VM/Storage footprints stay quiet. Quantified
+    // dollar-gap opportunities are exempt — they cleared the $ materiality floor.
+    const floor = opp.coveragePriorityFloor != null ? opp.coveragePriorityFloor : 250;
+    if (!opp.hasDollarGap && opp.workloadAcr < floor) {
+      return {
+        priority: 'Low',
+        priorityReason: 'Workload below the materiality threshold for this service; monitor only',
+        priorityRank: 2,
+      };
+    }
+
     const growing = opp.workloadGrowth > 0;
     const divergent = opp.defenderZeroWithWorkloadGrowth || opp.momentumRaw > eps;
     const severeCoverage = opp.signal === SIGNAL_ATTACH ||
@@ -226,6 +241,7 @@
       confidence: plan.confidence,
       pricingDriver: plan.pricingDriver,
       eligibleForGap: plan.eligibleForGap,
+      coveragePriorityFloor: plan.coveragePriorityFloor != null ? plan.coveragePriorityFloor : 250,
       signal,
       workloadSl2Present: presentSl2,
       workloadAcr,

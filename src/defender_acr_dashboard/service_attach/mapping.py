@@ -64,6 +64,12 @@ class WorkloadPlan:
         pricing_driver: Plain-language note on how the plan is actually priced.
         eligible_for_gap: When True the pair gets a $ benchmark gap. When False
             it is a coverage-only signal (workload present, Defender absent/low).
+        coverage_priority_floor: Minimum monthly workload ACR ($) before a
+            *coverage-only* opportunity (no quantified dollar gap) may be ranked
+            High/Medium. Below it the item is capped at Low. Tuned per service's
+            cost gravity so cheap services (e.g. Key Vault) still surface while
+            sub-scale footprints on big services (VMs, Storage) stay quiet. Has
+            no effect on quantified dollar-gap opportunities.
     """
 
     plan_label: str
@@ -72,6 +78,7 @@ class WorkloadPlan:
     confidence: str
     pricing_driver: str
     eligible_for_gap: bool
+    coverage_priority_floor: float = 250.0
 
 
 WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
@@ -92,6 +99,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per vCPU/core of monitored container hosts",
         eligible_for_gap=True,
+        coverage_priority_floor=500.0,
     ),
     WorkloadPlan(
         plan_label="Defender for SQL",
@@ -100,6 +108,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per vCore / protected database instance",
         eligible_for_gap=True,
+        coverage_priority_floor=500.0,
     ),
     WorkloadPlan(
         plan_label="Defender for App Service",
@@ -108,6 +117,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per App Service instance",
         eligible_for_gap=True,
+        coverage_priority_floor=250.0,
     ),
     WorkloadPlan(
         plan_label="Defender for Key Vault",
@@ -116,6 +126,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per 10K Key Vault transactions",
         eligible_for_gap=True,
+        coverage_priority_floor=50.0,
     ),
     WorkloadPlan(
         plan_label="Defender for PostgreSQL",
@@ -124,6 +135,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per protected server instance",
         eligible_for_gap=True,
+        coverage_priority_floor=250.0,
     ),
     WorkloadPlan(
         plan_label="Defender for MySQL",
@@ -132,6 +144,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per protected server instance",
         eligible_for_gap=True,
+        coverage_priority_floor=250.0,
     ),
     WorkloadPlan(
         plan_label="Defender for Azure Cosmos DB",
@@ -140,6 +153,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per 100 RU/s provisioned",
         eligible_for_gap=True,
+        coverage_priority_floor=250.0,
     ),
     WorkloadPlan(
         plan_label="Defender for APIs",
@@ -148,6 +162,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per API call / protected API",
         eligible_for_gap=True,
+        coverage_priority_floor=250.0,
     ),
     WorkloadPlan(
         plan_label="Defender for AI Services",
@@ -156,6 +171,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
         confidence="medium",
         pricing_driver="Per AI resource / monitored model",
         eligible_for_gap=True,
+        coverage_priority_floor=250.0,
     ),
     # --- Unit-priced plans benchmarked from a peer-median ACR proxy ----------
     # Servers and Storage are priced per unit (per server/hour; per storage
@@ -173,6 +189,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
             "Defender-to-VM ACR ratio"
         ),
         eligible_for_gap=True,
+        coverage_priority_floor=500.0,
     ),
     WorkloadPlan(
         plan_label="Defender for Storage",
@@ -184,6 +201,7 @@ WORKLOAD_PLANS: Tuple[WorkloadPlan, ...] = (
             "the peer-median Defender-to-Storage ACR ratio"
         ),
         eligible_for_gap=True,
+        coverage_priority_floor=500.0,
     ),
 )
 

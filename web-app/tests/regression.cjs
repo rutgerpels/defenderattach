@@ -1407,6 +1407,39 @@ console.log('\nweb-app service-level attach (SL2/SL4)');
     assertEqual(customerStory.caveat, customerStory.caveat_text, 'caveat alias');
   });
 
+  test('SL coverage-only opportunity below the per-service floor is capped at Low priority', () => {
+    const months = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6'];
+    function buildModelFor(sqlSeries) {
+      const frame = [];
+      const add = (sl2, sl4, level, series) => months.forEach((month, idx) => {
+        frame.push({ customer: 'C', sl2, sl4, level, month, acr: Number(series[idx]) });
+      });
+      add(SLMapping.TOTAL_TOKEN, '', SLParser.LEVEL_CUSTOMER_TOTAL, [20000, 20000, 20000, 20000, 20000, 20000]);
+      add('SQL Database', SLMapping.TOTAL_TOKEN, SLParser.LEVEL_SERVICE_TOTAL, sqlSeries);
+      add(SLMapping.DEFENDER_SL2, SLMapping.TOTAL_TOKEN, SLParser.LEVEL_SERVICE_TOTAL, [0, 0, 0, 0, 0, 0]);
+      add(SLMapping.DEFENDER_SL2, 'Microsoft Defender for SQL', SLParser.LEVEL_LEAF, [0, 0, 0, 0, 0, 0]);
+      const parsed = {
+        frame, months, customers: ['C'], reconciliation: [],
+        sourceName: 'synthetic', rowCount: frame.length, latestMonth: 'M6',
+      };
+      const config = SLMapping.defaultConfig();
+      config.useCohortMedian = false;
+      const model = SLEngine.buildModel(parsed, config);
+      return model.dossiers[0].opportunities.find((o) => o.planLabel === 'Defender for SQL');
+    }
+    // SQL floor is $500. Growing+unattached would normally be High; below the
+    // floor the materiality gate caps it at Low. Above the floor it escalates.
+    const low = buildModelFor([100, 150, 200, 250, 300, 350]);
+    assert(low && low.hasDollarGap === false, 'sub-floor SQL opp is coverage-only');
+    assert(low.workloadAcr < low.coveragePriorityFloor, 'sub-floor workload below the floor');
+    assertEqual(low.priority, 'Low', 'sub-floor coverage-only opp capped at Low');
+
+    const high = buildModelFor([300, 400, 500, 600, 700, 800]);
+    assert(high && high.hasDollarGap === false, 'above-floor SQL opp is coverage-only');
+    assert(high.workloadAcr >= high.coveragePriorityFloor, 'above-floor workload clears the floor');
+    assertEqual(high.priority, 'High', 'above-floor coverage-only growth divergence stays High');
+  });
+
   test('SL app scripts make no network calls (client-side privacy guard)', () => {
     const files = fs.readdirSync(path.join(WEBAPP, 'js'))
       .filter((f) => f.startsWith('sl-') && f.endsWith('.js'));
