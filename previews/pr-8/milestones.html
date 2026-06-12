@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Defender for Cloud — Milestone Gaps</title>
+
+  <script src="js/theme.js"></script>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="stylesheet" href="css/milestone.css" />
+</head>
+<body class="milestone-page">
+
+<div id="app-nav" data-active="milestones"></div>
+
+<main class="app-main">
+
+  <section id="milestone-empty" class="empty-state">
+    <div class="dropzone">
+      <h1>Defender for Cloud — Milestone Attach Gaps</h1>
+      <p class="lead">Compare Migration milestones with Defender for Cloud milestones to surface attach opportunities. Pick one Migration workbook and one Defender workbook to begin — files stay on your machine.</p>
+
+      <div class="file-pickers">
+        <div class="file-pick">
+          <button class="primary-btn" id="migration-btn">📂 Pick Migration Excel</button>
+          <input type="file" id="migration-input" accept=".xlsx,.xls" style="display:none" />
+          <p class="file-status" id="migration-status">No file loaded</p>
+        </div>
+        <div class="file-pick">
+          <button class="primary-btn" id="defender-btn">📂 Pick Defender Excel</button>
+          <input type="file" id="defender-input" accept=".xlsx,.xls" style="display:none" />
+          <p class="file-status" id="defender-status">No file loaded</p>
+        </div>
+      </div>
+
+      <p class="error-msg" style="color:var(--color-danger);margin-top:8px;"></p>
+      <p class="empty-meta">Supported: <code>.xlsx</code>, <code>.xls</code> · Sheet named "Export"</p>
+    </div>
+  </section>
+
+  <section id="milestone-shell" class="milestone-shell" hidden>
+    <header class="page-header">
+      <div>
+        <h1>Defender Milestone Attach Gaps</h1>
+        <p class="subtitle" id="page-subtitle">Migration milestones missing matching Defender for Cloud milestones.</p>
+      </div>
+      <div class="header-actions">
+        <button class="secondary-btn" id="print-btn" disabled>🖨️ Print / PDF</button>
+        <button class="secondary-btn" id="csv-btn" disabled>⬇️ Download CSV</button>
+        <button class="primary-btn" id="pptx-btn" disabled>📑 Export to PowerPoint</button>
+      </div>
+    </header>
+
+    <section class="metric-grid" id="summary-cards"></section>
+
+    <section class="chart-box milestone-guide">
+      <strong>How to read this:</strong>
+      Account-level gaps show customers with Migration milestones but no Defender milestones.
+      Opportunity-level gaps show attached accounts where the same Migration Opportunity ID has no Defender milestone.
+    </section>
+
+    <section class="chart-box milestone-toolbar" aria-label="Milestone gap filters">
+      <label>Search
+        <input id="milestone-search" type="search" placeholder="Account, opportunity, workload, owner" />
+      </label>
+      <label>Gap type
+        <select id="gap-filter">
+          <option value="all">All gaps</option>
+          <option value="Account-level gap">Account-level gaps</option>
+          <option value="Opportunity-level gap">Opportunity-level gaps</option>
+        </select>
+      </label>
+      <label>Priority
+        <select id="priority-filter">
+          <option value="all">All priorities</option>
+          <option value="HIGH">HIGH</option>
+          <option value="MEDIUM">MEDIUM</option>
+          <option value="LOW">LOW</option>
+        </select>
+      </label>
+      <label>Workload
+        <select id="workload-filter">
+          <option value="all">All workloads</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="chart-grid">
+      <div class="chart-box">
+        <h2>Priority mix</h2>
+        <div id="priority-chart" class="bar-list"></div>
+      </div>
+      <div class="chart-box">
+        <h2>Gap type mix</h2>
+        <div id="gap-type-chart" class="bar-list"></div>
+      </div>
+      <div class="chart-box wide">
+        <h2>Workload coverage</h2>
+        <div id="workload-chart" class="bar-list"></div>
+      </div>
+    </section>
+
+    <section class="chart-box">
+      <h2>Top 10 highest-priority gaps</h2>
+      <div class="scroll-table">
+        <table id="top-gaps-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Opportunity</th>
+              <th>Workload</th>
+              <th>Date</th>
+              <th>Priority</th>
+              <th class="num">ACR pipeline</th>
+            </tr>
+          </thead>
+          <tbody id="top-gaps-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chart-box" id="all-gaps-section">
+      <h2>All milestone gaps</h2>
+      <p class="section-note">Click a row to drill into priority rationale, owners, and migration milestone names.</p>
+      <div id="result-count" class="result-count"></div>
+      <div id="gap-table" class="scroll-table"></div>
+    </section>
+
+    <section id="details-panel" class="chart-box details-panel" hidden></section>
+
+    <section class="chart-box">
+      <h2>Data quality notes</h2>
+      <div id="quality-notes"></div>
+    </section>
+
+    <section class="chart-box methodology">
+      <h2>Methodology</h2>
+      <p><strong>Account-level gap:</strong> account has Migration milestones but no Defender for Cloud milestones.</p>
+      <p><strong>Attached account:</strong> account appears in both workbooks.</p>
+      <p><strong>Opportunity-level gap:</strong> for attached accounts, a Migration Opportunity ID has no Defender milestone with the same account and Opportunity ID.</p>
+      <p><strong>Priority:</strong> HIGH = SalesStageName is Inspire &amp; Design or Listen and Consult; MEDIUM = other known sales stage or valid workload; LOW = no target sales stage and unclear workload. Rows are then sorted by the earliest due date.</p>
+    </section>
+  </section>
+
+</main>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/pptxgen.bundle.js"></script>
+
+<script src="js/app-nav.js"></script>
+<script src="js/excel-loader.js"></script>
+<script src="js/csv-export.js"></script>
+
+<script src="js/milestone-model.js"></script>
+<script src="js/milestone-view.js"></script>
+<script src="js/pptx-milestones.js"></script>
+<script src="js/milestone-app.js"></script>
+
+</body>
+</html>
