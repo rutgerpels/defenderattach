@@ -287,6 +287,14 @@ def build_html() -> str:
     _assert_contains(html, "function slSetChartText(", "Overview runtime chart-text helper")
     _assert_contains(html, "  slDecorateOverview();\n", "renderAll Overview decorator wiring")
 
+    _assert_contains(html, 'id="howto-modal"', "consolidated how-to modal markup")
+    _assert_contains(html, "How to use this dashboard", "how-to modal title")
+    _assert_contains(html, "function initHowToModal()", "how-to modal init handler")
+    _assert_absent(html, 'id="overview-guide-trigger"', "retired inline overview guide trigger")
+    _assert_absent(html, 'id="estimate-guide-trigger"', "retired inline estimate guide trigger")
+    _assert_absent(html, 'id="view-guide-modal"', "retired view guide modal")
+    _assert_absent(html, 'id="estimate-guide-modal"', "retired estimate guide modal")
+
     return html
 
 
