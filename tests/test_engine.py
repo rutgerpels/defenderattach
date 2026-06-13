@@ -166,7 +166,10 @@ class GapMathTests(unittest.TestCase):
         model = build_model(book, CFG)
         self.assertEqual(model.dossiers[0].opportunities, [])
 
-    def test_coverage_only_plan_has_no_dollar_benchmark(self):
+    def test_unit_priced_plan_benchmarks_from_target_ratio(self):
+        # Defender for Servers is unit-priced but now gap-eligible: it benchmarks
+        # the VM workload against the flat target_ratio (cohort median disabled
+        # in CFG), so a fully-unattached VM footprint surfaces a dollar gap.
         book = (
             _Book()
             .customer_total("VmCo", _const(50_000))
@@ -178,12 +181,13 @@ class GapMathTests(unittest.TestCase):
         model = build_model(book, CFG)
         opp = _find_opp(model.dossiers[0], "Defender for Servers")
         self.assertIsNotNone(opp)
-        self.assertFalse(opp.eligible_for_gap)
-        self.assertFalse(opp.has_dollar_gap)
-        self.assertIsNone(opp.benchmark_ratio)
-        self.assertEqual(opp.gap_dollars, 0.0)
-        # Coverage-only items are sized by workload footprint, not a fake gap.
-        self.assertAlmostEqual(opp.size_value, 50_000.0)
+        self.assertTrue(opp.eligible_for_gap)
+        self.assertTrue(opp.has_dollar_gap)
+        self.assertAlmostEqual(opp.benchmark_ratio, 0.06)
+        # expected = 50000 * 0.06 = 3000; actual 0 -> gap 3000; sized by the gap.
+        self.assertAlmostEqual(opp.expected, 3_000.0)
+        self.assertAlmostEqual(opp.gap_dollars, 3_000.0)
+        self.assertAlmostEqual(opp.size_value, 3_000.0)
         self.assertEqual(opp.signal, SIGNAL_ATTACH)
 
     def test_small_workload_suppresses_dollar_gap(self):
@@ -202,6 +206,51 @@ class GapMathTests(unittest.TestCase):
         self.assertIsNotNone(opp)
         self.assertFalse(opp.has_dollar_gap)
         self.assertEqual(opp.gap_dollars, 0.0)
+
+
+class PriorityFloorTests(unittest.TestCase):
+    """Per-service materiality floor for coverage-only opportunities."""
+
+    def test_subfloor_coverage_only_is_low(self):
+        # SQL's coverage_priority_floor is $500. A growing, fully-unattached SQL
+        # workload ending at $350/mo is below that floor: expected = 350*0.06 = 21
+        # (< $100) so it is coverage-only, and the growth+zero-Defender pattern
+        # would normally escalate it to High. The materiality gate caps it at Low.
+        book = (
+            _Book()
+            .customer_total("SmallSqlCo", _const(20_000))
+            .workload("SmallSqlCo", "SQL Database", [100, 150, 200, 250, 300, 350])
+            .dfc_total("SmallSqlCo", _const(0))
+            .defender_plan("SmallSqlCo", "Microsoft Defender for SQL", _const(0))
+            .parsed()
+        )
+        model = build_model(book, CFG)
+        opp = _find_opp(model.dossiers[0], "Defender for SQL")
+        self.assertIsNotNone(opp)
+        self.assertFalse(opp.has_dollar_gap)
+        self.assertLess(opp.workload_acr, opp.coverage_priority_floor)
+        self.assertEqual(opp.priority, "Low")
+        self.assertEqual(opp.priority_rank, 2)
+
+    def test_above_floor_coverage_only_still_escalates(self):
+        # Same growing, unattached pattern but ending at $800/mo (above SQL's
+        # $500 floor). Still coverage-only (expected = 48 < $100), but the gate
+        # no longer applies, so the growth divergence escalates it to High.
+        book = (
+            _Book()
+            .customer_total("BigSqlCo", _const(20_000))
+            .workload("BigSqlCo", "SQL Database", [300, 400, 500, 600, 700, 800])
+            .dfc_total("BigSqlCo", _const(0))
+            .defender_plan("BigSqlCo", "Microsoft Defender for SQL", _const(0))
+            .parsed()
+        )
+        model = build_model(book, CFG)
+        opp = _find_opp(model.dossiers[0], "Defender for SQL")
+        self.assertIsNotNone(opp)
+        self.assertFalse(opp.has_dollar_gap)
+        self.assertGreaterEqual(opp.workload_acr, opp.coverage_priority_floor)
+        self.assertEqual(opp.priority, "High")
+        self.assertEqual(opp.priority_rank, 0)
 
 
 class AttachRatioTests(unittest.TestCase):

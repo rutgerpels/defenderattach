@@ -2646,6 +2646,42 @@ function slPlanBars(containerId, rows) {
   }).join('');
 }
 
+function slSegmentAttachGap(totalGap, stories) {
+  // Pure, self-contained split of the headline attach gap by momentum.
+  // Defender Coverage Drift stories reuse their opportunity's gap_dollars, so a
+  // drift story on a gap-eligible service is ALREADY inside totalGap. This
+  // re-segments (never adds): Accelerating = drift on gap-eligible services,
+  // Stable = the remainder, and drift on $0-gap services is a separate count.
+  const pick = (s, camel, snake) => {
+    if (!s || typeof s !== 'object') return undefined;
+    if (s[camel] !== undefined && s[camel] !== null) return s[camel];
+    if (s[snake] !== undefined && s[snake] !== null) return s[snake];
+    return undefined;
+  };
+  const total = (typeof totalGap === 'number' && totalGap > 0) ? totalGap : 0;
+  const list = Array.isArray(stories) ? stories : [];
+  let acceleratingGap = 0;
+  let driftRiskCount = 0;
+  let driftRiskWorkload = 0;
+  list.forEach(s => {
+    const hasGap = pick(s, 'hasDollarGap', 'has_dollar_gap') === true;
+    const g = Number(pick(s, 'gapDollars', 'gap_dollars')) || 0;
+    if (hasGap && g > 0) {
+      acceleratingGap += g;
+    } else {
+      driftRiskCount += 1;
+      driftRiskWorkload += Number(pick(s, 'latestWorkloadAcr', 'latest_workload_acr')) || 0;
+    }
+  });
+  if (acceleratingGap > total) acceleratingGap = total;
+  const stableGap = Math.max(0, total - acceleratingGap);
+  const accelPct = total > 0 ? (acceleratingGap / total) : 0;
+  return {
+    total: total, acceleratingGap: acceleratingGap, stableGap: stableGap,
+    accelPct: accelPct, driftRiskCount: driftRiskCount, driftRiskWorkload: driftRiskWorkload,
+  };
+}
+
 function slDecorateOverview() {
   if (!hasServiceAttachData()) return;
   const sa = DATA.service_attach || {};
@@ -2718,14 +2754,65 @@ function slDecorateOverview() {
     topPlan ? fmt.money(topPlanGap) : '\u2013',
     topPlan ? topPlan + ' / mo across the book' : 'no quantified service gap');
 
-  const guideSummary = document.querySelector('#overview-guide-trigger .guide-summary');
-  if (guideSummary) {
-    guideSummary.innerHTML = '<strong>How to read this:</strong> Each account buys Azure workloads '
-      + '(containers, SQL, App Service, storage, and more) without the matching Defender for Cloud plan switched on. '
-      + 'The cards size the total monthly and annualized attach gap across the book, how many accounts are affected, '
-      + 'and which Defender service carries the largest gap. Use <em>Service Attach Opportunities</em> for workloads customers buy but do not protect, '
-      + 'and <em>Defender Coverage Drift</em> when workload trends and mapped Defender trends move apart.';
-  }
+  // --- Urgency split of the SAME total gap (re-segments, never additive) ---
+  // Defender Coverage Drift stories are derived from the opportunities and
+  // reuse their gap_dollars, so a drift story on a gap-eligible service is
+  // ALREADY inside totalGap. We slice the headline into Accelerating vs Stable
+  // (no double counting) and surface coverage-only drift (gap = $0) as a
+  // separate, non-additive risk chip.
+  (function segmentGapByUrgency() {
+    const host = document.getElementById('gap-urgency');
+    if (!host) return;
+    if (!(totalGap > 0)) { host.hidden = true; return; }
+    const stories = (typeof divergenceStories === 'function') ? divergenceStories() : [];
+    const seg = slSegmentAttachGap(totalGap, stories);
+    const acceleratingGap = seg.acceleratingGap;
+    const stableGap = seg.stableGap;
+    const accelPct = seg.accelPct;
+    const driftRiskCount = seg.driftRiskCount;
+    const driftRiskWorkload = seg.driftRiskWorkload;
+
+    const accelSeg = document.getElementById('gu-seg-accel');
+    const stableSeg = document.getElementById('gu-seg-stable');
+    if (accelSeg) accelSeg.style.width = (accelPct * 100).toFixed(1) + '%';
+    if (stableSeg) stableSeg.style.width = ((1 - accelPct) * 100).toFixed(1) + '%';
+
+    const pctTxt = v => (totalGap > 0 ? Math.round((v / totalGap) * 100) : 0) + '%';
+    const legend = document.getElementById('gu-legend');
+    if (legend) {
+      legend.innerHTML =
+        '<span><span class="dot accel"></span>Accelerating <span class="amt">' + fmt.money(acceleratingGap) + '/mo</span> <span class="pct">' + pctTxt(acceleratingGap) + '</span></span>' +
+        '<span><span class="dot stable"></span>Stable <span class="amt">' + fmt.money(stableGap) + '/mo</span> <span class="pct">' + pctTxt(stableGap) + '</span></span>';
+    }
+
+    const chip = document.getElementById('gu-drift-chip');
+    if (chip) {
+      if (driftRiskCount > 0) {
+        chip.hidden = false;
+        chip.innerHTML = '\u26a0 ' + driftRiskCount + ' service' + (driftRiskCount === 1 ? '' : 's') +
+          ' drifting on protected spend \u00b7 ' + fmt.money(driftRiskWorkload) + '/mo workload at risk' +
+          ' <span class="gu-chip-arrow">\u2192</span>';
+        chip.title = 'These services already meet (or sit near) the Defender benchmark, so they carry no current dollar gap \u2014 but Defender is shrinking or lagging the workload. Watch them so they do not become tomorrow\u2019s gap. Not added to the dollar total.';
+        chip.onclick = function () {
+          const tab = document.querySelector('.tab[data-tab="divergence"]');
+          if (tab) tab.click();
+        };
+      } else {
+        chip.hidden = true;
+      }
+    }
+
+    const info = document.getElementById('gu-info');
+    if (info) {
+      info.title = 'The total attach gap is split by momentum. Accelerating = the share on workloads growing faster than Defender is keeping up (from Defender Coverage Drift) \u2014 the most time-sensitive dollars. Stable = the remaining gap on workloads that are flat. Both slices are the SAME total; drift is never added on top, so there is no double counting.';
+    }
+
+    const note = document.getElementById('gu-note');
+    if (note) {
+      note.textContent = 'Accelerating and Stable are slices of the same ' + fmt.money(totalGap) + '/mo total \u2014 Defender Coverage Drift re-segments the gap by urgency, it is not added on top.';
+    }
+    host.hidden = false;
+  })();
 
   // Chart 1: attach gap by Defender service (non-clickable plan bars).
   const planRows = Array.from(byPlan.entries())

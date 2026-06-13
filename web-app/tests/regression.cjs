@@ -86,22 +86,32 @@ console.log('\nweb-app/acr.html (generated)');
     assert(/href="acr\.html"/.test(appNavSrc), 'shared nav must link to the generated ACR dashboard');
     assert(/href="milestones\.html"/.test(appNavSrc), 'shared nav must link to the milestone dashboard');
   });
-  test('overview guide sits above tabs and opens an accessible sales explanation modal', () => {
-    const guideIndex = src.indexOf('id="overview-guide-trigger"');
-    const tabsIndex = src.indexOf('<div class="tabs">');
-    assert(guideIndex >= 0, 'overview guide trigger must exist');
-    assert(tabsIndex >= 0, 'tabs container must exist');
-    assert(guideIndex < tabsIndex, 'overview guide trigger must appear above tabs');
-    assert(/<button class="note guide-note" id="overview-guide-trigger" type="button" aria-haspopup="dialog" aria-controls="view-guide-modal">/.test(src),
-      'guide trigger must be a dialog button');
-    assert(/id="view-guide-modal" role="dialog" aria-modal="true"/.test(src),
-      'guide modal must expose dialog semantics');
-    assert(/Which view should I use\?/.test(src), 'guide modal title must be present');
+  test('how-to guide is a single header button opening one consolidated wiki modal', () => {
+    // Trigger now lives in the shared topbar (app-nav.js), ACR page only.
+    assert(/id="howto-trigger"[^>]*aria-haspopup="dialog"[^>]*aria-controls="howto-modal"/.test(appNavSrc),
+      'how-to trigger must be a dialog button in the shared topbar');
+    assert(/How to use this dashboard/.test(appNavSrc), 'header button must be labeled How to use this dashboard');
+
+    // The two old inline guide-note buttons and their separate modals are gone.
+    assert(!/id="overview-guide-trigger"/.test(src), 'inline overview guide trigger must be removed');
+    assert(!/id="estimate-guide-trigger"/.test(src), 'inline estimate guide trigger must be removed');
+    assert(!/id="view-guide-modal"/.test(src), 'old view guide modal must be removed');
+    assert(!/id="estimate-guide-modal"/.test(src), 'old estimate guide modal must be removed');
+
+    // One consolidated dialog with all the prior content folded in.
+    assert(/id="howto-modal" role="dialog" aria-modal="true"/.test(src), 'consolidated modal must expose dialog semantics');
+    assert(/Which view should I use\?/.test(src), 'consolidated modal must keep the view-picker guidance');
     assert(/Service Attach Opportunities/.test(src), 'service attach guidance must be included');
     assert(/Defender Coverage Drift/.test(src), 'coverage drift guidance must be included');
-    assert(/event\.target === modal/.test(src), 'guide modal must close on backdrop click');
-    assert(/event\.key === 'Escape' && !modal\.hidden/.test(src), 'guide modal must close on Escape');
-    assert(/returnFocusTo\.focus\(\)/.test(src), 'guide modal must return focus to trigger');
+    assert(/Accelerating vs Stable/.test(src), 'urgency-split explanation must be included');
+    assert(/How the Servers &amp; Storage gap is estimated/.test(src), 'servers & storage estimate must be included');
+    assert(/show as Low priority/.test(src), 'priority materiality floor note must be included');
+
+    // Modal still closes accessibly and the trigger open is delegated off document.
+    assert(/event\.target\.closest\('#howto-trigger'\)/.test(src), 'header trigger open must be delegated off document');
+    assert(/event\.target === modal/.test(src), 'consolidated modal must close on backdrop click');
+    assert(/event\.key === 'Escape' && !modal\.hidden/.test(src), 'consolidated modal must close on Escape');
+    assert(/returnFocusTo\.focus\(\)/.test(src), 'consolidated modal must return focus to trigger');
   });
   test('renderOpportunityHeatmap escapes customer + derived fields', () => {
     const start = src.indexOf('function renderOpportunityHeatmap()');
@@ -1405,6 +1415,78 @@ console.log('\nweb-app service-level attach (SL2/SL4)');
     assertEqual(customerStory.defender_pct_change, 0, 'defender safe percentage');
     assert(customerStory.caveat.includes('Directional signal'), 'caveat included');
     assertEqual(customerStory.caveat, customerStory.caveat_text, 'caveat alias');
+  });
+
+  test('SL coverage-only opportunity below the per-service floor is capped at Low priority', () => {
+    const months = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6'];
+    function buildModelFor(sqlSeries) {
+      const frame = [];
+      const add = (sl2, sl4, level, series) => months.forEach((month, idx) => {
+        frame.push({ customer: 'C', sl2, sl4, level, month, acr: Number(series[idx]) });
+      });
+      add(SLMapping.TOTAL_TOKEN, '', SLParser.LEVEL_CUSTOMER_TOTAL, [20000, 20000, 20000, 20000, 20000, 20000]);
+      add('SQL Database', SLMapping.TOTAL_TOKEN, SLParser.LEVEL_SERVICE_TOTAL, sqlSeries);
+      add(SLMapping.DEFENDER_SL2, SLMapping.TOTAL_TOKEN, SLParser.LEVEL_SERVICE_TOTAL, [0, 0, 0, 0, 0, 0]);
+      add(SLMapping.DEFENDER_SL2, 'Microsoft Defender for SQL', SLParser.LEVEL_LEAF, [0, 0, 0, 0, 0, 0]);
+      const parsed = {
+        frame, months, customers: ['C'], reconciliation: [],
+        sourceName: 'synthetic', rowCount: frame.length, latestMonth: 'M6',
+      };
+      const config = SLMapping.defaultConfig();
+      config.useCohortMedian = false;
+      const model = SLEngine.buildModel(parsed, config);
+      return model.dossiers[0].opportunities.find((o) => o.planLabel === 'Defender for SQL');
+    }
+    // SQL floor is $500. Growing+unattached would normally be High; below the
+    // floor the materiality gate caps it at Low. Above the floor it escalates.
+    const low = buildModelFor([100, 150, 200, 250, 300, 350]);
+    assert(low && low.hasDollarGap === false, 'sub-floor SQL opp is coverage-only');
+    assert(low.workloadAcr < low.coveragePriorityFloor, 'sub-floor workload below the floor');
+    assertEqual(low.priority, 'Low', 'sub-floor coverage-only opp capped at Low');
+
+    const high = buildModelFor([300, 400, 500, 600, 700, 800]);
+    assert(high && high.hasDollarGap === false, 'above-floor SQL opp is coverage-only');
+    assert(high.workloadAcr >= high.coveragePriorityFloor, 'above-floor workload clears the floor');
+    assertEqual(high.priority, 'High', 'above-floor coverage-only growth divergence stays High');
+  });
+
+  test('overview urgency split re-segments the gap without double counting', () => {
+    const acrSrc = fs.readFileSync(path.join(WEBAPP, ACR_PAGE), 'utf8');
+    const start = acrSrc.indexOf('function slSegmentAttachGap(totalGap, stories)');
+    const end = acrSrc.indexOf('\nfunction slDecorateOverview()', start);
+    assert(start >= 0 && end > start, 'slSegmentAttachGap source extracted');
+    const fnSrc = acrSrc.slice(start, end);
+    const sb = { console };
+    vm.createContext(sb);
+    vm.runInContext(fnSrc + '\nthis.slSegmentAttachGap = slSegmentAttachGap;', sb);
+
+    const totalGap = 109210;
+    const stories = [
+      // Drift on gap-eligible services -> Accelerating (already inside totalGap).
+      { has_dollar_gap: true, gap_dollars: 20000, latest_workload_acr: 50000 },
+      { hasDollarGap: true, gapDollars: 11280, latestWorkloadAcr: 30000 },
+      // Coverage-only drift (gap = $0) -> risk count, NEVER added to the $ total.
+      { has_dollar_gap: false, gap_dollars: 0, latest_workload_acr: 27000 },
+      { hasDollarGap: false, gapDollars: 0, latestWorkloadAcr: 600 },
+    ];
+    const seg = sb.slSegmentAttachGap(totalGap, stories);
+
+    assertEqual(seg.acceleratingGap, 31280, 'accelerating = sum of gap-eligible drift gap_dollars');
+    assertEqual(seg.stableGap, totalGap - 31280, 'stable = remainder of the same total');
+    assert(Math.abs((seg.acceleratingGap + seg.stableGap) - totalGap) < 1e-6,
+      'accel + stable reconcile to the headline (no inflation, no double counting)');
+    assertEqual(seg.driftRiskCount, 2, 'coverage-only drift stories counted, not summed into dollars');
+    assertEqual(seg.driftRiskWorkload, 27600, 'drift-risk workload is workload ACR, separate from the $ total');
+
+    // Accelerating can never exceed the headline even if drift gap_dollars overshoot.
+    const clamped = sb.slSegmentAttachGap(1000, [{ has_dollar_gap: true, gap_dollars: 5000 }]);
+    assertEqual(clamped.acceleratingGap, 1000, 'accelerating clamped to total');
+    assertEqual(clamped.stableGap, 0, 'stable floors at zero');
+
+    // No headline gap -> empty split, no divide-by-zero.
+    const empty = sb.slSegmentAttachGap(0, stories);
+    assertEqual(empty.acceleratingGap, 0, 'no gap -> no accelerating');
+    assertEqual(empty.accelPct, 0, 'no gap -> zero pct (no NaN)');
   });
 
   test('SL app scripts make no network calls (client-side privacy guard)', () => {
